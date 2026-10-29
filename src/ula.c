@@ -114,8 +114,10 @@ static void ula_eval(sim_t *s, part_t *p) {
     pin_out(s, p, P_ROMCS, DRV_BIT(a15 || a14));
     pin_out(s, p, P_INT, DRV_BIT(!u->irq));
     /* The CPU clock: an inverting open collector output (R73 pulls it up,
-     * TR3 inverts it again for the Z80). */
-    pin_out(s, p, P_PHICPU, u->cpuclk ? DRV_LO : DRV_Z);
+     * TR3 inverts it again for the Z80). The 5C ULAs pull it up
+     * themselves: the Issue 1 has no R73 (through D14 and R24 they drive
+     * TR3's base). */
+    pin_out(s, p, P_PHICPU, u->cpuclk ? DRV_LO : u->clk_pulls_up ? DRIVE(S_RES, 1) : DRV_Z);
     part_drive_bus(s, p, addr_pins, 7, u->addr, u->ae);
     /* The SOUND pin: the speaker bit (an analog level on the real chip: the
      * MIC bit only moves it a little). The EAR input is the same pin, read
@@ -262,12 +264,13 @@ static void ula_reset(sim_t *s, part_t *p) {
     (void)s;
     ula_state_t *u = p->state;
     uint32_t *fb = u->fb;
-    bool ear = u->ear_in, running = u->running, logging = u->logging;
+    bool ear = u->ear_in, running = u->running, logging = u->logging, pulls_up = u->clk_pulls_up;
     memset(u, 0, sizeof(*u));
     u->fb = fb;
     u->ear_in = ear;
     u->running = running;
     u->logging = logging;
+    u->clk_pulls_up = pulls_up;
     u->cpuclk = true;
 }
 

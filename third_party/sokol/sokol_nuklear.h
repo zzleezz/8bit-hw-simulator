@@ -588,8 +588,15 @@ typedef struct {
     float mouse_scroll[2];
     bool mouse_did_move;
     bool mouse_did_scroll;
-    bool btn_down[NK_BUTTON_MAX];
-    bool btn_up[NK_BUTTON_MAX];
+    /* (c64-hw-sim patch) every button change, in order, with where the
+     * mouse was: one change per button is handed to nuklear each frame, so
+     * a press and its release in the same frame are both seen, and none is
+     * dropped (the stock code kept one flag per button and cleared them
+     * when the mouse left the window: a release lost there left nuklear
+     * thinking the button was still held, and windows stopped answering). */
+    struct { uint8_t button, down; int x, y; } btn_queue[32];
+    int btn_queued;
+    bool btn_held[NK_BUTTON_MAX];   /* as last queued */
     char char_buffer[NK_INPUT_MAX];
     bool keys_down[NK_KEY_MAX];
     bool keys_up[NK_KEY_MAX];
@@ -2532,16 +2539,20 @@ SOKOL_API_IMPL struct nk_context* snk_new_frame(void) {
     }
     if (_snuklear.mouse_did_scroll) {
         nk_input_scroll(&_snuklear.ctx, nk_vec2(_snuklear.mouse_scroll[0], _snuklear.mouse_scroll[1]));
+        _snuklear.mouse_scroll[0] = _snuklear.mouse_scroll[1] = 0.0f;
         _snuklear.mouse_did_scroll = false;
     }
-    for (int i = 0; i < NK_BUTTON_MAX; i++) {
-        if (_snuklear.btn_down[i]) {
-            _snuklear.btn_down[i] = false;
-            nk_input_button(&_snuklear.ctx, (enum nk_buttons)i, _snuklear.mouse_pos[0], _snuklear.mouse_pos[1], 1);
-        } else if (_snuklear.btn_up[i]) {
-            _snuklear.btn_up[i] = false;
-            nk_input_button(&_snuklear.ctx, (enum nk_buttons)i, _snuklear.mouse_pos[0], _snuklear.mouse_pos[1], 0);
+    {   /* (c64-hw-sim patch) the first queued change of each button */
+        bool done[NK_BUTTON_MAX] = { false };
+        int kept = 0;
+        for (int i = 0; i < _snuklear.btn_queued; i++) {
+            int b = _snuklear.btn_queue[i].button;
+            if (done[b]) { _snuklear.btn_queue[kept++] = _snuklear.btn_queue[i]; continue; }
+            done[b] = true;
+            nk_input_button(&_snuklear.ctx, (enum nk_buttons)b, _snuklear.btn_queue[i].x, _snuklear.btn_queue[i].y,
+                            _snuklear.btn_queue[i].down);
         }
+        _snuklear.btn_queued = kept;
     }
     const size_t char_buffer_len = strlen(_snuklear.char_buffer);
     if (char_buffer_len > 0) {
@@ -2800,43 +2811,37 @@ _SOKOL_PRIVATE enum nk_keys _snk_event_to_nuklearkey(const sapp_event* ev) {
     }
 }
 
+/* (c64-hw-sim patch) a button change, queued (see btn_queue). */
+static void _snk_queue_button(int b, bool down) {
+    if (b < 0 || b >= NK_BUTTON_MAX || _snuklear.btn_held[b] == down) return;
+    _snuklear.btn_held[b] = down;
+    if (_snuklear.btn_queued == (int)(sizeof(_snuklear.btn_queue) / sizeof(_snuklear.btn_queue[0]))) return;
+    _snuklear.btn_queue[_snuklear.btn_queued].button = (uint8_t)b;
+    _snuklear.btn_queue[_snuklear.btn_queued].down = down;
+    _snuklear.btn_queue[_snuklear.btn_queued].x = _snuklear.mouse_pos[0];
+    _snuklear.btn_queue[_snuklear.btn_queued].y = _snuklear.mouse_pos[1];
+    _snuklear.btn_queued++;
+}
+
+static int _snk_button(sapp_mousebutton b) {
+    switch (b) {
+        case SAPP_MOUSEBUTTON_LEFT: return NK_BUTTON_LEFT;
+        case SAPP_MOUSEBUTTON_RIGHT: return NK_BUTTON_RIGHT;
+        case SAPP_MOUSEBUTTON_MIDDLE: return NK_BUTTON_MIDDLE;
+        default: return -1;
+    }
+}
+
 SOKOL_API_IMPL bool snk_handle_event(const sapp_event* ev) {
     SOKOL_ASSERT(_SNK_INIT_COOKIE == _snuklear.init_cookie);
     const float dpi_scale = _snuklear.desc.dpi_scale;
     switch (ev->type) {
         case SAPP_EVENTTYPE_MOUSE_DOWN:
-            _snuklear.mouse_pos[0] = (int) (ev->mouse_x / dpi_scale);
-            _snuklear.mouse_pos[1] = (int) (ev->mouse_y / dpi_scale);
-            switch (ev->mouse_button) {
-                case SAPP_MOUSEBUTTON_LEFT:
-                    _snuklear.btn_down[NK_BUTTON_LEFT] = true;
-                    break;
-                case SAPP_MOUSEBUTTON_RIGHT:
-                    _snuklear.btn_down[NK_BUTTON_RIGHT] = true;
-                    break;
-                case SAPP_MOUSEBUTTON_MIDDLE:
-                    _snuklear.btn_down[NK_BUTTON_MIDDLE] = true;
-                    break;
-                default:
-                    break;
-            }
-            break;
         case SAPP_EVENTTYPE_MOUSE_UP:
             _snuklear.mouse_pos[0] = (int) (ev->mouse_x / dpi_scale);
             _snuklear.mouse_pos[1] = (int) (ev->mouse_y / dpi_scale);
-            switch (ev->mouse_button) {
-                case SAPP_MOUSEBUTTON_LEFT:
-                    _snuklear.btn_up[NK_BUTTON_LEFT] = true;
-                    break;
-                case SAPP_MOUSEBUTTON_RIGHT:
-                    _snuklear.btn_up[NK_BUTTON_RIGHT] = true;
-                    break;
-                case SAPP_MOUSEBUTTON_MIDDLE:
-                    _snuklear.btn_up[NK_BUTTON_MIDDLE] = true;
-                    break;
-                default:
-                    break;
-            }
+            _snuklear.mouse_did_move = true;
+            _snk_queue_button(_snk_button(ev->mouse_button), ev->type == SAPP_EVENTTYPE_MOUSE_DOWN);
             break;
         case SAPP_EVENTTYPE_MOUSE_MOVE:
             _snuklear.mouse_pos[0] = (int) (ev->mouse_x / dpi_scale);
@@ -2845,20 +2850,25 @@ SOKOL_API_IMPL bool snk_handle_event(const sapp_event* ev) {
             break;
         case SAPP_EVENTTYPE_MOUSE_ENTER:
         case SAPP_EVENTTYPE_MOUSE_LEAVE:
-            for (int i = 0; i < NK_BUTTON_MAX; i++) {
-                _snuklear.btn_down[i] = false;
-                _snuklear.btn_up[i] = false;
-            }
+            /* (c64-hw-sim patch) nothing dropped: the window captures the
+             * mouse while a button is held, so the release still comes. */
+            break;
+        case SAPP_EVENTTYPE_UNFOCUSED:
+            /* (c64-hw-sim patch) switched away with a button held: let go
+             * of it (the release goes to the other program). */
+            for (int i = 0; i < NK_BUTTON_MAX; i++) _snk_queue_button(i, false);
             break;
         case SAPP_EVENTTYPE_MOUSE_SCROLL:
-            _snuklear.mouse_scroll[0] = ev->scroll_x;
-            _snuklear.mouse_scroll[1] = ev->scroll_y;
+            /* (c64-hw-sim patch) added up: several wheel notches can come
+             * in one frame */
+            _snuklear.mouse_scroll[0] += ev->scroll_x;
+            _snuklear.mouse_scroll[1] += ev->scroll_y;
             _snuklear.mouse_did_scroll = true;
             break;
         case SAPP_EVENTTYPE_TOUCHES_BEGAN:
-            _snuklear.btn_down[NK_BUTTON_LEFT] = true;
             _snuklear.mouse_pos[0] = (int) (ev->touches[0].pos_x / dpi_scale);
             _snuklear.mouse_pos[1] = (int) (ev->touches[0].pos_y / dpi_scale);
+            _snk_queue_button(NK_BUTTON_LEFT, true);
             _snuklear.mouse_did_move = true;
             break;
         case SAPP_EVENTTYPE_TOUCHES_MOVED:
@@ -2867,14 +2877,13 @@ SOKOL_API_IMPL bool snk_handle_event(const sapp_event* ev) {
             _snuklear.mouse_did_move = true;
             break;
         case SAPP_EVENTTYPE_TOUCHES_ENDED:
-            _snuklear.btn_up[NK_BUTTON_LEFT] = true;
             _snuklear.mouse_pos[0] = (int) (ev->touches[0].pos_x / dpi_scale);
             _snuklear.mouse_pos[1] = (int) (ev->touches[0].pos_y / dpi_scale);
+            _snk_queue_button(NK_BUTTON_LEFT, false);
             _snuklear.mouse_did_move = true;
             break;
         case SAPP_EVENTTYPE_TOUCHES_CANCELLED:
-            _snuklear.btn_up[NK_BUTTON_LEFT] = false;
-            _snuklear.btn_down[NK_BUTTON_LEFT] = false;
+            _snk_queue_button(NK_BUTTON_LEFT, false);
             break;
         case SAPP_EVENTTYPE_KEY_DOWN:
             /* intercept Ctrl-V, this is handled via EVENTTYPE_CLIPBOARD_PASTED */

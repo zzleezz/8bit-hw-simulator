@@ -29,7 +29,24 @@ extern const part_type_t PT_82S100, PT_2364, PT_2332, PT_2114, PT_4164;
 extern const part_type_t PT_74LS08, PT_7406, PT_74LS139, PT_74LS257, PT_74LS258;
 extern const part_type_t PT_74LS373, PT_4066, PT_556, PT_74LS629;
 extern const part_type_t PT_74LS74, PT_74LS193, PT_MC4044;
-extern const part_type_t PT_4116, PT_4532, PT_23128, PT_74LS157, PT_74LS32, PT_74LS00, PT_LM1889;
+extern const part_type_t PT_4116, PT_4532, PT_UPD23128, PT_HN613128, PT_74LS157, PT_74LS32, PT_74LS00, PT_LM1889;
+/* The other chips for the 4532's place (zx48.c: the upper RAM option). */
+extern const part_type_t PT_4532_4, PT_3732L, PT_3732H, PT_4164_ZX;
+/* The Issue 6A's glue: a hex inverter, and the ZX8401 (its 15
+ * multiplexer sections: output, A and B pins; see parts.c). */
+extern const part_type_t PT_74LS04, PT_ZX8401;
+#define ZX8401_NMUX 15
+extern const int zx8401_mux[ZX8401_NMUX][3];
+/* The C64 ASSY 250469's: its RAMs, BASIC and KERNAL ROM, a Schmitt
+ * trigger, the clock generator, the HMOS 6510, VIC-II and SID, and the
+ * Super PLA (see parts.c). */
+extern const part_type_t PT_41464, PT_27128, PT_74LS14, PT_8701, PT_8500, PT_8565, PT_8580, PT_SUPERPLA;
+/* A 64K x 1 DRAM, whole or half good (a 4164, 4532, 3732). */
+bool part_is_dram64(const part_t *p);
+
+/* A memory chip that can take memory faults (MF_*): its address lines and
+ * data bits, and whether it is a DRAM. 0 if it isn't a memory chip. */
+int part_memory(const part_t *p, int *data_bits, bool *dram);
 
 /* 82S100 PLA: its logic as a table of product terms (see parts.c). The
  * input word has bit PI_x set when that input pin is high; the outputs are
@@ -46,6 +63,12 @@ extern const int pla_nterms;
 extern const int pla_in_pin[PLA_NIN], pla_out_pin[PLA_NOUT];
 unsigned pla_read_inputs(sim_t *s, part_t *p);
 unsigned pla_logic(unsigned inputs);
+/* The 250469's Super PLA, modeled with the same table: its pin for each
+ * input (PI_AEC is /AEC inside, from its AEC pin) and output (0: the
+ * output stays inside, /IO feeds its I/O decoder and GR/W nothing), and
+ * the input word as pla_read_inputs() makes it. */
+extern const int superpla_in_pin[PLA_NIN], superpla_out_pin[PLA_NOUT];
+unsigned superpla_read_inputs(sim_t *s, part_t *p);
 
 /* Attach a type to a part: pin names/flags, functions, state. */
 void part_set_type(sim_t *s, int part, const part_type_t *t);
@@ -72,6 +95,15 @@ typedef struct {
     uint8_t ras_prev, cas_prev;
     uint8_t out_en, out_bit;
 } dram_state_t;
+/* 64K x 4 DRAM: one nibble per cell. */
+typedef struct {
+    uint8_t cells[65536];
+    uint8_t row, col;
+    uint8_t ras_prev, cas_prev;
+    uint8_t out_en, out_val;
+    int32_t out_cache;
+    uint8_t a6_row_bit;     /* the row address bit that is CPU A6 (set by the board) */
+} dram4_state_t;
 /* Color RAM. */
 typedef struct { uint8_t cells[1024]; int32_t out_cache; } sram_state_t;
 /* 556: power-on reset and RESTORE debouncer. */

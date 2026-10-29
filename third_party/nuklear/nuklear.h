@@ -19729,10 +19729,14 @@ nk_clear(struct nk_context *ctx)
         if (((iter->flags & NK_WINDOW_HIDDEN) ||
             (iter->flags & NK_WINDOW_CLOSED)) &&
             iter == ctx->active) {
-            ctx->active = iter->prev;
-            ctx->end = iter->prev;
-            if (!ctx->end)
-                ctx->begin = 0;
+            /* (c64-hw-sim patch) the topmost window still shown takes over;
+             * the list is left alone (stock nuklear set ctx->end, the last
+             * window, to the one before this, cutting the list there, and
+             * emptied the list when this was the first) */
+            struct nk_window *w, *top = 0;
+            for (w = ctx->begin; w; w = w->next)
+                if (w != iter && !(w->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED))) top = w;
+            ctx->active = top;
             if (ctx->active)
                 ctx->active->flags &= ~(unsigned)NK_WINDOW_ROM;
         }
@@ -20477,6 +20481,23 @@ nk_panel_begin(struct nk_context *ctx, const char *title, enum nk_panel_type pan
     layout->clip = clip;}
     return !(layout->flags & NK_WINDOW_HIDDEN) && !(layout->flags & NK_WINDOW_MINIMIZED);
 }
+/* (c64-hw-sim patch) The window the mouse is over: the last one drawn
+ * (the windows are drawn in list order) whose bounds or open popup hold
+ * the mouse; NULL if none. */
+static struct nk_window*
+nk_window_under_mouse(const struct nk_context *ctx)
+{
+    struct nk_window *iter, *hit = 0;
+    for (iter = ctx->begin; iter; iter = iter->next) {
+        if (iter->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED | NK_WINDOW_MINIMIZED)) continue;
+        if (nk_input_is_mouse_hovering_rect(&ctx->input, iter->bounds) ||
+            (iter->popup.active && iter->popup.win &&
+             nk_input_is_mouse_hovering_rect(&ctx->input, iter->popup.win->bounds)))
+            hit = iter;
+    }
+    return hit;
+}
+
 NK_LIB void
 nk_panel_end(struct nk_context *ctx)
 {
@@ -20574,9 +20595,10 @@ nk_panel_end(struct nk_context *ctx)
             while (root_window->parent)
                 root_window = root_window->parent;
 
-            /* only allow scrolling if parent window is active */
+            /* only allow scrolling if parent window is active
+             * (c64-hw-sim patch: if it is under the mouse instead) */
             scroll_has_scrolling = nk_false;
-            if ((root_window == ctx->active) && layout->has_scrolling) {
+            if (root_window == nk_window_under_mouse(ctx) && layout->has_scrolling) {
                 /* and panel is being hovered and inside clip rect*/
                 if (nk_input_is_mouse_hovering_rect(in, layout->bounds) &&
                     NK_INTERSECT(layout->bounds.x, layout->bounds.y, layout->bounds.w, layout->bounds.h,
@@ -20594,7 +20616,9 @@ nk_panel_end(struct nk_context *ctx)
             }
         } else {
             /* window mouse wheel scrolling */
-            scroll_has_scrolling = (window == ctx->active) && layout->has_scrolling;
+            /* (c64-hw-sim patch) the window under the mouse, not the
+             * active one (which took the wheel wherever the mouse was) */
+            scroll_has_scrolling = window == nk_window_under_mouse(ctx) && layout->has_scrolling;
             if (in && (in->mouse.scroll_delta.y > 0 || in->mouse.scroll_delta.x > 0) && scroll_has_scrolling)
                 window->scrolled = nk_true;
             else window->scrolled = nk_false;
@@ -21061,6 +21085,12 @@ nk_begin_titled(struct nk_context *ctx, const char *name, const char *title,
             if (ctx->end != win && !(win->flags & NK_WINDOW_BACKGROUND))
                 win->flags |= NK_WINDOW_ROM;
         }
+        /* (c64-hw-sim patch) the window under the mouse answers it (hover,
+         * wheel), though another window overlaps it somewhere else: stock
+         * nuklear keeps such a window read only until it is clicked. */
+        if ((win->flags & NK_WINDOW_ROM) && !(win->flags & NK_WINDOW_BACKGROUND) &&
+            !ctx->input.mouse.buttons[NK_BUTTON_LEFT].down && nk_window_under_mouse(ctx) == win)
+            win->flags &= ~(nk_flags)NK_WINDOW_ROM;
     }
     win->layout = (struct nk_panel*)nk_create_panel(ctx);
     ctx->current = win;

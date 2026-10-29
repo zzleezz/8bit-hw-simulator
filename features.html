@@ -1,0 +1,258 @@
+<title>c64-hw-sim Features</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a single datasheet column; feature groups as numbered "pin blocks",
+   with the logic probe's own colors (high, low, pulsing, floating, fight) as the accent system. */
+:root {
+  --bg: #f3f5f1;
+  --panel: #e6ebe3;
+  --fg: #17201a;
+  --muted: #56635a;
+  --rule: #c5cfc4;
+  --mask: #1f5a3c;          /* solder mask green */
+  --high: #c62f2f;
+  --low: #2a5bc4;
+  --pulse: #b88a00;
+  --float: #8a948c;
+  --fight: #b0309c;
+  --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --body: "Source Serif 4", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1612; --panel: #17221b; --fg: #e3ebe4; --muted: #9aa99e; --rule: #2c3b31;
+    --mask: #6fc596; --high: #ff6b63; --low: #6f9bff; --pulse: #f0c23e; --float: #7d887f; --fight: #e070d0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1612; --panel: #17221b; --fg: #e3ebe4; --muted: #9aa99e; --rule: #2c3b31;
+  --mask: #6fc596; --high: #ff6b63; --low: #6f9bff; --pulse: #f0c23e; --float: #7d887f; --fight: #e070d0;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 400 17px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+}
+main { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+p { margin: 0; max-width: 66ch; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+
+header { display: flex; flex-direction: column; gap: 18px; }
+.eyebrow {
+  font: 600 12px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--mask);
+}
+h1 { font-size: clamp(40px, 8vw, 72px); font-weight: 800; font-stretch: 75%; line-height: 0.95; letter-spacing: -0.01em; }
+.lede { font-size: 20px; line-height: 1.55; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font: 400 13px/1 var(--mono); color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.d-high { background: var(--high); } .d-low { background: var(--low); } .d-pulse { background: var(--pulse); }
+.d-float { background: var(--float); } .d-fight { background: var(--fight); }
+
+.figures {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px;
+  background: var(--rule); border: 1px solid var(--rule);
+}
+.figures div { background: var(--bg); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.figures b { font: 700 28px/1 var(--display); font-stretch: 80%; font-variant-numeric: tabular-nums; }
+.figures span { font: 400 12.5px/1.35 var(--mono); color: var(--muted); }
+
+section { display: grid; grid-template-columns: 64px 1fr; gap: 0 20px; border-top: 2px solid var(--fg); padding-top: 18px; }
+.pin { font: 600 13px/1 var(--mono); color: var(--muted); padding-top: 8px; }
+.pin i { display: block; width: 26px; height: 6px; margin-top: 10px; border-radius: 1px; }
+section > div { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+h2 { font-size: 30px; font-weight: 700; font-stretch: 85%; line-height: 1.1; }
+.new { font: 600 11px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--bg); background: var(--high); padding: 4px 7px; border-radius: 2px; vertical-align: 6px; margin-left: 8px; }
+ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+li { padding-left: 18px; position: relative; max-width: 68ch; }
+li::before { content: ""; position: absolute; left: 0; top: 0.72em; width: 8px; height: 2px; background: var(--mask); }
+li b { font-weight: 600; }
+
+.rank { display: flex; flex-wrap: wrap; gap: 8px; }
+.rank span { font: 400 13px/1 var(--mono); border: 1px solid var(--rule); padding: 7px 10px; border-radius: 3px; background: var(--panel); }
+.rank span b { color: var(--high); font-weight: 600; margin-right: 6px; }
+
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--rule); padding-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+a { color: var(--mask); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 2px solid var(--mask); outline-offset: 2px; border-radius: 2px; }
+.credit { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font: 400 14px/1.5 var(--mono); color: var(--muted); border-left: 3px solid var(--mask); padding: 8px 0 8px 14px; }
+.credit b { color: var(--fg); font-weight: 600; }
+
+@media (max-width: 560px) {
+  section { grid-template-columns: 1fr; gap: 10px; }
+  .pin { display: flex; align-items: center; gap: 10px; padding-top: 0; }
+  .pin i { margin-top: 0; }
+  body { font-size: 16px; }
+  .lede { font-size: 18px; }
+}
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">Commodore 64 ASSY 250407 and 250469 · ZX Spectrum Issues 1, 2, 3B, 4B and 6A</div>
+    <h1>c64-hw-sim</h1>
+    <p class="lede">A simulator of two motherboards, every pin of every chip. Lift a leg, short it to ground, pull a chip, open a resistor, then watch what the machine does. Nobody told it what a broken C64 looks like: the garbage on the screen comes from the circuit. It now also helps you find the fault on a real board, from a screenshot or a logic probe.</p>
+    <div class="credit">
+      <span>Original project by <b>Salvatore Sanfilippo (antirez)</b></span>
+      <a href="https://github.com/antirez/c64-hw-simulator">github.com/antirez/c64-hw-simulator</a>
+    </div>
+    <div class="credit">
+      <span>ZX Spectrum board layouts by <b>liveboxandy</b></span>
+      <a href="https://github.com/liveboxandy">github.com/liveboxandy</a>
+    </div>
+    <div class="legend" aria-label="Logic probe colors used on the board">
+      <span><i class="dot d-high"></i>high</span>
+      <span><i class="dot d-low"></i>low</span>
+      <span><i class="dot d-pulse"></i>pulsing</span>
+      <span><i class="dot d-float"></i>floating</span>
+      <span><i class="dot d-fight"></i>outputs fighting</span>
+    </div>
+  </header>
+
+  <div class="figures">
+    <div><b>216</b><span>parts on the C64 board</span></div>
+    <div><b>249</b><span>nets from the KiCad replica</span></div>
+    <div><b>661</b><span>NOR gates the ULA model is checked against</span></div>
+    <div><b>3,575</b><span>simulated faults in the atlas</span></div>
+    <div><b>736</b><span>different symptoms they produce</span></div>
+  </div>
+
+  <section>
+    <div class="pin">01<i class="d-high"></i></div>
+    <div>
+      <h2>The boards, pin by pin</h2>
+      <ul>
+        <li><b>Commodore 64</b>: 6510, VIC-II, two CIAs and SID from floooh's cycle-accurate cores, each in a socket that sees only its pins. The DRAMs, ROMs, color RAM, glue logic and the PLA (with its real 82S100 equations) are modeled at their pins.</li>
+        <li><b>ZX Spectrum 48K</b>: the ULA modeled at the half-period of its 14 MHz oscillator, so bus contention emerges from the circuit. The Z80 is stepped on every clock edge and passes ZEXDOC and ZEXALL.</li>
+        <li><b>Electrical model</b>: strong, weak and supply drives; contention where two outputs fight; floating nets that drift toward TTL or MOS levels and read erratically; chips that lose VCC, lose GND, or run on phantom power.</li>
+        <li>Power supply on the Spectrum modeled by what it does: +5V, the +12V DC-DC converter and the −5V charge pump the 4116s need.</li>
+        <li>Two C64 boards, picked in the controls: the breadbin's ASSY 250407 and the C64C's 250469, with its 251715-01 Super PLA simulated as the 250407 chips it replaced (its logic was never published: what is assumed is listed in the README), two 41464 RAMs and an 8701 clock generator.</li>
+        <li>Five Spectrum boards, picked in the controls: Issues 2, 3B, 4B and 6A, each as a 48K or 16K machine, and the 16K Issue 1; the early boards with their 5C ULA or a 6C001; the 6A with its ZX8401 simulated as the 74LS chips it replaced.</li>
+        <li>The upper RAM's chips and type links: TI 4532-3 or -4, OKI 3732-L or -H, or whole 4164s, and the TI/OKI links (LNK1 on the Issue 2). Links that don't match the chips leave half the upper RAM bad, as on a real board.</li>
+        <li>The ROM, NEC uPD23128 or Hitachi HN613128, and its N/H link on every Spectrum board: the NEC latches its address on pin 20, so on the Hitachi link it reads one byte over and over and the machine is dead; the static Hitachi works either way.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">02<i class="d-low"></i></div>
+    <div>
+      <h2>Break anything</h2>
+      <ul>
+        <li>Click a pin to float it, short it to GND or +5V, or kill the output inside the chip (stuck low or high).</li>
+        <li>Solder bridges between neighboring legs, with both legs on the scope.</li>
+        <li>Pull a chip from its socket, open a resistor, a ferrite bead or the crystal.</li>
+        <li>Faults inside ROM and RAM: a dead data bit or address line, one bad cell, a corrupted byte, weak DRAM cells that forget.</li>
+        <li>Break and repair parts while the machine runs, from the GUI or with <code>--at 150:U6.17:open</code>.</li>
+        <li><b>Practice mode</b> hides the fault markers so you can find your own fault with the probe and the scope.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">03<i class="d-pulse"></i></div>
+    <div>
+      <h2>See every signal</h2>
+      <ul>
+        <li>Every pin colored like a logic probe; zoom in for references, address ranges, pin names and gates.</li>
+        <li>An oscilloscope on any pin, showing floating segments and what each leg drives itself.</li>
+        <li><b>Chip inspector</b> drawn like a datasheet, with the gates wired to their pins. For the PLA it lights the product terms and shows which input holds a term back.</li>
+        <li><b>Continuity test</b>: shift-click a pin to beep out its net through beads, links and fuses, with resistors, diodes, pull-ups and broken legs marked. Solder bridges and pins shorted to GND or +5V beep too.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">04<i class="d-float"></i></div>
+    <div>
+      <h2>Load software and diagnostics</h2>
+      <ul>
+        <li>C64 programs (.prg), cartridges (.crt: 8K, 16K, Ultimax) and raw EPROM dumps, with the wiring guessed from the contents. 8K images can go in the KERNAL socket.</li>
+        <li>Multi-bank DesTestSwitch EPROMs with a working bank switch.</li>
+        <li><b>Dead Test</b> gives its manual's flash codes; the <b>586220 Diagnostic</b> cartridge runs with its loopback harness.</li>
+        <li>Spectrum snapshots (.sna, .z80), ROM cartridges and the <b>ZX Spectrum Diagnostics ROM</b>, which finds the failing RAM bit where its manual says.</li>
+        <li>A file browser that tells you what each file is from its header, plus drag and drop and recent files.</li>
+        <li><b>Save to file</b> <span class="new">new</span>: the whole board as it is, faults, cartridge and repair notes, in a <span class="mono">.hwstate</span> file that loads back exactly as it was, even in a newer version.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">05<i class="d-fight"></i></div>
+    <div>
+      <h2>Diagnose a screenshot</h2>
+      <ul>
+        <li>Drop a capture-card picture of a real broken machine's screen. It is matched against the fault atlas: the screens of thousands of simulated faults, from a normal boot.</li>
+        <li>The window lists the faults whose screen looks most alike. <b>Apply &amp; Inspect</b> puts one on the board, power cycles it and zooms to the part.</li>
+        <li><b>Real repair records</b> <span class="new">new</span>: keep a repair you made (the screenshot, and the faulty chips clicked on the board). A screenshot like it later shows <i>Seen on real boards</i> above the simulated matches, and probing tries those chips first. Merge and export records to share them, with statistics of the chips that fail most.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">06<i class="d-high"></i></div>
+    <div>
+      <h2>Diagnose by probing <span class="new">new</span></h2>
+      <p>Turns a logic probe on the real machine into a guided search. Say what the screen shows, then probe the pin it rings in cyan and click Low, High, Pulsing or Floating. Each reading narrows the list, and one misread pin only drops a fault down the list instead of losing it.</p>
+      <ul>
+        <li><b>Bench failure ranking</b>: faults are weighted the way they come to the repair bench.</li>
+      </ul>
+      <div class="rank" aria-label="Failure ranking">
+        <span><b>1</b>PLA</span><span><b>2</b>CIAs</span><span><b>3</b>CPU</span><span><b>4</b>RAM</span><span><b>5</b>ROMs</span>
+      </div>
+      <ul>
+        <li><b>Chip markings</b>: mark the RAM as MT and the logic or PLA as MOS, as printed on the real board. MT RAM climbs to the PLA's level, MOS logic close to the CIAs, and an early non-MOS PLA drops to the bottom.</li>
+        <li><b>Three ways to pick the next pin</b>:
+          <span class="mono">Bench procedure</span> (reset and clock at the CPU, then the PLA outputs, as a repairer would),
+          <span class="mono">Likeliest faults first</span>, or
+          <span class="mono">Fewest probes</span>.</li>
+        <li>A stuck net is named after the chip driving it: "U17 PLA pin 16 (/KERNAL) shorted to GND, or the output dead inside the chip".</li>
+        <li>Matching suspects are listed most likely first, each with its likelihood. <code>--probe</code> opens the window at start.</li>
+        <li>After a screenshot diagnosis it starts on the screenshot's pictures.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">07<i class="d-pulse"></i></div>
+    <div>
+      <h2>Browse the atlas <span class="new">new</span></h2>
+      <p>Every picture the fault atlas has of the board on the bench, as a grid of thumbnails, with its causes and the chips they are on. Narrow it down by what you see instead of matching a screenshot.</p>
+      <ul>
+        <li><b>Filters</b>: kind of picture, border color, screen color, behavior (still, blinking, changing, flashing a code, no picture), CPU state, and a chip involved. Each choice says how many pictures it leaves.</li>
+        <li><b>Probe readings</b>: type a pin and what the probe shows on the real machine; only pictures one of whose causes shows every reading stay. <span class="mono">IC2.26 low</span> (the Z80 held in reset) leaves one picture of 439.</li>
+        <li>Click a picture for its causes: <span class="mono">Apply &amp; Inspect</span> puts one on the board, or narrow them down by probing.</li>
+        <li><code>--browse-atlas[=N]</code> opens the window at start.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="pin">08<i class="d-low"></i></div>
+    <div>
+      <h2>Headless and tested</h2>
+      <ul>
+        <li>Runs without a window: <code>--headless 200 --text --shot out.png --fault U17:removed</code> prints the screen's text and saves the picture.</li>
+        <li>Fault suites whose expected symptoms were written down before the simulator ran: 31 C64 faults and 13 Spectrum faults, plus memory faults and diagnostic-cartridge checks.</li>
+        <li>Self-tests for the matchers: <code>--match-test</code> and <code>--probe-test</code>. With every reading right and the screen known, probing lists the true fault first 94–97% of the time.</li>
+        <li>The ULA is checked against the 6C001's die netlist on every output and every pixel, with <code>tools/ulacheck.c</code>.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>c64-hw-sim was created by Salvatore Sanfilippo (antirez), who got the idea from Andre Weissflog's pin-interface chip emulators. Source and original README: <a href="https://github.com/antirez/c64-hw-simulator">github.com/antirez/c64-hw-simulator</a>. zlib license.</p>
+    <p><b>An AI-generated project:</b> the additions to antirez's original were written by Claude, Anthropic's AI model, in Claude Code, directed and tested by zzleezz.</p>
+    <p>Runs on Windows, macOS and Linux with OpenGL. Not an emulator for games: it runs at a third to a half of real speed on a fast machine, because every pin of every chip is simulated. Chip cores by floooh, C64 boards (250407, 250469) by bwack, Spectrum boards (Issues 1, 2, 3B, 4B and 6A) from the KiCad projects of liveboxandy (<a href="https://github.com/liveboxandy">github.com/liveboxandy</a>), PLA equations by Mark Smith and Marko Mäkelä.</p>
+  </footer>
+</main>

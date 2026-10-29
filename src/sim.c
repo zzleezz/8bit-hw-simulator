@@ -7,16 +7,12 @@
 
 static void compute_hold_times(sim_t *s);
 
-/* Pending joins for the next sim_rebuild(). */
-static int *join_a, *join_b, njoin, join_cap;
-
 /* ------------------------------------------------------------------------ */
 /* Setup                                                                     */
 /* ------------------------------------------------------------------------ */
 
 void sim_init(sim_t *s, const board_data_t *bd, const sim_desc_t *desc) {
     memset(s, 0, sizeof(*s));
-    njoin = 0;      /* the joins of a board simulated before this one */
     s->bd = bd;
     s->time_scale = desc->cycles_per_us;
     s->npins = bd->npads;
@@ -45,7 +41,7 @@ void sim_init(sim_t *s, const board_data_t *bd, const sim_desc_t *desc) {
         p->kind = desc->kind_of(bc->ref);
         p->first_pin = bc->first_pad;
         p->npins = bc->npads;
-        for (int i = 0; i < 48; i++) p->pinmap[i] = -1;
+        for (int i = 0; i < PIN_NUMBERS; i++) p->pinmap[i] = -1;
         for (int i = 0; i < bc->npads; i++) {
             int pi = bc->first_pad + i;
             pin_t *pin = &s->pins[pi];
@@ -53,7 +49,7 @@ void sim_init(sim_t *s, const board_data_t *bd, const sim_desc_t *desc) {
             pin->net = (int16_t)bd->pads[pi].net;
             pin->root = pin->net;
             pin->number = (int16_t)atoi(bd->pads[pi].name);
-            if (pin->number > 0 && pin->number < 48) p->pinmap[pin->number] = pi;
+            if (pin->number > 0 && pin->number < PIN_NUMBERS) p->pinmap[pin->number] = pi;
         }
         s->nparts++;
     }
@@ -61,15 +57,12 @@ void sim_init(sim_t *s, const board_data_t *bd, const sim_desc_t *desc) {
 }
 
 void sim_free(sim_t *s) {
-    for (int i = 0; i < s->nnets; i++) {
-        free(s->nets[i].pins);
-        free(s->nets[i].readers);
-        free(s->nets[i].switches);
-    }
     for (int i = 0; i < s->npins; i++) free((char *)s->pin_names[i]);
     for (int i = 0; i < s->nparts; i++) free(s->parts[i].state);
     free(s->pins); free(s->pin_names); free(s->nets); free(s->nread);
+    free(s->pin_pool); free(s->reader_pool); free(s->switch_pool);
     free(s->open_since); free(s->noisy); free(s->commit_list);
+    free(s->join_a); free(s->join_b);
     memset(s, 0, sizeof(*s));
 }
 
@@ -118,17 +111,16 @@ int sim_find_net(sim_t *s, const char *name) {
 /* Merging nets (union-find)                                                 */
 /* ------------------------------------------------------------------------ */
 
-void sim_join_begin(sim_t *s) { (void)s; njoin = 0; }
+void sim_join_begin(sim_t *s) { s->njoin = 0; }
 
 void sim_join(sim_t *s, int a, int b) {
-    (void)s;
     if (a < 0 || b < 0) return;
-    if (njoin == join_cap) {
-        join_cap = join_cap ? join_cap * 2 : 256;
-        join_a = realloc(join_a, join_cap * sizeof(int));
-        join_b = realloc(join_b, join_cap * sizeof(int));
+    if (s->njoin == s->join_cap) {
+        s->join_cap = s->join_cap ? s->join_cap * 2 : 256;
+        s->join_a = realloc(s->join_a, s->join_cap * sizeof(int));
+        s->join_b = realloc(s->join_b, s->join_cap * sizeof(int));
     }
-    join_a[njoin] = a; join_b[njoin] = b; njoin++;
+    s->join_a[s->njoin] = a; s->join_b[s->njoin] = b; s->njoin++;
 }
 
 static int find_root(sim_t *s, int n) {
@@ -140,6 +132,15 @@ static int find_root(sim_t *s, int n) {
 }
 
 static void resolve(sim_t *s, int root, int cause_part);
+
+/* Add / remove one drive (a drive_t with a strength) to a net's counts,
+ * keeping the 'kinds' bitmask in step. */
+static inline void count_add(net_t *n, drive_t d) {
+    if (n->count[d]++ == 0) n->kinds |= (uint16_t)(1u << d);
+}
+static inline void count_sub(net_t *n, drive_t d) {
+    if (--n->count[d] == 0) n->kinds &= (uint16_t)~(1u << d);
+}
 
 /* ------------------------------------------------------------------------ */
 /* Floating inputs                                                           */
@@ -231,6 +232,7 @@ int sim_read_open(sim_t *s, int pin) {
     for (int d = -1; d <= 1; d += 2) {
         int nb = num + d;
         if (num <= 0 || nb < 1 || nb > part->npins || (num <= half) != (nb <= half)) continue;
+        if (nb >= (int)(sizeof(part->pinmap) / sizeof(part->pinmap[0]))) continue;     /* not mapped */
         int pi = part->pinmap[nb];
         if (pi < 0 || (s->pins[pi].flags & PIN_POWER) || s->pins[pi].root < 0) continue;
         v += K_CROSSTALK * ((s->nread[s->pins[pi].root] & 1) ? V_HIGH / 2 : -V_HIGH / 2);
@@ -257,15 +259,21 @@ void sim_rebuild(sim_t *s) {
     for (int i = 0; i < s->nnets; i++) {
         net_t *n = &s->nets[i];
         n->root = i;
-        free(n->pins); n->pins = NULL; n->npins = 0;
-        free(n->readers); n->readers = NULL; n->nreaders = 0;
-        free(n->switches); n->switches = NULL; n->nswitches = 0;
+        /* n->pins/readers/switches point into this sim's pools (below),
+         * freed as a whole further down: just forget them here, don't
+         * free() a pointer into the middle of a shared block. */
+        n->pins = NULL; n->npins = 0;
+        n->readers = NULL; n->nreaders = 0;
+        n->switches = NULL; n->nswitches = 0;
     }
-    for (int j = 0; j < njoin; j++) {
-        int ra = find_root(s, join_a[j]), rb = find_root(s, join_b[j]);
+    for (int j = 0; j < s->njoin; j++) {
+        int ra = find_root(s, s->join_a[j]), rb = find_root(s, s->join_b[j]);
         if (ra == rb) continue;
-        /* Keep a rail as root, so the merged net stays a rail. */
-        if (s->nets[rb].rail && !s->nets[ra].rail) { int t = ra; ra = rb; rb = t; }
+        /* Keep a rail as root, so the merged net stays a rail. A supply
+         * shorted to ground (a shorted decoupling capacitor) is pulled down
+         * to it: ground wins. */
+        if ((s->nets[rb].rail && !s->nets[ra].rail) ||
+            (s->nets[rb].rail == RAIL_GND && s->nets[ra].rail == RAIL_VCC)) { int t = ra; ra = rb; rb = t; }
         s->nets[rb].root = ra;
     }
     for (int i = 0; i < s->nnets; i++) s->nets[i].root = find_root(s, i);
@@ -296,6 +304,44 @@ void sim_rebuild(sim_t *s) {
             }
         }
     }
+    /* Compact every net's pins/readers/switches (just built one realloc
+     * at a time above, since rebuilds are rare) into three pools shared
+     * by the whole board. resolve() and its callers walk a net's readers
+     * every time the net changes: that is now a run of nearby ints in one
+     * block, instead of a separate small heap allocation per net picked
+     * essentially at random as different nets change (the readers lists
+     * of neighboring nets on the board have no reason to be adjacent in
+     * the original per-net mallocs, so every one was a likely cache
+     * miss). Same values, same order, same pointer/array access at every
+     * call site - only where the bytes live changes. */
+    {
+        int total_pins = 0, total_readers = 0, total_switches = 0;
+        for (int i = 0; i < s->nnets; i++) {
+            total_pins += s->nets[i].npins;
+            total_readers += s->nets[i].nreaders;
+            total_switches += s->nets[i].nswitches;
+        }
+        free(s->pin_pool); free(s->reader_pool); free(s->switch_pool);
+        s->pin_pool = total_pins ? malloc((size_t)total_pins * sizeof(int)) : NULL;
+        s->reader_pool = total_readers ? malloc((size_t)total_readers * sizeof(int)) : NULL;
+        s->switch_pool = total_switches ? malloc((size_t)total_switches * sizeof(int)) : NULL;
+        int po = 0, ro = 0, so = 0;
+        for (int i = 0; i < s->nnets; i++) {
+            net_t *n = &s->nets[i];
+            if (n->npins) {
+                memcpy(s->pin_pool + po, n->pins, (size_t)n->npins * sizeof(int));
+                free(n->pins); n->pins = s->pin_pool + po; po += n->npins;
+            }
+            if (n->nreaders) {
+                memcpy(s->reader_pool + ro, n->readers, (size_t)n->nreaders * sizeof(int));
+                free(n->readers); n->readers = s->reader_pool + ro; ro += n->nreaders;
+            }
+            if (n->nswitches) {
+                memcpy(s->switch_pool + so, n->switches, (size_t)n->nswitches * sizeof(int));
+                free(n->switches); n->switches = s->switch_pool + so; so += n->nswitches;
+            }
+        }
+    }
     /* Commit list (parts with memory). */
     free(s->commit_list);
     s->commit_list = malloc(s->nparts * sizeof(int));
@@ -304,9 +350,12 @@ void sim_rebuild(sim_t *s) {
 
     /* Count the drives on every net, then resolve everything and
      * re-evaluate every part. */
-    for (int i = 0; i < s->nnets; i++) memset(s->nets[i].count, 0, sizeof(s->nets[i].count));
+    for (int i = 0; i < s->nnets; i++) {
+        memset(s->nets[i].count, 0, sizeof(s->nets[i].count));
+        s->nets[i].kinds = 0;
+    }
     for (int i = 0; i < s->nnets; i++)
-        if (s->nets[i].rail) s->nets[s->nets[i].root].count[DRIVE(S_SUPPLY, s->nets[i].rail == RAIL_VCC)]++;
+        if (s->nets[i].rail) count_add(&s->nets[s->nets[i].root], DRIVE(S_SUPPLY, s->nets[i].rail == RAIL_VCC));
     for (int i = 0; i < s->npins; i++) {
         pin_t *p = &s->pins[i];
         const part_t *part = &s->parts[p->part];
@@ -315,7 +364,7 @@ void sim_rebuild(sim_t *s) {
         p->locked = p->root < 0 || p->fault != PF_OK || part->power == PWR_OFF ||
                     (part->power != PWR_OK && part->tech != TECH_CMOS);
         p->eff = p->root >= 0 ? pin_drive(s, p) : DRV_Z;
-        if (p->eff >> 1) s->nets[p->root].count[p->eff]++;
+        if (p->eff >> 1) count_add(&s->nets[p->root], p->eff);
     }
     /* Nets with a TTL input on them (a present, connected one). */
     for (int i = 0; i < s->nnets; i++) s->nets[i].ttl_loaded = 0;
@@ -372,6 +421,9 @@ drive_t pin_drive(const sim_t *s, const pin_t *p) {
     default: break;
     }
     const part_t *part = &s->parts[p->part];
+    /* A dead output: stuck while the chip has power. */
+    if (p->fault == PF_OUT0 || p->fault == PF_OUT1)
+        return part->power == PWR_OK ? DRIVE(S_STRONG, p->fault == PF_OUT1) : DRV_Z;
     if (part->power == PWR_OK || part->tech == TECH_CMOS) return part->power == PWR_OFF ? DRV_Z : p->drive;
     if (part->power == PWR_OFF || (p->flags & PIN_POWER)) return DRV_Z;
     if (part->power == PWR_NO_VCC) return DRV_Z;
@@ -380,24 +432,13 @@ drive_t pin_drive(const sim_t *s, const pin_t *p) {
     return (p->flags & PIN_OUT) ? DRIVE(S_PULL, 1) : DRV_Z;
 }
 
-/* Combine the drives counted on a net: the strongest wins, equal ones
- * fighting produce a contention where low wins. */
-static drive_t combine(const uint16_t *count, int *contention) {
-    for (int st = S_SUPPLY; st >= S_PULL; st--) {
-        int lo = count[DRIVE(st, 0)], hi = count[DRIVE(st, 1)];
-        if (lo || hi) { *contention = lo && hi; return DRIVE(st, lo ? 0 : 1); }
-    }
-    *contention = 0;
-    return DRV_Z;
-}
-
 /* Resolve a root net. If its level or "drivenness" changed, every part that
  * reads it must be re-evaluated. 'cause_part' is the part whose drive just
  * changed: analog switches don't need to look at their own drive. */
 static void resolve(sim_t *s, int root, int cause_part) {
     net_t *n = &s->nets[root];
     int contention;
-    drive_t d = combine(n->count, &contention);
+    drive_t d = sim_combine(n->kinds, &contention);
     int st = d >> 1;
     /* A floating net keeps its level (the charge on the copper). */
     int level = st == S_Z ? n->level : (d & 1);
@@ -434,8 +475,8 @@ void sim_drive_changed(sim_t *s, pin_t *p) {
     drive_t eff = p->drive;
     if (eff == p->eff) return;
     net_t *n = &s->nets[p->root];
-    if (p->eff >> 1) n->count[p->eff]--;
-    if (eff >> 1) n->count[eff]++;
+    if (p->eff >> 1) count_sub(n, p->eff);
+    if (eff >> 1) count_add(n, eff);
     p->eff = eff;
     resolve(s, p->root, p->part);
 }
@@ -452,16 +493,13 @@ void sim_set_pin_fault(sim_t *s, int pin, int fault) {
 drive_t sim_drive_except(sim_t *s, int pin_on_net, int except_pin) {
     const pin_t *p = &s->pins[pin_on_net];
     if (p->root < 0 || p->fault == PF_OPEN) return DRV_Z;
-    /* Like combine(), with the excluded pin's own drive taken out. */
-    const uint16_t *count = s->nets[p->root].count;
+    /* Like sim_combine(), with the excluded pin's own drive taken out. */
+    const net_t *n = &s->nets[p->root];
     const pin_t *x = &s->pins[except_pin];
-    drive_t skip = x->root == p->root ? x->eff : DRV_Z;
-    for (int st = S_SUPPLY; st >= S_PULL; st--) {
-        int lo = count[DRIVE(st, 0)] - (skip == DRIVE(st, 0));
-        int hi = count[DRIVE(st, 1)] - (skip == DRIVE(st, 1));
-        if (lo || hi) return DRIVE(st, lo ? 0 : 1);
-    }
-    return DRV_Z;
+    unsigned kinds = n->kinds;
+    if (x->root == p->root && (x->eff >> 1) && n->count[x->eff] == 1) kinds &= ~(1u << x->eff);
+    int contention;
+    return sim_combine(kinds, &contention);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -532,7 +570,7 @@ void sim_settle(sim_t *s) {
     /* Evaluate dirty parts until the board is stable. A board with a fault
      * can oscillate (an output feeding its own input through a short), so
      * give up after a large number of evaluations. */
-    int budget = 20000;
+    int budget = s->osc_after && s->oscillations >= s->osc_after ? 256 : 20000;
     while (s->qhead != s->qtail && budget--) {
         int part = s->queue[s->qhead++ & (SIM_QUEUE_SIZE - 1)];
         s->dirty[part] = 0;
@@ -541,10 +579,17 @@ void sim_settle(sim_t *s) {
         if (p->power != PWR_OK && !phantom_powered(s, p)) continue;
         p->eval(s, p);
     }
+    if (s->qhead != s->qtail) s->oscillations++;
     while (s->qhead != s->qtail)        /* oscillating: drop pending work */
         s->dirty[s->queue[s->qhead++ & (SIM_QUEUE_SIZE - 1)]] = 0;
 }
 
+/* Tried and measured: calling a commit only when one of the part's nets
+ * changed since its last commit (a per-net mask of commit parts, ORed into
+ * a pending word by resolve()). On the C64 it never skips a DRAM, since
+ * every bus step moves /RAS, /CAS or the multiplexed address they all
+ * share, so it was 4% slower; on the Spectrum it skipped about half the
+ * DRAM commits but gained only 3%. Not kept. */
 void sim_commit(sim_t *s) {
     for (int i = 0; i < s->ncommit; i++) {
         part_t *p = &s->parts[s->commit_list[i]];
@@ -554,7 +599,7 @@ void sim_commit(sim_t *s) {
 
 void sim_update_part_power(sim_t *s, int part) {
     part_t *p = &s->parts[part];
-    bool no_vcc = false, no_gnd = false;
+    bool no_vcc = p->supply_cut & 1, no_gnd = (p->supply_cut & 2) != 0;
     for (int i = 0; i < p->npins; i++) {
         int pi = p->first_pin + i;
         if (!(s->pins[pi].flags & PIN_POWER) || s->pins[pi].fault != PF_OPEN) continue;

@@ -4,9 +4,19 @@
  * The machines (c64.c) add the cores of their chips and the bus cycle
  * that moves them, through their machine_t. */
 #include "board.h"
+#include "c64.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <mach-o/ldsyms.h>
+#endif
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 /* Is 'word' one of the space separated words of 'list'? */
 static bool in_list(const char *list, const char *word) {
@@ -23,18 +33,26 @@ static bool in_list(const char *list, const char *word) {
 /* Scope and statistics                                                      */
 /* ------------------------------------------------------------------------ */
 
+/* A scope sample of a pin: its net, and what its own leg drives. */
+static uint8_t scope_sample(const sim_t *s, int pi) {
+    const pin_t *pin = &s->pins[pi];
+    uint8_t v = 0;
+    if (pin->root >= 0) {
+        const net_t *n = &s->nets[pin->root];
+        v = n->level ? SC_LEVEL : 0;
+        if (n->strength == S_Z) v |= SC_FLOATING;
+        if (n->contention) v |= SC_FIGHT;
+    }
+    if ((pin->drive >> 1) != S_Z) v |= (pin->drive & 1) ? SC_OWN_HI : SC_OWN_LO;
+    return v;
+}
+
 void board_sample(board_t *b) {
     sim_t *s = &b->sim;
     if (b->scope_pin >= 0) {
-        const pin_t *pin = &s->pins[b->scope_pin];
-        uint8_t v = 0;
-        if (pin->root >= 0) {
-            const net_t *n = &s->nets[pin->root];
-            v = n->level ? SC_LEVEL : 0;
-            if (n->strength == S_Z) v |= SC_FLOATING;
-            if (n->contention) v |= SC_FIGHT;
-        }
-        b->scope[b->scope_pos++ & (SCOPE_SAMPLES - 1)] = v;
+        uint32_t at = b->scope_pos++ & (SCOPE_SAMPLES - 1);
+        b->scope[at] = scope_sample(s, b->scope_pin);
+        if (b->scope_pin2 >= 0) b->scope2[at] = scope_sample(s, b->scope_pin2);
     }
     /* Logic probe statistics: sample every net once in a while. */
     if (--b->st_countdown > 0) return;
@@ -61,7 +79,7 @@ void board_sample(board_t *b) {
     if (b->p_pla < 0) return;
     part_t *pla = &s->parts[b->p_pla];
     if (!pla->dead) {
-        unsigned in = pla_read_inputs(s, pla);
+        unsigned in = b->pla_super ? superpla_read_inputs(s, pla) : pla_read_inputs(s, pla);
         for (int t = 0; t < pla_nterms; t++)
             if ((in & pla_terms[t].mask) == pla_terms[t].value) b->pla_hits[t]++;
         b->pla_samples++;
@@ -73,6 +91,8 @@ void board_sample(board_t *b) {
 /* ------------------------------------------------------------------------ */
 
 static const part_def_t *part_def(board_t *b, int part) {
+    const part_def_t *d = b->m->part_def ? b->m->part_def(b, part) : NULL;
+    if (d) return d;
     const char *ref = b->sim.parts[part].ref;
     for (int i = 0; i < b->m->nparts; i++)
         if (!strcmp(b->m->parts[i].ref, ref)) return &b->m->parts[i];
@@ -99,6 +119,43 @@ int board_part_role(board_t *b, int part) {
     return d ? d->role : ROLE_OTHER;
 }
 
+/* Does a reference start with a prefix followed by its number ("C" matches
+ * C12, not CN4 or CR1; "TI" matches TI-4)? */
+static bool ref_is(const char *ref, const char *prefix) {
+    size_t n = strlen(prefix);
+    return !strncmp(ref, prefix, n) && ((ref[n] >= '0' && ref[n] <= '9') || ref[n] == '-' || !ref[n]);
+}
+
+const char *board_part_kind_name(board_t *b, int part) {
+    const part_t *p = &b->sim.parts[part];
+    if (p->kind == PART_IC) return "chip";
+    if (p->kind == PART_CONNECTOR) return "connector";
+    /* VR is a regulator on the C64, a trimmer ("2K2") on the Spectrum. */
+    if (ref_is(p->ref, "VR") && p->name && p->name[0] >= '0' && p->name[0] <= '9' && strpbrk(p->name, "KkRM"))
+        return "trimmer";
+    static const char *const names[][2] = {
+        { "FB", "ferrite bead" }, { "EM", "EMI filter" }, { "RP", "resistor pack" }, { "CR", "diode" }, { "JP", "solder jumper" },
+        { "JROM", "wire link" }, { "OKI", "wire link" }, { "TI", "wire link" }, { "TR", "transistor" }, { "VR", "voltage regulator" }, { "REG", "voltage regulator" },
+        { "SW", "switch" }, { "LS", "speaker" }, { "C", "capacitor" }, { "R", "resistor" }, { "D", "diode" },
+        { "Q", "transistor" }, { "Y", "crystal" }, { "X", "crystal" }, { "L", "coil" }, { "F", "fuse" },
+        { "E", "jumper wire" }, { "T", "transformer" }, { "M", "modulator" },
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (ref_is(p->ref, names[i][0])) return names[i][1];
+    return p->kind == PART_LINK ? "link" : p->kind == PART_RESISTOR ? "resistor" : "part";
+}
+
+static bool is_capacitor(board_t *b, int part) { return !strcmp(board_part_kind_name(b, part), "capacitor"); }
+
+bool board_part_can_short(board_t *b, int part) {
+    const part_t *p = &b->sim.parts[part];
+    if (p->kind == PART_IC || p->kind == PART_CONNECTOR || p->kind == PART_LINK) return false;
+    if (p->kind == PART_RESISTOR) return p->state && ((resistor_state_t *)p->state)->nel > 0;
+    /* Legs 1 and 2: a capacitor (some footprints have a third pad for
+     * another lead spacing), a diode, a two pin crystal. */
+    return part_pin(p, 1) >= 0 && part_pin(p, 2) >= 0 && (p->npins == 2 || is_capacitor(b, part));
+}
+
 /* ------------------------------------------------------------------------ */
 /* Passive parts                                                             */
 /* ------------------------------------------------------------------------ */
@@ -109,17 +166,28 @@ static void setup_passive(board_t *b, int idx) {
     part_t *p = &s->parts[idx];
     resistor_state_t *st = calloc(1, sizeof(*st));
     p->state = st;
+    p->state_size = sizeof(*st);
     int pairs[16][2], npairs = 0;
-    bool bussed = strstr(p->name, "Bussed") != NULL;
+    /* Bussed by its value (the C64's "R_Pack_Bussed") or its footprint
+     * (KiCad's SIP array, pin 1 common: the Spectrum Issue 1's RP1; the
+     * RP_ARRAY of the 250469, whose values don't say: the 250407's say
+     * "isolated" on its RP1 and RP2). */
+    const char *fp = s->bd->comps[idx].footprint;
     bool isolated = strstr(p->name, "isolated") != NULL;
+    bool bussed = !isolated && (strstr(p->name, "Bussed") || strstr(fp, "R_Array_SIP") || strstr(fp, "RP_ARRAY"));
     if (bussed) {
-        for (int n = 2; n < 48 && npairs < 16; n++)
+        for (int n = 2; n < PIN_NUMBERS && npairs < 16; n++)
             if (p->pinmap[n] >= 0) { pairs[npairs][0] = p->pinmap[n]; pairs[npairs][1] = p->pinmap[1]; npairs++; }
     } else if (isolated) {
-        for (int n = 1; n + 1 < 48 && npairs < 16; n += 2)
+        for (int n = 1; n + 1 < PIN_NUMBERS && npairs < 16; n += 2)
             if (p->pinmap[n] >= 0 && p->pinmap[n + 1] >= 0) {
                 pairs[npairs][0] = p->pinmap[n]; pairs[npairs][1] = p->pinmap[n + 1]; npairs++;
             }
+    } else if (strstr(fp, "T-FILTER")) {
+        /* A T filter (the 250469's EM1-EM9 on the joystick lines): the
+         * line goes from pin 1 to pin 3, the capacitor to ground (pin 2)
+         * is not simulated. */
+        if (p->pinmap[1] >= 0 && p->pinmap[3] >= 0) { pairs[0][0] = p->pinmap[1]; pairs[0][1] = p->pinmap[3]; npairs = 1; }
     } else if (p->pinmap[1] >= 0 && p->pinmap[2] >= 0) {
         pairs[0][0] = p->pinmap[1]; pairs[0][1] = p->pinmap[2]; npairs = 1;
     }
@@ -144,6 +212,50 @@ static void setup_passive(board_t *b, int idx) {
     }
 }
 
+/* Does a reference start with one of the prefixes of a list, followed by
+ * its number ("CR" matches CR5, not CRT1)? */
+static bool in_prefix_list(const char *list, const char *ref) {
+    for (const char *s = list; s && *s; ) {
+        size_t len = strcspn(s, " ");
+        if (!strncmp(s, ref, len) && ref[len] >= '0' && ref[len] <= '9') return true;
+        s += len + (s[len] == ' ');
+    }
+    return false;
+}
+
+int board_passives(board_t *b, int part, passive_t *out, int max) {
+    sim_t *s = &b->sim;
+    part_t *p = &s->parts[part];
+    int n = 0;
+    if ((p->kind == PART_RESISTOR || p->kind == PART_LINK) && p->state) {
+        resistor_state_t *st = p->state;
+        for (int i = 0; i < st->nel && n < max; i++) {
+            const element_t *e = &st->el[i];
+            if (e->type == EL_NPN || e->type == EL_FOLLOWER) continue;     /* transistors */
+            out[n++] = (passive_t){ e->pin_a, e->pin_b,
+                                    e->type == EL_DIODE ? PASS_DIODE : p->kind == PART_LINK ? PASS_LINK : PASS_RESISTOR };
+        }
+        return n;
+    }
+    if (max < 1 || p->kind == PART_IC || p->kind == PART_CONNECTOR) return 0;
+    int a = part_pin(p, 1), c = part_pin(p, 2);
+    if (a < 0 || c < 0) return 0;
+    if (is_capacitor(b, part)) out[n++] = (passive_t){ a, c, PASS_CAP };
+    else if (p->npins != 2) return 0;
+    else if (in_prefix_list(b->m->diodes, p->ref)) out[n++] = (passive_t){ a, c, PASS_DIODE };
+    else if (in_prefix_list(b->m->jumpers, p->ref)) out[n++] = (passive_t){ a, c, PASS_LINK };
+    /* Any other two pin part shorted is a wire to the meter. */
+    else if (p->rfault == RF_SHORT) out[n++] = (passive_t){ a, c, PASS_LINK };
+    return n;
+}
+
+int board_net_supply(board_t *b, int net) {
+    if (net < 0) return RAIL_NONE;
+    const net_t *n = &b->sim.nets[net];
+    if (n->rail) return n->rail;
+    return in_list(b->m->supplies, n->name) ? RAIL_VCC : RAIL_NONE;
+}
+
 bool board_part_simulated(board_t *b, int part) {
     part_t *p = &b->sim.parts[part];
     if (p->kind == PART_IC || p->kind == PART_CONNECTOR) return true;
@@ -155,21 +267,83 @@ bool board_part_simulated(board_t *b, int part) {
     return false;
 }
 
+/* Two legs joined by a part, unless one is lifted. */
+static void join_legs(sim_t *s, int pin_a, int pin_b) {
+    if (s->pins[pin_a].fault == PF_OPEN || s->pins[pin_b].fault == PF_OPEN) return;
+    sim_join(s, s->pins[pin_a].net, s->pins[pin_b].net);
+}
+
+/* The supplies of the healthy board, from its first rebuild: where each
+ * power pin of a chip gets its supply. That is the biggest net (the plane)
+ * of what the pin is joined to: a chip fed through a ferrite bead gets
+ * +5V or +12V through it. */
+static void supply_baseline(board_t *b) {
+    sim_t *s = &b->sim;
+    int *npins = calloc(s->nnets, sizeof(int)), *big = malloc(sizeof(int) * s->nnets);
+    for (int i = 0; i < s->npins; i++) if (s->pins[i].net >= 0) npins[s->pins[i].net]++;
+    for (int i = 0; i < s->nnets; i++) big[i] = -1;
+    b->gnd_net = b->vcc_net = -1;
+    for (int i = 0; i < s->nnets; i++) {
+        int r = s->nets[i].root;
+        if (big[r] < 0 || npins[i] > npins[big[r]]) big[r] = i;
+        int *main = s->nets[i].rail == RAIL_GND ? &b->gnd_net : s->nets[i].rail == RAIL_VCC ? &b->vcc_net : NULL;
+        if (main && (*main < 0 || npins[i] > npins[*main])) *main = i;
+    }
+    b->pwr_src = malloc(sizeof(int) * s->npins);
+    b->pwr_rail = calloc(s->npins, 1);
+    for (int i = 0; i < s->npins; i++) {
+        const pin_t *p = &s->pins[i];
+        b->pwr_src[i] = (p->flags & PIN_POWER) && p->root >= 0 ? big[p->root] : -1;
+        if (b->pwr_src[i] >= 0) b->pwr_rail[i] = s->nets[p->root].rail;
+    }
+    free(npins);
+    free(big);
+}
+
+/* Which chips lost a supply since the healthy board: the copper from the
+ * power pin to its supply is cut (an open ferrite bead, a lifted leg of
+ * it), or the supply is shorted to another (a shorted decoupling
+ * capacitor pulls +5V down to ground). True if that changed for a chip. */
+static bool supply_check(board_t *b) {
+    sim_t *s = &b->sim;
+    bool changed = false;
+    for (int i = 0; i < s->nparts; i++) {
+        part_t *p = &s->parts[i];
+        uint8_t cut = 0;
+        for (int k = 0; k < p->npins; k++) {
+            int pi = p->first_pin + k, src = b->pwr_src[pi];
+            if (src < 0) continue;
+            int root = s->nets[src].root;
+            if (s->pins[pi].root == root && s->nets[root].rail == b->pwr_rail[pi]) continue;
+            const char *name = s->pin_names[pi];
+            cut |= name && (strstr(name, "GND") || !strcmp(name, "VSS")) ? 2 : 1;
+        }
+        if (p->supply_cut != cut) { p->supply_cut = cut; changed = true; }
+    }
+    return changed;
+}
+
 /* Rebuild the electrical network after a change: links, keys, faults. */
 void board_rebuild(board_t *b) {
     sim_t *s = &b->sim;
     sim_join_begin(s);
     for (int i = 0; i < s->nparts; i++) {
         part_t *p = &s->parts[i];
-        if ((p->kind != PART_RESISTOR && p->kind != PART_LINK) || !p->state) continue;
         if (p->rfault == RF_OPEN) continue;
-        resistor_state_t *st = p->state;
-        for (int k = 0; k < st->nel; k++) {
-            element_t *e = &st->el[k];
-            /* A shorted series resistor is a wire. */
-            if (e->type != EL_LINK && !(e->type == EL_SERIES && p->rfault == RF_SHORT)) continue;
-            if (s->pins[e->pin_a].fault == PF_OPEN || s->pins[e->pin_b].fault == PF_OPEN) continue;
-            sim_join(s, s->pins[e->pin_a].net, s->pins[e->pin_b].net);
+        if ((p->kind == PART_RESISTOR || p->kind == PART_LINK) && p->state) {
+            resistor_state_t *st = p->state;
+            for (int k = 0; k < st->nel; k++) {
+                element_t *e = &st->el[k];
+                /* A shorted resistor (in series, in an RC delay, or not
+                 * simulated) is a wire. Pull-ups, diodes and transistors
+                 * do their short themselves (see resistor_eval). */
+                bool wire = e->type == EL_LINK || (p->rfault == RF_SHORT &&
+                            (e->type == EL_SERIES || e->type == EL_DELAY || e->type == EL_ANALOG));
+                if (wire) join_legs(s, e->pin_a, e->pin_b);
+            }
+        } else if (p->rfault == RF_SHORT && board_part_can_short(b, i)) {
+            /* A shorted capacitor, diode, crystal... */
+            join_legs(s, part_pin(p, 1), part_pin(p, 2));
         }
     }
     /* Pressed keys, dongles... */
@@ -178,8 +352,38 @@ void board_rebuild(board_t *b) {
     if (b->reset_button && b->pin_reset >= 0 && b->pin_reset_gnd >= 0 &&
         s->pins[b->pin_reset].fault != PF_OPEN && s->pins[b->pin_reset_gnd].fault != PF_OPEN)
         sim_join(s, s->pins[b->pin_reset].net, s->pins[b->pin_reset_gnd].net);
+    /* Solder bridges: the two nets become one (a lifted leg isn't bridged).
+     * A bridge from an output to an input that drives it is a loop that
+     * oscillates without end: after a few times, settle with less work.
+     * (Only with a bridge, so every other fault runs as it always did.) */
+    s->osc_after = b->nbridges ? 16 : 0;
+    for (int i = 0; i < b->nbridges; i++) {
+        int pa = b->bridge[i][0], pb = b->bridge[i][1];
+        if (s->pins[pa].fault == PF_OPEN || s->pins[pb].fault == PF_OPEN) continue;
+        sim_join(s, s->pins[pa].net, s->pins[pb].net);
+    }
     for (int i = 0; i < s->nparts; i++) sim_update_part_power(s, i);
     sim_rebuild(s);
+    if (!b->pwr_src) { supply_baseline(b); return; }
+    /* A leg shorted to GND on a supply (a pad of a decoupling capacitor on
+     * +5V, or on a supply behind a ferrite bead), or to +5V on ground: a
+     * dead short between the two, which pulls the supply down. */
+    bool more = false;
+    for (int i = 0; i < s->npins; i++) {
+        const pin_t *p = &s->pins[i];
+        if (p->root < 0 || (p->fault != PF_GND && p->fault != PF_VCC)) continue;
+        int rail = s->nets[p->root].rail, supply = rail ? rail : board_net_supply(b, p->net);
+        bool dead = p->fault == PF_GND ? supply == RAIL_VCC : rail == RAIL_GND;
+        int to = p->fault == PF_GND ? b->gnd_net : b->vcc_net;
+        if (!dead || to < 0) continue;
+        sim_join(s, p->net, to);
+        more = true;
+    }
+    if (more) sim_rebuild(s);
+    if (supply_check(b)) {
+        for (int i = 0; i < s->nparts; i++) sim_update_part_power(s, i);
+        sim_rebuild(s);
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -255,6 +459,7 @@ bool board_net_simulated(board_t *b, int net) {
 board_t *board_create(const machine_t *m) {
     board_t *b = calloc(1, m->size);
     b->m = m;
+    board_config_changed(b);
     sim_t *s = &b->sim;
     sim_init(s, m->data, &m->sim);
     for (int i = 0; i < s->nparts; i++) s->parts[i].user = b;
@@ -265,8 +470,9 @@ board_t *board_create(const machine_t *m) {
     for (int i = 0; i < s->nparts; i++)
         if (s->parts[i].kind == PART_RESISTOR || s->parts[i].kind == PART_LINK) setup_passive(b, i);
     b->screen = calloc((size_t)m->screen_w * m->screen_h, sizeof(uint32_t));
+    b->snow_seed = 12345;
     b->check = getenv("C64HW_CHECK") != NULL;
-    b->scope_pin = -1;
+    b->scope_pin = b->scope_pin2 = -1;
     b->p_pla = b->pin_reset = b->pin_reset_gnd = -1;
     b->st_hi = calloc(s->nnets, sizeof(uint32_t));
     b->st_lo = calloc(s->nnets, sizeof(uint32_t));
@@ -288,6 +494,7 @@ void board_destroy(board_t *b) {
     for (int c = 0; c < b->m->nconns; c++) free(b->conn_strings[c]);
     free(b->conn_strings);
     free(b->pin_func);
+    free(b->pwr_src); free(b->pwr_rail);
     free(b->screen);
     free(b->st_hi); free(b->st_lo); free(b->st_float); free(b->st_fight);
     free(b->pst_hi); free(b->pst_lo); free(b->pst_off); free(b->pst_weak);
@@ -303,9 +510,565 @@ void board_power_on(board_t *b) {
      * starts over (the same faults give the same run). */
     sim_discharge(s);
     sim_seed(s, 1);
+    s->oscillations = 0;
     for (int i = 0; i < s->nparts; i++)
         if (s->parts[i].reset) s->parts[i].reset(s, &s->parts[i]);
     board_rebuild(b);
+}
+
+static uint32_t next_config_id;     /* boards are made in parallel threads (the atlas) */
+
+void board_config_changed(board_t *b) { b->config_id = __atomic_add_fetch(&next_config_id, 1, __ATOMIC_RELAXED); }
+
+/* ------------------------------------------------------------------------ */
+/* Save states                                                               */
+/* ------------------------------------------------------------------------ */
+
+/* A copy of everything that changes while the machine runs: the machine's
+ * struct (board_t, the sim_t in it, the chip cores), the pins and nets,
+ * the parts' states (the DRAM cells...) and the picture. What only
+ * changes with the hardware set up (a cartridge's ROM, the tables) is
+ * left out: config_id makes sure it is the same. */
+struct board_state {
+    const machine_t *m;
+    uint32_t config_id;
+    void *machine;
+    pin_t *pins;
+    net_t *nets;
+    uint8_t *nread;
+    uint64_t *open_since;
+    int *noisy;
+    uint32_t *screen;
+    uint8_t *states;
+};
+
+static void *dup_bytes(const void *p, size_t n) {
+    void *d = malloc(n ? n : 1);
+    memcpy(d, p, n);
+    return d;
+}
+
+static size_t screen_bytes(const board_t *b) { return (size_t)b->m->screen_w * b->m->screen_h * sizeof(uint32_t); }
+
+board_state_t *board_save_state(board_t *b) {
+    sim_t *s = &b->sim;
+    board_state_t *st = calloc(1, sizeof(*st));
+    st->m = b->m;
+    st->config_id = b->config_id;
+    st->machine = dup_bytes(b, b->m->size);
+    st->pins = dup_bytes(s->pins, sizeof(pin_t) * s->npins);
+    st->nets = dup_bytes(s->nets, sizeof(net_t) * s->nnets);
+    st->nread = dup_bytes(s->nread, s->nnets);
+    st->open_since = dup_bytes(s->open_since, sizeof(uint64_t) * s->npins);
+    st->noisy = dup_bytes(s->noisy, sizeof(int) * SIM_MAX_PARTS);
+    st->screen = dup_bytes(b->screen, screen_bytes(b));
+    size_t total = 0;
+    for (int i = 0; i < s->nparts; i++) if (s->parts[i].state) total += s->parts[i].state_size;
+    st->states = malloc(total ? total : 1);
+    uint8_t *q = st->states;
+    for (int i = 0; i < s->nparts; i++)
+        if (s->parts[i].state) { memcpy(q, s->parts[i].state, s->parts[i].state_size); q += s->parts[i].state_size; }
+    return st;
+}
+
+/* Copy a save state into the board. What the board allocated since (the
+ * pools of the nets, rebuilt by every sim_rebuild) and the interface's
+ * choices (the scope's pins) stay as they are. */
+static void put_back(board_t *b, const board_state_t *st) {
+    sim_t *s = &b->sim;
+    board_t *before = dup_bytes(b, b->m->size);
+    const sim_t *o = &before->sim;
+    memcpy(b, st->machine, b->m->size);
+    s->pin_pool = o->pin_pool; s->reader_pool = o->reader_pool; s->switch_pool = o->switch_pool;
+    s->commit_list = o->commit_list; s->ncommit = o->ncommit;
+    s->join_a = o->join_a; s->join_b = o->join_b; s->njoin = o->njoin; s->join_cap = o->join_cap;
+    b->scope_pin = before->scope_pin; b->scope_pin2 = before->scope_pin2;
+    b->pin_stats = before->pin_stats;
+    b->check = before->check; b->check_errors = before->check_errors;
+    if (b->m->state_loaded) b->m->state_loaded(b, before);
+    free(before);
+    memcpy(s->pins, st->pins, sizeof(pin_t) * s->npins);
+    for (int i = 0; i < s->nnets; i++) {     /* the lists point into the pools */
+        net_t *n = &s->nets[i];
+        int *pins = n->pins, *readers = n->readers, *switches = n->switches;
+        *n = st->nets[i];
+        n->pins = pins; n->readers = readers; n->switches = switches;
+    }
+    memcpy(s->nread, st->nread, s->nnets);
+    memcpy(s->open_since, st->open_since, sizeof(uint64_t) * s->npins);
+    memcpy(s->noisy, st->noisy, sizeof(int) * SIM_MAX_PARTS);
+    memcpy(b->screen, st->screen, screen_bytes(b));
+    const uint8_t *q = st->states;
+    for (int i = 0; i < s->nparts; i++)
+        if (s->parts[i].state) { memcpy(s->parts[i].state, q, s->parts[i].state_size); q += s->parts[i].state_size; }
+}
+
+bool board_load_state(board_t *b, const board_state_t *st) {
+    if (!st || st->m != b->m || st->config_id != b->config_id) return false;
+    /* The faults, keys and links first, so the rebuild merges the nets as
+     * they were; then the electrical state of those nets, over what the
+     * rebuild worked out. */
+    put_back(b, st);
+    board_rebuild(b);
+    put_back(b, st);
+    return true;
+}
+
+void board_free_state(board_state_t *st) {
+    if (!st) return;
+    free(st->machine); free(st->pins); free(st->nets); free(st->nread);
+    free(st->open_since); free(st->noisy); free(st->screen); free(st->states);
+    free(st);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Save files                                                                */
+/* ------------------------------------------------------------------------ */
+
+/* A save state on disk. It is the memory of the machine, as a save state
+ * in memory is, so the pointers in it (to what the board allocated, to
+ * the program's functions and tables) are those of the program that
+ * saved it. Loading makes the board again, set up the same way (the
+ * machine, its options, the harness, what is plugged in), and takes the
+ * pointers from it: a word that differs between two boards made the same
+ * way points at what each allocated; one that differs from the same board
+ * made by the program that saved it (kept in the file too) points into
+ * the program (Windows loads it at another address each time, and a new
+ * version has its functions elsewhere): if it is still what it was when
+ * the board was made, the new board's is right. Every other word is the
+ * machine's state and comes from the file. One whose machine has another
+ * size (a version that lays it out differently) is refused.
+ *
+ * A file can come from anyone, so nothing in it may point the program
+ * anywhere: a word that points into the program on the new board (the
+ * parts' functions, the chips' tables) always comes from the new board,
+ * never from the file (no such pointer changes while a machine runs: a
+ * file in which one did is refused), and a file whose state holds an
+ * address inside the program, where the new board keeps none, is refused
+ * (a doctored file aiming a function pointer that is empty on a fresh
+ * board). The parts' read caches, which do point into the program once a
+ * machine has run, are cleared first (sf_forget_caches()). Measured on
+ * save files of every board, with cartridges, faults and the harness:
+ * neither then happens in a real one.
+ *
+ * The file: text lines ("KEY VALUE"), the notes (their length on the
+ * "notes" line, then the text), a line "data", then binary blocks, each
+ * its length (8 bytes, little endian) and its bytes: what is plugged in
+ * (if anything), the fresh board, the saved one. */
+
+#define SF_MAGIC "c64-hw-sim save state 1"
+#define SF_EXT ".hwstate"
+#define SF_MAX_OPTIONS 8
+#define SF_NBLOBS 8
+
+static const machine_t *const sf_machines[] = { &machine_c64, &machine_zx48, &machine_zx48i2, &machine_zx48i1,
+                                                &machine_zx48i4b, &machine_zx48i6a, &machine_c64c };
+
+/* How a board is set up. */
+typedef struct {
+    const machine_t *m;
+    int options[SF_MAX_OPTIONS];
+    bool harness;
+    char plugged[260];          /* the file to plug, "" for none */
+    int bank;
+    int socket;                 /* a C64 ROM in the port (0) or in U4 (1) */
+} sf_config_t;
+
+static board_t *sf_make(const sf_config_t *c, char *err, int errlen) {
+    board_t *b = board_create(c->m);
+    for (int i = 0; i < c->m->noptions && i < SF_MAX_OPTIONS; i++)
+        if (c->m->get_option(b, i) != c->options[i]) c->m->set_option(b, i, c->options[i]);
+    if (c->harness) board_set_harness(b, true);
+    if (c->plugged[0]) {
+        char msg[256];
+        if (!board_load(b, c->plugged, false, msg, sizeof(msg))) {
+            snprintf(err, errlen, "can't plug in %s again: %s", c->plugged, msg);
+            board_destroy(b);
+            return NULL;
+        }
+        if (c->bank) board_set_cart_bank(b, c->bank);
+        if (board_is_c64(b) && c64_cart_socket(b) >= 0 && c64_cart_socket(b) != c->socket)
+            c64_set_cart_socket(b, c->socket);
+    }
+    return b;
+}
+
+/* The blocks of a save state of board b: where, how long. */
+typedef struct { void **p; size_t n; } sf_blob_t;
+
+static void sf_blobs(const board_t *b, board_state_t *st, sf_blob_t *out) {
+    const sim_t *s = &b->sim;
+    size_t total = 0;
+    for (int i = 0; i < s->nparts; i++) if (s->parts[i].state) total += s->parts[i].state_size;
+    out[0] = (sf_blob_t){ &st->machine, b->m->size };
+    out[1] = (sf_blob_t){ (void **)&st->pins, sizeof(pin_t) * s->npins };
+    out[2] = (sf_blob_t){ (void **)&st->nets, sizeof(net_t) * s->nnets };
+    out[3] = (sf_blob_t){ (void **)&st->nread, (size_t)s->nnets };
+    out[4] = (sf_blob_t){ (void **)&st->open_since, sizeof(uint64_t) * s->npins };
+    out[5] = (sf_blob_t){ (void **)&st->noisy, sizeof(int) * SIM_MAX_PARTS };
+    out[6] = (sf_blob_t){ (void **)&st->screen, screen_bytes(b) };
+    out[7] = (sf_blob_t){ (void **)&st->states, total };
+}
+
+static void sf_put(FILE *f, const void *p, uint64_t n) {
+    uint8_t len[8];
+    for (int i = 0; i < 8; i++) len[i] = (uint8_t)(n >> (8 * i));
+    fwrite(len, 1, 8, f);
+    if (n) fwrite(p, 1, n, f);
+}
+
+/* A block of the length expected (want), or of any length (want ~0: *got
+ * says it). NULL if the file is short or the length isn't that. */
+static void *sf_get(FILE *f, uint64_t want, size_t *got) {
+    uint8_t len[8];
+    if (fread(len, 1, 8, f) != 8) return NULL;
+    uint64_t n = 0;
+    for (int i = 0; i < 8; i++) n |= (uint64_t)len[i] << (8 * i);
+    if ((want != ~(uint64_t)0 && n != want) || n > (64u << 20)) return NULL;
+    void *p = malloc(n ? n : 1);
+    if (n && fread(p, 1, n, f) != n) { free(p); return NULL; }
+    if (got) *got = n;
+    return p;
+}
+
+static void sf_put_state(FILE *f, board_t *b, board_state_t *st) {
+    sf_blob_t bl[SF_NBLOBS];
+    sf_blobs(b, st, bl);
+    for (int i = 0; i < SF_NBLOBS; i++) sf_put(f, *bl[i].p, bl[i].n);
+}
+
+/* A save state of board b from the file (NULL if it doesn't fit b). */
+static board_state_t *sf_get_state(FILE *f, board_t *b) {
+    board_state_t *st = calloc(1, sizeof(*st));
+    sf_blob_t bl[SF_NBLOBS];
+    sf_blobs(b, st, bl);
+    for (int i = 0; i < SF_NBLOBS; i++)
+        if (!(*bl[i].p = sf_get(f, bl[i].n, NULL))) { board_free_state(st); return NULL; }
+    st->m = b->m;
+    st->config_id = b->config_id;
+    return st;
+}
+
+/* Where the program itself is in memory (its code and its tables), to
+ * tell pointers into it; 0, 0 if that can't be found out. */
+static void sf_program(uint64_t *lo, uint64_t *hi) {
+    *lo = *hi = 0;
+#if defined(_WIN32)
+    extern const uint8_t __ImageBase[];     /* the program's PE header, its size in it */
+    const uint8_t *b = __ImageBase;
+    uint32_t pe, size;
+    memcpy(&pe, b + 0x3c, 4);
+    memcpy(&size, b + pe + 24 + 56, 4);
+    *lo = (uint64_t)(uintptr_t)b;
+    *hi = *lo + size;
+#elif defined(__APPLE__)
+    const struct mach_header_64 *h = &_mh_execute_header;
+    const uint8_t *lc = (const uint8_t *)(h + 1);
+    intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+    uint64_t a = ~(uint64_t)0, z = 0;
+    for (uint32_t i = 0; i < h->ncmds; i++) {
+        const struct segment_command_64 *sg = (const void *)lc;
+        if (sg->cmd == LC_SEGMENT_64 && strcmp(sg->segname, "__PAGEZERO")) {
+            if (sg->vmaddr + slide < a) a = sg->vmaddr + slide;
+            if (sg->vmaddr + slide + sg->vmsize > z) z = sg->vmaddr + slide + sg->vmsize;
+        }
+        lc += sg->cmdsize;
+    }
+    if (z) { *lo = a; *hi = z; }
+#elif defined(__GNUC__)
+    extern char __executable_start, _end;
+    *lo = (uint64_t)(uintptr_t)&__executable_start;
+    *hi = (uint64_t)(uintptr_t)&_end;
+#endif
+}
+
+/* The pointers of the saved block r from the new board (see above): f is
+ * the block of the fresh board of the program that saved, b1 that of the
+ * new board as made, b2 of another made the same way, [lo, hi) the
+ * program. Returns how many words differ unexplained, or point where they
+ * may not. */
+static int sf_relocate(uint8_t *r, const uint8_t *f, const uint8_t *b1, const uint8_t *b2, size_t n,
+                       uint64_t lo, uint64_t hi) {
+    int bad = 0;
+    for (size_t o = 0; o + 8 <= n; o += 8) {
+        uint64_t vr, vf, v1, v2;
+        memcpy(&vr, r + o, 8);
+        memcpy(&vf, f + o, 8);
+        memcpy(&v1, b1 + o, 8);
+        memcpy(&v2, b2 + o, 8);
+        if (v1 != v2) memcpy(r + o, &v1, 8);                 /* what the board allocated */
+        else if (v1 >= lo && v1 < hi) {                       /* into the program: the new board's */
+            if (vr != vf) bad++;
+            memcpy(r + o, &v1, 8);
+        } else if (v1 != vf) {                                /* the program's, of another version */
+            if (vr == vf) memcpy(r + o, &v1, 8);
+            else bad++;
+        } else if (vr >= lo && vr < hi) bad++;                /* state may not point into the program */
+    }
+    return bad;
+}
+
+/* The parts' read caches (group_t, sim_read_group()) out of a saved
+ * machine: made again when first read, as after every rebuild. Their keys
+ * point at the program's pin tables, set as the machine runs: not state,
+ * and not to be taken from a file. */
+static void sf_forget_caches(const board_t *b, board_state_t *st) {
+    for (int i = 0; i < b->sim.nparts; i++) {
+        size_t at = (size_t)((const uint8_t *)b->sim.parts[i].groups - (const uint8_t *)b);
+        memset((uint8_t *)st->machine + at, 0, sizeof(b->sim.parts[i].groups));
+    }
+}
+
+bool board_is_state_file(const char *path) {
+    size_t n = strlen(path), e = strlen(SF_EXT);
+    if (n <= e) return false;
+    for (size_t i = 0; i < e; i++)
+        if ((path[n - e + i] | 0x20) != SF_EXT[i] && path[n - e + i] != SF_EXT[i]) return false;
+    return true;
+}
+
+const char *board_basename(const char *path) {
+    const char *s = strrchr(path, '/'), *t = strrchr(path, '\\');
+    if (t && (!s || t > s)) s = t;
+    return s ? s + 1 : path;
+}
+
+static void *sf_slurp(const char *path, size_t *n) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *p = size >= 0 && size < (64l << 20) ? malloc((size_t)size + 1) : NULL;
+    if (p && fread(p, 1, (size_t)size, f) != (size_t)size) { free(p); p = NULL; }
+    fclose(f);
+    *n = (size_t)size;
+    return p;
+}
+
+bool board_save_file(board_t *b, const char *path, const char *notes, char *err, int errlen) {
+    sf_config_t c;
+    memset(&c, 0, sizeof(c));
+    c.m = b->m;
+    for (int i = 0; i < b->m->noptions && i < SF_MAX_OPTIONS; i++) c.options[i] = b->m->get_option(b, i);
+    c.harness = board_harness(b);
+    snprintf(c.plugged, sizeof(c.plugged), "%s", b->plugged);
+    c.bank = c.plugged[0] ? board_cart_bank(b) : 0;
+    c.socket = board_is_c64(b) && c64_cart_socket(b) > 0;
+    size_t nplug = 0;
+    uint8_t *plug = NULL;
+    if (c.plugged[0] && !(plug = sf_slurp(c.plugged, &nplug))) {
+        snprintf(err, errlen, "can't read %s, which is plugged in", c.plugged);
+        return false;
+    }
+    board_t *fresh = sf_make(&c, err, errlen);
+    if (!fresh) { free(plug); return false; }
+    memset(fresh->plugged, 0, sizeof(fresh->plugged));     /* where it was is no part of the machine */
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        snprintf(err, errlen, "can't write %s", path);
+        free(plug);
+        board_destroy(fresh);
+        return false;
+    }
+    fprintf(f, "%s\nboard %s\n", SF_MAGIC, b->m->board_name);
+    for (int i = 0; i < b->m->noptions && i < SF_MAX_OPTIONS; i++)
+        fprintf(f, "option %s %s\n", b->m->options[i].id, b->m->options[i].value_ids[c.options[i]]);
+    fprintf(f, "harness %d\n", c.harness);
+    if (c.plugged[0]) fprintf(f, "plugged %s\nbank %d\nsocket %d\n", board_basename(c.plugged), c.bank, c.socket);
+    fprintf(f, "time %.3f\n", (double)b->sim.cycle / b->m->cpu_hz);
+    fprintf(f, "base %llu\n", (unsigned long long)(uintptr_t)&machine_c64);
+    fprintf(f, "notes %zu\n", strlen(notes));
+    fwrite(notes, 1, strlen(notes), f);
+    fprintf(f, "\ndata\n");
+    if (c.plugged[0]) sf_put(f, plug, nplug);
+    board_state_t *fs = board_save_state(fresh), *rs = board_save_state(b);
+    sf_put_state(f, fresh, fs);
+    sf_put_state(f, b, rs);
+    board_free_state(fs);
+    board_free_state(rs);
+    board_destroy(fresh);
+    free(plug);
+    if (fclose(f) != 0) {
+        snprintf(err, errlen, "can't write %s", path);
+        return false;
+    }
+    return true;
+}
+
+/* The text part of a save file: the setup, the notes (if notes), the
+ * base address of the program that saved it and when. False if it isn't
+ * one. */
+static bool sf_header(FILE *f, sf_config_t *c, char *plugged_name, int namelen, char *notes, int noteslen,
+                      uint64_t *base, double *time, char *err, int errlen) {
+    char line[512];
+    memset(c, 0, sizeof(*c));
+    if (notes && noteslen) notes[0] = 0;
+    if (!fgets(line, sizeof(line), f) || strncmp(line, SF_MAGIC, strlen(SF_MAGIC))) {
+        snprintf(err, errlen, "not a save file of this simulator");
+        return false;
+    }
+    plugged_name[0] = 0;
+    *base = 0;
+    *time = 0;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *v = strchr(line, ' ');
+        if (v) *v++ = 0;
+        else v = line + strlen(line);
+        if (!strcmp(line, "data")) {
+            if (!c->m) snprintf(err, errlen, "no board in the file");
+            return c->m != NULL;
+        }
+        if (!strcmp(line, "board")) {
+            for (size_t i = 0; i < sizeof(sf_machines) / sizeof(sf_machines[0]); i++)
+                if (!strcmp(v, sf_machines[i]->board_name)) c->m = sf_machines[i];
+            if (!c->m) { snprintf(err, errlen, "a board this simulator doesn't have: %s", v); return false; }
+        } else if (!strcmp(line, "option") && c->m) {
+            char id[64], val[64];
+            if (sscanf(v, "%63s %63s", id, val) != 2) continue;
+            bool found = false;
+            for (int i = 0; i < c->m->noptions && i < SF_MAX_OPTIONS; i++) {
+                if (strcmp(c->m->options[i].id, id)) continue;
+                for (int k = 0; k < c->m->options[i].nvalues; k++)
+                    if (!strcmp(c->m->options[i].value_ids[k], val)) { c->options[i] = k; found = true; }
+            }
+            if (!found) { snprintf(err, errlen, "an option this board doesn't have: %s %s", id, val); return false; }
+        } else if (!strcmp(line, "harness")) c->harness = atoi(v) != 0;
+        else if (!strcmp(line, "plugged")) snprintf(plugged_name, namelen, "%s", board_basename(v));
+        else if (!strcmp(line, "bank")) c->bank = atoi(v);
+        else if (!strcmp(line, "socket")) c->socket = atoi(v) != 0;
+        else if (!strcmp(line, "time")) *time = atof(v);
+        else if (!strcmp(line, "base")) *base = strtoull(v, NULL, 10);
+        else if (!strcmp(line, "notes")) {
+            size_t n = (size_t)strtoull(v, NULL, 10);
+            for (size_t i = 0; i < n; i++) {
+                int ch = fgetc(f);
+                if (ch == EOF) break;
+                if (notes && (int)i < noteslen - 1) { notes[i] = (char)ch; notes[i + 1] = 0; }
+            }
+            fgetc(f);           /* the end of the line */
+        }
+    }
+    snprintf(err, errlen, "the file is cut short");
+    return false;
+}
+
+const file_kind_t *board_state_file_kind(const char *path, char *info, int len, bool *bad) {
+    static const file_kind_t kind = { "save state", "Load the save state", false, -1 };
+    if (!board_is_state_file(path)) return NULL;
+    FILE *f = fopen(path, "rb");
+    sf_config_t c;
+    char name[260], err[128];
+    uint64_t base;
+    double time;
+    *bad = !f || !sf_header(f, &c, name, sizeof(name), NULL, 0, &base, &time, err, sizeof(err));
+    if (!f) snprintf(info, len, "can't read the file");
+    else if (*bad) snprintf(info, len, "%s", err);
+    else snprintf(info, len, "%s at %.1f s%s%s", c.m->board_name, time, name[0] ? ", with " : "", name);
+    if (f) fclose(f);
+    return &kind;
+}
+
+static void sf_mkdir(const char *dir) {
+#ifdef _WIN32
+    _mkdir(dir);
+#else
+    mkdir(dir, 0777);
+#endif
+}
+
+/* Where a plugged file from a save file goes: the system's temporary
+ * folder, under its own name (the cartridge is called by it), in a folder
+ * named by its contents: two files of the same name (in two save files,
+ * or two copies of the program) don't overwrite each other, and the same
+ * file loaded again goes where it went before. */
+static bool sf_temp_path(const char *name, const uint8_t *data, size_t n, char *out, int len) {
+    const char *dir = getenv("TEMP");
+    if (!dir) dir = getenv("TMPDIR");
+    if (!dir) dir = "/tmp";
+    uint64_t h = 14695981039346656037ull;       /* FNV-1a */
+    for (size_t i = 0; i < n; i++) h = (h ^ data[i]) * 1099511628211ull;
+    snprintf(out, len, "%s/c64-hw-sim", dir);
+    sf_mkdir(out);
+    snprintf(out + strlen(out), len - strlen(out), "/%016llx", (unsigned long long)h);
+    sf_mkdir(out);
+    snprintf(out + strlen(out), len - strlen(out), "/%s", name);
+    return true;
+}
+
+board_t *board_load_file(const char *path, char *notes, int noteslen, char *err, int errlen) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { snprintf(err, errlen, "can't read the file"); return NULL; }
+    sf_config_t c;
+    char name[260];
+    uint64_t base;
+    double time;
+    if (!sf_header(f, &c, name, sizeof(name), notes, noteslen, &base, &time, err, errlen)) { fclose(f); return NULL; }
+    if (name[0]) {
+        size_t n;
+        uint8_t *plug = sf_get(f, ~(uint64_t)0, &n);
+        FILE *o = NULL;
+        if (plug && sf_temp_path(name, plug, n, c.plugged, sizeof(c.plugged))) o = fopen(c.plugged, "wb");
+        bool ok = o && fwrite(plug, 1, n, o) == n;
+        if (o && fclose(o) != 0) ok = false;
+        free(plug);
+        if (!ok) { snprintf(err, errlen, "can't put %s in the temporary folder", name); fclose(f); return NULL; }
+    }
+    board_t *b1 = sf_make(&c, err, errlen), *b2 = b1 ? sf_make(&c, err, errlen) : NULL;
+    board_state_t *fs = b2 ? sf_get_state(f, b1) : NULL, *rs = fs ? sf_get_state(f, b1) : NULL;
+    fclose(f);
+    if (!rs) {
+        if (b2) snprintf(err, errlen, "the file is cut short, or made by another version of the simulator");
+        board_free_state(fs);
+        if (b1) board_destroy(b1);
+        if (b2) board_destroy(b2);
+        return NULL;
+    }
+    /* The pointers, from the new board. */
+    char plugged[sizeof(b1->plugged)];
+    snprintf(plugged, sizeof(plugged), "%s", b1->plugged);
+    memset(b1->plugged, 0, sizeof(b1->plugged));
+    memset(b2->plugged, 0, sizeof(b2->plugged));
+    board_state_t *s1 = board_save_state(b1), *s2 = board_save_state(b2);
+    uint64_t lo, hi;
+    sf_program(&lo, &hi);
+    (void)base;                 /* where the program was: its pointers all come from the new board now */
+    sf_forget_caches(b1, fs);
+    sf_forget_caches(b1, rs);
+    sf_forget_caches(b1, s1);
+    sf_forget_caches(b1, s2);
+    sf_blob_t bf[SF_NBLOBS], br[SF_NBLOBS], b1l[SF_NBLOBS], b2l[SF_NBLOBS];
+    sf_blobs(b1, fs, bf);
+    sf_blobs(b1, rs, br);
+    sf_blobs(b1, s1, b1l);
+    sf_blobs(b1, s2, b2l);
+    int bad = 0;
+    for (int i = 0; i < SF_NBLOBS - 1; i++)
+        bad += sf_relocate(*br[i].p, *bf[i].p, *b1l[i].p, *b2l[i].p, br[i].n, lo, hi);
+    /* The parts' states one by one: each starts on a word of its own. */
+    size_t at = 0;
+    for (int i = 0; i < b1->sim.nparts; i++) {
+        const part_t *p = &b1->sim.parts[i];
+        if (!p->state) continue;
+        bad += sf_relocate(rs->states + at, fs->states + at, s1->states + at, s2->states + at, p->state_size, lo, hi);
+        at += p->state_size;
+    }
+    board_free_state(fs);
+    board_free_state(s1);
+    board_free_state(s2);
+    board_destroy(b2);
+    if (bad) {
+        snprintf(err, errlen, "made by another version of the simulator, or altered (%d words of the machine "
+                 "don't fit this one): it can't be loaded", bad);
+        board_free_state(rs);
+        board_destroy(b1);
+        return NULL;
+    }
+    board_load_state(b1, rs);
+    snprintf(b1->plugged, sizeof(b1->plugged), "%s", plugged);
+    board_free_state(rs);
+    return b1;
 }
 
 void board_run(board_t *b, int cycles) { b->m->run(b, cycles); }
@@ -316,11 +1079,23 @@ void board_frame_update(board_t *b, uint32_t us) { b->m->frame_update(b, us); }
 void board_monitor(board_t *b, uint32_t *out) { b->m->monitor(b, out); }
 
 bool board_load(board_t *b, const char *path, bool run, char *msg, int msglen) {
-    return b->m->load(b, path, run, msg, msglen);
+    uint32_t was = b->config_id;
+    bool ok = b->m->load(b, path, run, msg, msglen);
+    if (ok && b->config_id != was) snprintf(b->plugged, sizeof(b->plugged), "%s", path);
+    return ok;
 }
 
 const char *board_cart_name(board_t *b) { return b->m->cart_name ? b->m->cart_name(b) : NULL; }
-void board_remove_cart(board_t *b) { if (b->m->remove_cart) b->m->remove_cart(b); }
+void board_remove_cart(board_t *b) {
+    if (b->m->remove_cart) b->m->remove_cart(b);
+    b->plugged[0] = 0;
+}
+int board_cart_banks(board_t *b) { return b->m->cart_banks ? b->m->cart_banks(b) : 0; }
+int board_cart_bank(board_t *b) { return b->m->cart_bank ? b->m->cart_bank(b) : 0; }
+const char *board_cart_bank_info(board_t *b, int bank) {
+    return b->m->cart_bank_info ? b->m->cart_bank_info(b, bank) : "";
+}
+void board_set_cart_bank(board_t *b, int bank) { if (b->m->set_cart_bank) b->m->set_cart_bank(b, bank); }
 
 /* ------------------------------------------------------------------------ */
 /* Faults                                                                    */
@@ -332,6 +1107,7 @@ void board_set_pin_fault(board_t *b, int pin, int fault) {
 }
 
 void board_set_removed(board_t *b, int part, bool removed) {
+    if (b->sim.parts[part].unfitted) return;    /* nothing there to put back */
     b->sim.parts[part].removed = removed;
     board_rebuild(b);
 }
@@ -341,6 +1117,96 @@ void board_set_rfault(board_t *b, int part, int rfault) {
     board_rebuild(b);
 }
 
+void board_set_mem_fault(board_t *b, int part, const mem_fault_t *mf) {
+    part_t *p = &b->sim.parts[part];
+    p->mfault = mf->kind;
+    p->mf_bit = mf->bit;
+    p->mf_val = mf->val;
+    p->mf_addr = mf->addr;
+    board_rebuild(b);
+}
+
+bool board_parse_mem_fault(board_t *b, int part, const char *what, mem_fault_t *mf) {
+    int bits;
+    bool dram;
+    int lines = part >= 0 ? part_memory(&b->sim.parts[part], &bits, &dram) : 0;
+    unsigned n, v, addr, mask = 1;
+    char end;
+    memset(mf, 0, sizeof(*mf));
+    if (!lines) return false;
+    if (sscanf(what, "data%u=%u%c", &n, &v, &end) == 2) {
+        if (n >= (unsigned)bits || v > 1) return false;
+        *mf = (mem_fault_t){ MF_DATA, (uint8_t)n, (uint8_t)v, 0 };
+    } else if (sscanf(what, "addr%u%c", &n, &end) == 1) {
+        if (n >= (unsigned)lines) return false;
+        *mf = (mem_fault_t){ MF_ADDR, (uint8_t)n, 0, 0 };
+    } else if (!strncmp(what, "flip=", 5) || !strncmp(what, "flip@", 5)) {
+        int r = sscanf(what + 5, "%x%c", &addr, &end);
+        if (r < 1 || (r == 2 && end != '^')) return false;
+        if (r == 2 && sscanf(strchr(what, '^') + 1, "%x%c", &mask, &end) != 1) return false;
+        if (what[4] == '@') {       /* a CPU address: where it is in this chip */
+            int cell = b->m->ram_cell && addr <= 0xFFFF ? b->m->ram_cell(b, part, (uint16_t)addr) : -1;
+            if (cell < 0) return false;
+            addr = (unsigned)cell;
+        }
+        if (!mask || mask >= 1u << bits) return false;
+        bool fits = dram ? (addr >> 8) < 1u << lines && (addr & 255) < 1u << lines : addr < 1u << lines;
+        if (!fits) return false;
+        *mf = (mem_fault_t){ MF_FLIP, 0, (uint8_t)mask, addr };
+    } else if (!strcmp(what, "weak")) {
+        if (!dram) return false;
+        mf->kind = MF_WEAK;
+    } else {
+        return !strcmp(what, "ok");     /* MF_OK */
+    }
+    return true;
+}
+
+void board_mem_fault_spec(const mem_fault_t *mf, char *out, int len) {
+    switch (mf->kind) {
+    case MF_DATA: snprintf(out, (size_t)len, "data%d=%d", mf->bit, mf->val); break;
+    case MF_ADDR: snprintf(out, (size_t)len, "addr%d", mf->bit); break;
+    case MF_FLIP:
+        if (mf->val == 1) snprintf(out, (size_t)len, "flip=%04X", (unsigned)mf->addr);
+        else snprintf(out, (size_t)len, "flip=%04X^%02X", (unsigned)mf->addr, mf->val);
+        break;
+    case MF_WEAK: snprintf(out, (size_t)len, "weak"); break;
+    default:      snprintf(out, (size_t)len, "ok"); break;
+    }
+}
+
+void board_mem_fault_desc(board_t *b, int part, const mem_fault_t *mf, char *out, int len) {
+    bool dram;
+    int bits;
+    part_memory(&b->sim.parts[part], &bits, &dram);
+    switch (mf->kind) {
+    case MF_DATA:
+        if (bits == 1) snprintf(out, (size_t)len, "dead: reads %d at every address", mf->val);
+        else snprintf(out, (size_t)len, "data bit D%d dead: reads %d at every address", mf->bit, mf->val);
+        break;
+    case MF_ADDR:
+        snprintf(out, (size_t)len, "address line A%d dead inside the chip: half of it is never reached, "
+                 "the other half answers twice", mf->bit);
+        break;
+    case MF_FLIP:
+        if (dram)
+            snprintf(out, (size_t)len, "one bad cell (row $%02X, column $%02X) reads back wrong",
+                     (unsigned)mf->addr >> 8, (unsigned)mf->addr & 255);
+        else if (bits == 4)
+            snprintf(out, (size_t)len, "one bad cell at $%03X reads back wrong (bits $%X inverted)",
+                     (unsigned)mf->addr, mf->val);
+        else
+            snprintf(out, (size_t)len, "byte $%04X corrupted (bits $%02X inverted)", (unsigned)mf->addr, mf->val);
+        break;
+    case MF_WEAK:
+        snprintf(out, (size_t)len, "weak cells: about 1 in 64 forget what was written (read 0)");
+        break;
+    default:
+        snprintf(out, (size_t)len, "working");
+        break;
+    }
+}
+
 /* The RESET button: not a fault, a switch (see board_rebuild). */
 void board_set_reset_button(board_t *b, bool pressed) {
     if (b->reset_button == pressed) return;
@@ -348,15 +1214,81 @@ void board_set_reset_button(board_t *b, bool pressed) {
     board_rebuild(b);
 }
 
-/* Text form of a fault, used by the command line:
- *   U17:removed  U17.18:gnd  U17.18:vcc  U17.18:open  R51:open  R51:short
- * and the RESET button: RESET:pressed  RESET:released */
+int board_find_bridge(board_t *b, int pin_a, int pin_b) {
+    for (int i = 0; i < b->nbridges; i++)
+        if ((b->bridge[i][0] == pin_a && b->bridge[i][1] == pin_b) ||
+            (b->bridge[i][0] == pin_b && b->bridge[i][1] == pin_a)) return i;
+    return -1;
+}
+
+bool board_set_bridge(board_t *b, int pin_a, int pin_b, bool on) {
+    int i = board_find_bridge(b, pin_a, pin_b);
+    if (on) {
+        if (i >= 0) return true;
+        if (b->nbridges == BOARD_MAX_BRIDGES || pin_a == pin_b) return false;
+        /* Lower pin number first, so the spec reads "11-12". */
+        if (b->sim.pins[pin_a].number > b->sim.pins[pin_b].number) { int t = pin_a; pin_a = pin_b; pin_b = t; }
+        b->bridge[b->nbridges][0] = pin_a;
+        b->bridge[b->nbridges][1] = pin_b;
+        b->nbridges++;
+    } else {
+        if (i < 0) return true;
+        b->bridge[i][0] = b->bridge[b->nbridges - 1][0];
+        b->bridge[i][1] = b->bridge[b->nbridges - 1][1];
+        b->nbridges--;
+    }
+    board_rebuild(b);
+    return true;
+}
+
+int board_dip_neighbor(board_t *b, int pin, int dir) {
+    const sim_t *s = &b->sim;
+    const part_t *p = &s->parts[s->pins[pin].part];
+    int n = p->npins, num = s->pins[pin].number, other = num + dir;
+    /* A DIP: pins 1..N, N even, every number there. */
+    if (p->kind != PART_IC || n < 4 || n % 2 || n >= (int)(sizeof(p->pinmap) / sizeof(p->pinmap[0])) ||
+        num < 1 || num > n) return -1;
+    if (other < 1 || other > n || (num <= n / 2) != (other <= n / 2)) return -1;
+    return p->pinmap[other];
+}
+
+void board_bridge_desc(board_t *b, int pin_a, int pin_b, char *out, int len) {
+    const sim_t *s = &b->sim;
+    if (s->pins[pin_a].number > s->pins[pin_b].number) { int t = pin_a; pin_a = pin_b; pin_b = t; }
+    int part = s->pins[pin_a].part;
+    const part_t *p = &s->parts[part];
+    /* The signals: the net's name, or the pin's when the net has none of
+     * its own ("Net-(U13-Pad11)"). */
+    const char *what[2];
+    for (int k = 0; k < 2; k++) {
+        int pi = k ? pin_b : pin_a, net = s->pins[pi].net;
+        const char *nn = net >= 0 ? s->nets[net].name : NULL, *pn = sim_pin_name(s, pi);
+        what[k] = nn && strncmp(nn, "Net-", 4) ? nn : pn ? pn : nn ? nn : "?";
+    }
+    snprintf(out, (size_t)len, "%s %s pins %d-%d shorted: %s and %s bridged", p->ref,
+             p->name ? p->name : board_part_label(b, part), s->pins[pin_a].number, s->pins[pin_b].number,
+             what[0], what[1]);
+}
+
+/* Text form of a fault, used by the command line (see board.h). */
 bool board_apply_fault_spec(board_t *b, const char *spec) {
     if (!strcmp(spec, "RESET:pressed") || !strcmp(spec, "RESET:released")) {
         board_set_reset_button(b, !strcmp(spec, "RESET:pressed"));
         return true;
     }
-    char ref[16] = {0}, pad[8] = {0}, what[16] = {0};
+    char ref[16] = {0}, pad[8] = {0}, pad2[8] = {0}, what[16] = {0};
+    /* A solder bridge between two legs of a part: U13.11-12:short */
+    if (sscanf(spec, "%15[^.:].%7[^-:]-%7[^:]:%15s", ref, pad, pad2, what) == 4) {
+        int part = sim_find_part(&b->sim, ref);
+        if (part < 0) return false;
+        int pa = board_pad_pin(b, part, pad), pb = board_pad_pin(b, part, pad2);
+        if (pa < 0 || pb < 0 || pa == pb) return false;
+        if (strcmp(what, "short") && strcmp(what, "ok")) return false;
+        /* Only legs next to each other (not across the end of the chip). */
+        if (board_dip_neighbor(b, pa, -1) != pb && board_dip_neighbor(b, pa, +1) != pb) return false;
+        return board_set_bridge(b, pa, pb, !strcmp(what, "short"));
+    }
+    pad[0] = 0;
     if (sscanf(spec, "%15[^.:].%7[^:]:%15s", ref, pad, what) != 3 &&
         sscanf(spec, "%15[^:]:%15s", ref, what) != 2) return false;
     int part = sim_find_part(&b->sim, ref);
@@ -364,11 +1296,18 @@ bool board_apply_fault_spec(board_t *b, const char *spec) {
     if (pad[0]) {       /* a pin, by its pad name: "18", or "B" on CN6 */
         int pi = board_pad_pin(b, part, pad);
         if (pi < 0) return false;
+        bool out = !strcmp(what, "out0") || !strcmp(what, "out1");
+        if (out && !(b->sim.pins[pi].flags & PIN_OUT)) return false;     /* not an output */
         int f = !strcmp(what, "gnd") ? PF_GND : !strcmp(what, "vcc") ? PF_VCC :
-                !strcmp(what, "open") ? PF_OPEN : PF_OK;
+                !strcmp(what, "open") ? PF_OPEN : !strcmp(what, "out0") ? PF_OUT0 :
+                !strcmp(what, "out1") ? PF_OUT1 : PF_OK;
         board_set_pin_fault(b, pi, f);
     } else if (!strcmp(what, "removed") || !strcmp(what, "present")) {
         board_set_removed(b, part, !strcmp(what, "removed"));
+    } else if (part_memory(&b->sim.parts[part], NULL, NULL) && strcmp(what, "open") && strcmp(what, "short")) {
+        mem_fault_t mf;
+        if (!board_parse_mem_fault(b, part, what, &mf)) return false;
+        board_set_mem_fault(b, part, &mf);
     } else {
         board_set_rfault(b, part, !strcmp(what, "open") ? RF_OPEN : !strcmp(what, "short") ? RF_SHORT : RF_OK);
     }
@@ -378,7 +1317,12 @@ bool board_apply_fault_spec(board_t *b, const char *spec) {
 void board_clear_faults(board_t *b) {
     sim_t *s = &b->sim;
     for (int i = 0; i < s->npins; i++) sim_set_pin_fault(s, i, PF_OK);
-    for (int i = 0; i < s->nparts; i++) { s->parts[i].removed = false; s->parts[i].rfault = RF_OK; }
+    for (int i = 0; i < s->nparts; i++) {
+        s->parts[i].removed = s->parts[i].unfitted;
+        s->parts[i].rfault = RF_OK;
+        s->parts[i].mfault = MF_OK;
+    }
+    b->nbridges = 0;
     board_rebuild(b);
 }
 

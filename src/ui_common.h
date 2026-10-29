@@ -30,6 +30,40 @@
 #define COL_TRACE     nk_rgb(90, 255, 120)
 #define COL_HARNESS   nk_rgb(150, 160, 255)
 
+/* Light or dark windows (ui_set_theme(), the Theme row of the controls).
+ * The board, the monitor, the scope screen and the chips keep their own
+ * colors either way: only the windows and the space around them change. */
+typedef struct {
+    bool light;
+    struct nk_color bg;                 /* behind the board and the windows */
+    struct nk_color row_sel, row_hover; /* the file browser's list */
+    struct nk_color line_hover;         /* a line of the fault list */
+} theme_t;
+extern theme_t g_theme;
+
+/* A color for text or a line on a window. The colors above are made for
+ * a dark one; on a light one, a light grey becomes as dark as it was
+ * light, and a bright color is darkened until it reads. Dark colors stay,
+ * so ink(ink(c)) == ink(c). */
+static inline struct nk_color ink(struct nk_color c) {
+    if (!g_theme.light) return c;
+    float l = (0.299f * c.r + 0.587f * c.g + 0.114f * c.b) / 255;
+    int hi = c.r > c.g ? (c.r > c.b ? c.r : c.b) : (c.g > c.b ? c.g : c.b);
+    int lo = c.r < c.g ? (c.r < c.b ? c.r : c.b) : (c.g < c.b ? c.g : c.b);
+    if (hi - lo < 40) {
+        if (l <= 0.5f) return c;
+        nk_byte v = (nk_byte)((1 - l) * 255);
+        return nk_rgba(v, v, v, c.a);
+    }
+    if (l <= 0.42f) return c;
+    float k = 0.42f / l;
+    return nk_rgba((int)(c.r * k), (int)(c.g * k), (int)(c.b * k), c.a);
+}
+
+/* Colored labels are always on a window. */
+#define nk_label_colored(ctx, txt, align, c) nk_label_colored(ctx, txt, align, ink(c))
+#define nk_label_colored_wrap(ctx, txt, c) nk_label_colored_wrap(ctx, txt, ink(c))
+
 /* Chip names are colored by role (see ROLE_* in board.h). */
 static const struct nk_color role_color[] = {
     [ROLE_RAM]   = { 120, 195, 255, 255 },    /* the 8 DRAMs */
@@ -89,16 +123,23 @@ static inline const char *state_name(int st) {
     }
 }
 
+/* "Hide fault markers": the board, the inspector and the fault list don't
+ * show what is broken (for practice: find it like on a real board). */
+extern bool g_hide_faults;
+
 static inline const char *pin_fault_name(int f) {
     switch (f) {
     case PF_OPEN: return "floating (open)";
     case PF_GND: return "shorted to GND";
     case PF_VCC: return "shorted to +5V";
+    case PF_OUT0: return "output dead, stuck low";
+    case PF_OUT1: return "output dead, stuck high";
     default: return "working";
     }
 }
 
-/* Short description of a pin: "U17.18 /CASRAM (PLA)", "CN4.3 ATN (SERIAL)". */
+/* Short description of a pin: "U17.18 /CASRAM (PLA)", "CN4.3 ATN (SERIAL)",
+ * "C54.1 (capacitor .1)". */
 static inline void pin_desc(board_t *b, int pin, char *buf, size_t len) {
     const sim_t *s = &b->sim;
     const pin_t *p = &s->pins[pin];
@@ -110,8 +151,22 @@ static inline void pin_desc(board_t *b, int pin, char *buf, size_t len) {
     else if (func)
         snprintf(buf, len, "%s.%s %s (%s)", part->ref, b->sim.bd->pads[pin].name, func,
                  board_connector_name(b, p->part));
+    else if (part->kind != PART_CONNECTOR)
+        snprintf(buf, len, "%s.%s (%s %s)", part->ref, b->sim.bd->pads[pin].name, board_part_kind_name(b, p->part),
+                 part->name ? part->name : "");
     else
         snprintf(buf, len, "%s.%s %s", part->ref, b->sim.bd->pads[pin].name, name ? name : "");
+}
+
+/* "Repair records with U7 faulty (3)": the records window showing the
+ * real repairs of chip PART (diagnose.c). True if clicked. */
+bool chip_records_button(struct nk_context *ctx, int part);
+
+/* TEXT on one line: a chip label's line breaks ("4164\nbit D0") as spaces. */
+static inline const char *one_line(char *out, size_t len, const char *text) {
+    snprintf(out, len, "%s", text);
+    for (char *c = out; *c; c++) if (*c == '\n') *c = ' ';
+    return out;
 }
 
 static inline const char *pin_net_name(board_t *b, int pin) {

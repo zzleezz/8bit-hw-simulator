@@ -8,3 +8,14 @@ chips/codegen/__pycache__/
 tests/z80/wave
 tests/z80/zex
 tests/z80/roms/
+
+# Made on your own PC: not part of the source
+fault_atlas.bin
+fault_atlas.bin.bak-*
+repairs.bin
+*.hwstate
+ui-debug.log
+match_test/
+c64-hw-sim-*.exe
+tools/__pycache__/
+WORK_SUMMARY.md

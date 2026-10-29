@@ -27,6 +27,11 @@ typedef struct {
 } board_data_t;
 
 extern const board_data_t bd_c64;   /* c64_board_data.c */
-extern const board_data_t bd_zx48;  /* zx48_board_data.c */
+extern const board_data_t bd_c64c;  /* c64c_board_data.c (ASSY 250469) */
+extern const board_data_t bd_zx48;  /* zx48_board_data.c (Issue 3B) */
+extern const board_data_t bd_zx48i2;    /* zx48i2_board_data.c (Issue 2) */
+extern const board_data_t bd_zx48i1;    /* zx48i1_board_data.c (Issue 1) */
+extern const board_data_t bd_zx48i4b;   /* zx48i4b_board_data.c (Issue 4B) */
+extern const board_data_t bd_zx48i6a;   /* zx48i6a_board_data.c (Issue 6A) */
 
 #endif

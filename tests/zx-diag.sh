@@ -20,7 +20,7 @@ run() {     # name frames "expected" faults...
     for f in "$@"; do args="$args --fault $f"; done
     {
         echo "EXPECTED: $expected"
-        C64HW_TYPE=$KEYS $BIN --machine zx48 $ROM --headless $frames --shot "$OUT/$name.png" $args
+        C64HW_TYPE=$KEYS $BIN --machine ${MACHINE:-zx48} $ROM --headless $frames --shot "$OUT/$name.png" $args
     } > "$OUT/$name.txt" 2>&1 &
 }
 
@@ -29,6 +29,12 @@ run lram_ic8 1500 "lower RAM: RAM FAIL 2, the stripe of bit 2 red (IC8 is D2)" I
 run lram_ic13 1500 "lower RAM: RAM FAIL 7, the stripe of bit 7 red (IC13 is D7)" IC13:removed
 run uram_ic17 3000 "upper RAM tests FAIL, failures found in bit 2, red border (IC17 is D2)" IC17:removed
 run uram_ic22 3000 "upper RAM tests FAIL, failures found in bit 7, red border (IC22 is D7)" IC22:removed
+wait
+# The Issue 6A: the same chips, the ZX8401 in the glue's place.
+MACHINE=zx48i6a
+run i6a_healthy 3000 "every test PASS, 48K RAM Tests Passed, Testing Completed"
+run i6a_lram_ic8 1500 "lower RAM: RAM FAIL 2, the stripe of bit 2 red (IC8 is D2)" IC8:removed
+run i6a_uram_ic17 3000 "upper RAM tests FAIL, failures found in bit 2, red border (IC17 is D2)" IC17:removed
 wait
 for f in "$OUT"/*.txt; do
     echo "== $(basename "$f" .txt): $OUT/$(basename "$f" .txt).png"

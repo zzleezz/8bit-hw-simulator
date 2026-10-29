@@ -24,6 +24,7 @@ void part_set_type(sim_t *s, int part, const part_type_t *t) {
     p->reset = t->reset;
     p->tech = (uint8_t)t->tech;
     if (t->state_size) p->state = calloc(1, t->state_size);
+    p->state_size = (uint32_t)t->state_size;
     /* Parse "NAME:K NAME:K ..." into pin names and flags. */
     char *copy = strdup(t->pins), *save = NULL;
     int number = 1;
@@ -44,8 +45,8 @@ void part_set_type(sim_t *s, int part, const part_type_t *t) {
             default: flags = 0; break;
             }
         }
-        int pi = p->pinmap[number < 48 ? number : 0];
-        if (number < 48 && pi >= 0) {
+        int pi = p->pinmap[number < PIN_NUMBERS ? number : 0];
+        if (number < PIN_NUMBERS && pi >= 0) {
             s->pin_names[pi] = strdup(tok);
             s->pins[pi].flags = flags;
         }
@@ -66,16 +67,18 @@ void part_drive_bus(sim_t *s, part_t *p, const int *pins, int n, unsigned v, boo
 /* The big chips: only pin descriptions here, the models are in board.c     */
 /* ------------------------------------------------------------------------ */
 
-const part_type_t PT_6510 = { "6510 CPU",
-    "PHI0:M RDY:m /IRQ:m /NMI:m AEC:M VCC:P A0:O A1:O A2:O A3:O A4:O A5:O A6:O A7:O "
-    "A8:O A9:O A10:O A11:O A12:O A13:O GND:P A14:O A15:O P5:B P4:B P3:B P2:B P1:B P0:B "
-    "D7:B D6:B D5:B D4:B D3:B D2:B D1:B D0:B R/W:O PHI2:O /RES:m", 0, 0, 0, 0, TECH_NMOS };
+#define PINS_6510 \
+    "PHI0:M RDY:m /IRQ:m /NMI:m AEC:M VCC:P A0:O A1:O A2:O A3:O A4:O A5:O A6:O A7:O " \
+    "A8:O A9:O A10:O A11:O A12:O A13:O GND:P A14:O A15:O P5:B P4:B P3:B P2:B P1:B P0:B " \
+    "D7:B D6:B D5:B D4:B D3:B D2:B D1:B D0:B R/W:O PHI2:O /RES:m"
+const part_type_t PT_6510 = { "6510 CPU", PINS_6510, 0, 0, 0, 0, TECH_NMOS };
 
-const part_type_t PT_6569 = { "6569 VIC-II",
-    "D6:B D5:B D4:B D3:B D2:B D1:B D0:B /IRQ:O LP:m /CS:m R/W:m BA:O VDD:P COLOR:O "
-    "S/LUM:O AEC:O PHI0:O /RAS:O /CAS:O GND:P PHICOL:m PHIIN:m A11:O A0/A8:B A1/A9:B "
-    "A2/A10:B A3/A11:B A4/A12:B A5/A13:B A6:O A7:O A8:O A9:O A10:O D11:B D10:B D9:B "
-    "D8:B D7:B VCC:P", 0, 0, 0, 0, TECH_NMOS };
+#define PINS_6569 \
+    "D6:B D5:B D4:B D3:B D2:B D1:B D0:B /IRQ:O LP:m /CS:m R/W:m BA:O VDD:P COLOR:O " \
+    "S/LUM:O AEC:O PHI0:O /RAS:O /CAS:O GND:P PHICOL:m PHIIN:m A11:O A0/A8:B A1/A9:B " \
+    "A2/A10:B A3/A11:B A4/A12:B A5/A13:B A6:O A7:O A8:O A9:O A10:O D11:B D10:B D9:B " \
+    "D8:B D7:B VCC:P"
+const part_type_t PT_6569 = { "6569 VIC-II", PINS_6569, 0, 0, 0, 0, TECH_NMOS };
 
 const part_type_t PT_6526 = { "6526 CIA",
     "GND:P PA0:B PA1:B PA2:B PA3:B PA4:B PA5:B PA6:B PA7:B PB0:B PB1:B PB2:B PB3:B "
@@ -83,10 +86,11 @@ const part_type_t PT_6526 = { "6526 CIA",
     "D7:B D6:B D5:B D4:B D3:B D2:B D1:B D0:B /RES:m RS3:m RS2:m RS1:m RS0:m SP:O CNT:O",
     0, 0, 0, 0, TECH_NMOS };
 
-const part_type_t PT_6581 = { "6581 SID",
-    "CAP1A:O CAP1B:O CAP2A:O CAP2B:O /RES:m PHI2:m R/W:m /CS:m A0:m A1:m A2:m A3:m A4:m "
-    "GND:P D0:B D1:B D2:B D3:B D4:B D5:B D6:B D7:B POTY:m POTX:m VCC:P EXTIN:m "
-    "AUDIO:O VDD:P", 0, 0, 0, 0, TECH_NMOS };
+#define PINS_6581 \
+    "CAP1A:O CAP1B:O CAP2A:O CAP2B:O /RES:m PHI2:m R/W:m /CS:m A0:m A1:m A2:m A3:m A4:m " \
+    "GND:P D0:B D1:B D2:B D3:B D4:B D5:B D6:B D7:B POTY:m POTX:m VCC:P EXTIN:m " \
+    "AUDIO:O VDD:P"
+const part_type_t PT_6581 = { "6581 SID", PINS_6581, 0, 0, 0, 0, TECH_NMOS };
 
 /* ------------------------------------------------------------------------ */
 /* 82S100 PLA (U17)                                                          */
@@ -165,12 +169,27 @@ unsigned pla_read_inputs(sim_t *s, part_t *p) {
     return in;
 }
 
-unsigned pla_logic(unsigned in) {
+static unsigned pla_logic_terms(unsigned in) {
     unsigned any = 0;
     for (int t = 0; t < pla_nterms; t++)
         if ((in & pla_terms[t].mask) == pla_terms[t].value) any |= pla_terms[t].outputs;
     /* The selects are active low; /CASRAM is high when RAM is NOT selected. */
     return (any ^ ~(1u << PO_CASRAM)) & 0xFF;
+}
+
+/* The PLA is evaluated on almost every bus change: look its outputs up in
+ * a table of all 2^16 input combinations, built from the terms above the
+ * first time it is needed, instead of matching every term each time.
+ * Boards running in parallel threads share the table: call pla_logic()
+ * once before starting them (see atlas.c). */
+unsigned pla_logic(unsigned in) {
+    static uint8_t table[1u << PLA_NIN];
+    static bool ready;
+    if (!ready) {
+        for (unsigned i = 0; i < (1u << PLA_NIN); i++) table[i] = (uint8_t)pla_logic_terms(i);
+        ready = true;
+    }
+    return table[in];
 }
 
 static void pla_eval(sim_t *s, part_t *p) {
@@ -186,24 +205,50 @@ const part_type_t PT_82S100 = { "82S100 PLA",
     "/GAME:T /EXROM:T R/W:T /AEC:T BA:T A12:T VCC:P", pla_eval, 0, 0, 0, TECH_TTL };
 
 /* ------------------------------------------------------------------------ */
+/* Memory faults (part_t.mfault, see sim.h)                                  */
+/* ------------------------------------------------------------------------ */
+
+/* The address the cells of a chip see: a dead address line reads 0. */
+static inline unsigned mem_addr(const part_t *p, unsigned addr) {
+    return p->mfault == MF_ADDR ? addr & ~(1u << p->mf_bit) : addr;
+}
+
+/* What a faulty chip returns for the data 'v' stored at 'addr'. */
+static unsigned mem_read(const part_t *p, unsigned addr, unsigned v) {
+    switch (p->mfault) {
+    case MF_DATA: return p->mf_val ? v | 1u << p->mf_bit : v & ~(1u << p->mf_bit);
+    case MF_FLIP: return addr == p->mf_addr ? v ^ p->mf_val : v;
+    case MF_WEAK: return (addr * 2654435761u) >> 26 ? v : 0;
+    default:      return v;
+    }
+}
+
+/* ------------------------------------------------------------------------ */
 /* ROMs: 2364 (8K, BASIC and KERNAL) and 2332 (4K, characters)               */
 /* ------------------------------------------------------------------------ */
 
 static const int rom_addr_pins[13] = { 8, 7, 6, 5, 4, 3, 2, 1, 23, 22, 19, 18, 21 };
 static const int rom_data_pins[8] = { 9, 10, 11, 13, 14, 15, 16, 17 };
 
+static unsigned rom_byte(const part_t *p, const rom_state_t *st, unsigned addr) {
+    if (!st->data) return 0xFF;
+    if (!p->mfault) return st->data[addr];
+    addr = mem_addr(p, addr);
+    return mem_read(p, addr, st->data[addr]);
+}
+
 static void rom2364_eval(sim_t *s, part_t *p) {
     rom_state_t *st = p->state;
     bool selected = !pin_in(s, p, 20);
     unsigned addr = selected ? part_read_bus(s, p, rom_addr_pins, 13) : 0;
-    part_drive_bus_cached(s, p, rom_data_pins, 8, st->data ? st->data[addr] : 0xFF, selected, &st->out_cache);
+    part_drive_bus_cached(s, p, rom_data_pins, 8, rom_byte(p, st, addr), selected, &st->out_cache);
 }
 
 static void rom2332_eval(sim_t *s, part_t *p) {
     rom_state_t *st = p->state;
     bool selected = !pin_in(s, p, 20) && pin_in(s, p, 21);   /* CS1 low, CS2 high */
     unsigned addr = selected ? part_read_bus(s, p, rom_addr_pins, 12) : 0;
-    part_drive_bus_cached(s, p, rom_data_pins, 8, st->data ? st->data[addr] : 0xFF, selected, &st->out_cache);
+    part_drive_bus_cached(s, p, rom_data_pins, 8, rom_byte(p, st, addr), selected, &st->out_cache);
 }
 
 const part_type_t PT_2364 = { "2364 ROM",
@@ -224,14 +269,16 @@ static const int sram_io_pins[4] = { 14, 13, 12, 11 };
 static void sram_eval(sim_t *s, part_t *p) {
     sram_state_t *st = p->state;
     bool read = !pin_in(s, p, 8) && pin_in(s, p, 10);         /* /CS low, /WE high */
-    unsigned addr = read ? part_read_bus(s, p, sram_addr_pins, 10) : 0;
-    part_drive_bus_cached(s, p, sram_io_pins, 4, st->cells[addr], read, &st->out_cache);
+    unsigned addr = read ? mem_addr(p, part_read_bus(s, p, sram_addr_pins, 10)) : 0;
+    unsigned v = p->mfault ? mem_read(p, addr, st->cells[addr]) & 15 : st->cells[addr];
+    part_drive_bus_cached(s, p, sram_io_pins, 4, v, read, &st->out_cache);
 }
 
 static void sram_commit(sim_t *s, part_t *p) {
     sram_state_t *st = p->state;
     if (!pin_in(s, p, 8) && !pin_in(s, p, 10))                 /* /CS low, /WE low */
-        st->cells[part_read_bus(s, p, sram_addr_pins, 10)] = (uint8_t)part_read_bus(s, p, sram_io_pins, 4);
+        st->cells[mem_addr(p, part_read_bus(s, p, sram_addr_pins, 10))] =
+            (uint8_t)part_read_bus(s, p, sram_io_pins, 4);
 }
 
 static void sram_reset(sim_t *s, part_t *p) {
@@ -260,24 +307,35 @@ static void dram_eval(sim_t *s, part_t *p) {
     pin_out(s, p, 14, st->out_en ? DRV_BIT(st->out_bit) : DRV_Z);
 }
 
-/* A DRAM cycle with 'bits' address lines. A 4532 is a 4164 sold with one
- * good half: with 'bad_row7' the rows with A7 high (the half a TI 4532-3
- * doesn't use) don't store anything and read back garbage. */
-static void dram_cycle(sim_t *s, part_t *p, int bits, bool bad_row7) {
+/* A DRAM cycle with 'bits' address lines. A 4532 or a 3732 is a 4164
+ * sold with one good half: the cells of the other half (by 'half', below)
+ * don't store anything and read back garbage. */
+enum {
+    HALF_ALL,           /* a whole chip (4164, 4116) */
+    HALF_ROW7_LOW,      /* the rows with A7 low: TI 4532-3 */
+    HALF_ROW7_HIGH,     /* the rows with A7 high: TI 4532-4 */
+    HALF_COL7_LOW,      /* the columns with A7 low: OKI 3732-L */
+    HALF_COL7_HIGH,     /* the columns with A7 high: OKI 3732-H */
+};
+static void dram_cycle(sim_t *s, part_t *p, int bits, int half) {
     dram_state_t *st = p->state;
     int ras = pin_in(s, p, 4), cas = pin_in(s, p, 15);
     uint8_t out_en = st->out_en, out_bit = st->out_bit;
-    if (st->ras_prev && !ras) st->row = (uint8_t)part_read_bus(s, p, dram_addr_pins, bits);
+    /* A dead address line inside the chip is dead for the row and the
+     * column alike: they come in through the same buffer. */
+    if (st->ras_prev && !ras) st->row = (uint8_t)mem_addr(p, part_read_bus(s, p, dram_addr_pins, bits));
     if (st->cas_prev && !cas && !ras) {
-        st->col = (uint8_t)part_read_bus(s, p, dram_addr_pins, bits);
+        st->col = (uint8_t)mem_addr(p, part_read_bus(s, p, dram_addr_pins, bits));
         int cell = (st->row << 8) | st->col;
-        bool bad = bad_row7 && (st->row & 0x80);
+        bool bad = half == HALF_ROW7_LOW ? (st->row & 0x80) : half == HALF_ROW7_HIGH ? !(st->row & 0x80) :
+                   half == HALF_COL7_LOW ? (st->col & 0x80) : half == HALF_COL7_HIGH ? !(st->col & 0x80) : false;
         if (!pin_in(s, p, 3)) {          /* /WE low before /CAS: early write */
             if (!bad) st->cells[cell] = (uint8_t)pin_in(s, p, 2);
             st->out_en = 0;
         } else {                        /* read: Q drives until /CAS rises */
             st->out_en = 1;
             st->out_bit = bad ? (uint8_t)(((unsigned)cell * 2654435761u) >> 31) : st->cells[cell];
+            if (p->mfault) st->out_bit = (uint8_t)(mem_read(p, (unsigned)cell, st->out_bit) & 1);
         }
     }
     /* Q is valid until /CAS rises (it outlives /RAS: the ZX Spectrum's
@@ -288,7 +346,7 @@ static void dram_cycle(sim_t *s, part_t *p, int bits, bool bad_row7) {
     if (st->out_en != out_en || st->out_bit != out_bit) sim_mark_dirty(s, (int)(p - s->parts));
 }
 
-static void dram_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, false); }
+static void dram_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, HALF_ALL); }
 
 /* Power-on pattern used by c64-llm: 64 bytes of $00, then 64 of $FF. With
  * row = A0-A7 and column = A8-A15 the address of a cell is (col << 8) | row. */
@@ -392,8 +450,8 @@ static void cd4066_eval(sim_t *s, part_t *p) {
         int a = part_pin(p, sw[i][0]), b = part_pin(p, sw[i][1]);
         if (a < 0 || b < 0) continue;
         if (pin_in(s, p, sw[i][2])) {
-            drive_t from_a = sim_drive_except(s, a, a);
-            drive_t from_b = sim_drive_except(s, b, b);
+            drive_t from_a = sim_drive_others(s, a);
+            drive_t from_b = sim_drive_others(s, b);
             sim_drive(s, a, from_b);
             sim_drive(s, b, from_a);
         } else {
@@ -478,7 +536,7 @@ const part_type_t PT_MC4044 = { "MC4044 PLL",
  * that side (its own drive excluded), one step weaker. Through two
  * resistors a chip output is only as strong as a pull-up. */
 static drive_t through(sim_t *s, int pin) {
-    drive_t d = sim_drive_except(s, pin, pin);
+    drive_t d = sim_drive_others(s, pin);
     int st = d >> 1;
     if (st >= S_STRONG) return DRIVE(S_RES, d & 1);
     if (st >= S_PULL) return DRIVE(S_PULL, d & 1);
@@ -492,8 +550,9 @@ void resistor_eval(sim_t *s, part_t *p) {
         switch (e->type) {
         case EL_PULLUP:
         case EL_PULLDOWN: {
+            /* Open, or its leg on the supply lifted: it pulls nothing. */
             int level = e->type == EL_PULLUP;
-            drive_t d = p->rfault == RF_OPEN ? DRV_Z :
+            drive_t d = p->rfault == RF_OPEN || s->pins[e->pin_b].fault == PF_OPEN ? DRV_Z :
                         p->rfault == RF_SHORT ? DRIVE(S_SUPPLY, level) : DRIVE(S_PULL, level);
             sim_drive(s, e->pin_a, d);
             break;
@@ -519,7 +578,8 @@ void resistor_eval(sim_t *s, part_t *p) {
             break;
         }
         case EL_DELAY:
-            sim_drive(s, e->pin_b, p->rfault == RF_OPEN ? DRV_Z : DRV_BIT(st->delayed[i]));
+            /* Shorted: a wire, joined by board_rebuild(), with no delay. */
+            sim_drive(s, e->pin_b, p->rfault != RF_OK ? DRV_Z : DRV_BIT(st->delayed[i]));
             break;
         case EL_NPN:
         case EL_FOLLOWER: {
@@ -582,32 +642,88 @@ void element_set_type(sim_t *s, part_t *p, int index, int type) {
 
 /* 4116 dynamic RAM 16K x 1 (the lower 16K, IC6-IC13): a 4164 with seven
  * address lines and three supplies (+12V, +5V, -5V). */
-static void dram4116_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 7, false); }
+static void dram4116_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 7, HALF_ALL); }
 const part_type_t PT_4116 = { "4116",
     "VBB:P D:m /WE:m /RAS:m A0:m A2:m A1:m VDD:P VCC:P A5:m A4:m A3:m A6:m Q:O /CAS:m VSS:P",
     dram_eval, dram4116_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
 
-/* 4532 (TI): a 4164 with one good half, the rows with A7 low (the upper
- * 32K, IC15-IC22; the board's links put A7 low in the row address). */
-static void dram4532_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, true); }
-const part_type_t PT_4532 = { "4532",
-    "NC:O D:m /WE:m /RAS:m A0:m A2:m A1:m VCC:P A7:m A5:m A4:m A3:m A6:m Q:O /CAS:m GND:P",
+/* 4532 (TI) and 3732 (OKI): a 4164 with one good half, the Spectrum's
+ * upper 32K (IC15-IC22). The TI's halves are by the row A7, the OKI's by
+ * the column A7: the board's links put A14 in the other address and the
+ * A7 of the good half in this one (zx48.c). PT_4532 is the TI 4532-3, the
+ * rows with A7 low. */
+#define DRAM_4532_PINS "NC:O D:m /WE:m /RAS:m A0:m A2:m A1:m VCC:P A7:m A5:m A4:m A3:m A6:m Q:O /CAS:m GND:P"
+static void dram4532_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, HALF_ROW7_LOW); }
+static void dram4532_4_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, HALF_ROW7_HIGH); }
+static void dram3732l_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, HALF_COL7_LOW); }
+static void dram3732h_commit(sim_t *s, part_t *p) { dram_cycle(s, p, 8, HALF_COL7_HIGH); }
+const part_type_t PT_4532 = { "4532", DRAM_4532_PINS,
     dram_eval, dram4532_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
+const part_type_t PT_4532_4 = { "4532-4", DRAM_4532_PINS,
+    dram_eval, dram4532_4_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
+const part_type_t PT_3732L = { "3732-L", DRAM_4532_PINS,
+    dram_eval, dram3732l_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
+const part_type_t PT_3732H = { "3732-H", DRAM_4532_PINS,
+    dram_eval, dram3732h_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
+/* A 4164 in the 4532's place (the whole chip works). */
+const part_type_t PT_4164_ZX = { "4164", DRAM_4532_PINS,
+    dram_eval, dram_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
 
-/* 23128 mask ROM 16K x 8 (IC5): the data comes out while /CE, /OE and OE1
- * (pin 27, used as a second chip select) are all low. */
+bool part_is_dram64(const part_t *p) {
+    return p->commit == dram_commit || p->commit == dram4532_commit || p->commit == dram4532_4_commit ||
+           p->commit == dram3732l_commit || p->commit == dram3732h_commit;
+}
+
+/* 16K x 8 mask ROMs (the Spectrum's IC5), two makers, the same pins but
+ * 20 and 27 (their active levels are the customer's: Sinclair's are low):
+ *   Hitachi HN613128: static. Pin 20 CS, 22 OE0, 27 OE1: the data comes
+ *     out while all three are low, from the address of the moment.
+ *   NEC uPD23128: clocked. Pin 20 /CE latches the address when it falls
+ *     (it must go high between reads), 22 OD, 27 CS.
+ * The board's link (JROM1, LNK2) puts /MREQ on pin 20 and /ROMCS on 27
+ * for a NEC, the other way round for a Hitachi. A Hitachi works either
+ * way. A NEC with /ROMCS on /CE sees no edge while the CPU stays in the
+ * ROM (/ROMCS is A14 and A15): it gives the byte it latched at the first
+ * read after the last RAM access, again and again. Both types share the
+ * state, so the option can swap them (zx48.c). */
 static const int rom23128_addr_pins[14] = { 10, 9, 8, 7, 6, 5, 4, 3, 25, 24, 21, 23, 2, 26 };
 static const int rom23128_data_pins[8] = { 11, 12, 13, 15, 16, 17, 18, 19 };
-static void rom23128_eval(sim_t *s, part_t *p) {
-    rom_state_t *st = p->state;
+typedef struct { rom_state_t rom; uint16_t addr; uint8_t ce_prev; } rom23128_state_t;
+static void hn613128_eval(sim_t *s, part_t *p) {
+    rom23128_state_t *st = p->state;
     bool selected = !pin_in(s, p, 20) && !pin_in(s, p, 22) && !pin_in(s, p, 27);
     unsigned addr = selected ? part_read_bus(s, p, rom23128_addr_pins, 14) : 0;
-    part_drive_bus_cached(s, p, rom23128_data_pins, 8, st->data ? st->data[addr] : 0xFF, selected, &st->out_cache);
+    part_drive_bus_cached(s, p, rom23128_data_pins, 8, rom_byte(p, &st->rom, addr), selected,
+                          &st->rom.out_cache);
 }
-const part_type_t PT_23128 = { "23128 ROM",
-    "NC:O A12:M A7:M A6:M A5:M A4:M A3:M A2:M A1:M A0:M D0:O D1:O D2:O GND:P D3:O D4:O D5:O D6:O "
-    "D7:O /CE:M A10:M /OE:M A11:M A9:M A8:M A13:M OE1:M VCC:P", rom23128_eval, 0, 0, sizeof(rom_state_t),
-    TECH_NMOS };
+static void upd23128_eval(sim_t *s, part_t *p) {
+    rom23128_state_t *st = p->state;
+    bool selected = !pin_in(s, p, 20) && !pin_in(s, p, 22) && !pin_in(s, p, 27);
+    part_drive_bus_cached(s, p, rom23128_data_pins, 8, rom_byte(p, &st->rom, st->addr), selected,
+                          &st->rom.out_cache);
+}
+static void upd23128_commit(sim_t *s, part_t *p) {
+    rom23128_state_t *st = p->state;
+    int ce = pin_in(s, p, 20);
+    if (st->ce_prev && !ce) {
+        unsigned addr = part_read_bus(s, p, rom23128_addr_pins, 14);
+        if (addr != st->addr) { st->addr = (uint16_t)addr; sim_mark_dirty(s, (int)(p - s->parts)); }
+    }
+    st->ce_prev = (uint8_t)ce;
+}
+static void rom23128_reset(sim_t *s, part_t *p) {
+    (void)s;
+    rom23128_state_t *st = p->state;
+    st->addr = 0;
+    st->ce_prev = 1;
+}
+#define ROM23128_PINS(ce, oe, cs) \
+    "NC:O A12:M A7:M A6:M A5:M A4:M A3:M A2:M A1:M A0:M D0:O D1:O D2:O GND:P D3:O D4:O D5:O D6:O " \
+    "D7:O " ce ":M A10:M " oe ":M A11:M A9:M A8:M A13:M " cs ":M VCC:P"
+const part_type_t PT_UPD23128 = { "uPD23128 ROM", ROM23128_PINS("/CE", "OD", "CS"), upd23128_eval,
+    upd23128_commit, rom23128_reset, sizeof(rom23128_state_t), TECH_NMOS };
+const part_type_t PT_HN613128 = { "HN613128 ROM", ROM23128_PINS("CS", "OE0", "OE1"), hn613128_eval, 0,
+    rom23128_reset, sizeof(rom23128_state_t), TECH_NMOS };
 
 /* 74LS157: quad 2-to-1 multiplexer. S low selects A, high selects B. With
  * /G high the outputs are low (not off, unlike the 74LS257). */
@@ -635,7 +751,281 @@ const part_type_t PT_74LS32 = { "74LS32",
 const part_type_t PT_74LS00 = { "74LS00",
     "1A:T 1B:T 1Y:O 2A:T 2B:T 2Y:O GND:P 3Y:O 3A:T 3B:T 4Y:O 4A:T 4B:T VCC:P", ls00_eval, 0, 0, 0, TECH_TTL };
 
+/* 74LS04: hex inverter. */
+static void ls04_eval(sim_t *s, part_t *p) {
+    static const int g[6][2] = { {1, 2}, {3, 4}, {5, 6}, {9, 8}, {11, 10}, {13, 12} };
+    for (int i = 0; i < 6; i++) pin_out(s, p, g[i][1], DRV_BIT(!pin_in(s, p, g[i][0])));
+}
+const part_type_t PT_74LS04 = { "74LS04",
+    "1A:T 1Y:O 2A:T 2Y:O 3A:T 3Y:O GND:P 4Y:O 4A:T 5Y:O 5A:T 6Y:O 6A:T VCC:P", ls04_eval, 0, 0, 0, TECH_TTL };
+
+/* ZX8401 (Philips PCF1306P): the Issue 6A's glue in one chip, the 4B's
+ * IC3, IC4 and IC23-IC26 as a drop-in replacement made of 74LS parts
+ * draws it (trastero.speccy.org/cosas/JL/pcf1306p). Four 74LS157
+ * sections each: IC3 and IC4 switch the CPU address onto the lower RAM's
+ * (DMA0-DMA6, by DRASLL: /RAS delayed outside), IC25 and IC26 onto the
+ * upper RAM's (MA0-MA7, MA7 from the type links on TS1 and TS2), by the
+ * select of the 4B's IC23 and IC24: high (the row) until MREQDL (its
+ * /URAS delayed outside) falls in a cycle for the upper RAM (A15 and RD or
+ * WR). The upper RAM's /CAS is /MREQ or that select, a step later (the
+ * gates, and C105 on the pin: the column is on the RAM's pins before
+ * /CAS falls). zx8401_mux: each section's output, A and B pins (B the
+ * row: the select is high before /RAS falls), the lower RAM's 7 first. */
+const int zx8401_mux[ZX8401_NMUX][3] = {
+    {19, 18, 17}, {16, 15, 14}, {13, 12, 11}, {23, 22, 21}, {7, 6, 5}, {4, 3, 2}, {10, 9, 8},
+    {28, 18, 17}, {29, 15, 14}, {30, 12, 11}, {27, 22, 21}, {31, 6, 5}, {33, 3, 2}, {26, 24, 25}, {32, 9, 8} };
+enum { ZX8401_DRASLL = 1, ZX8401_CASL = 34, ZX8401_MREQDL = 35, ZX8401_MREQL = 36, ZX8401_A15 = 37, ZX8401_RDL = 38,
+       ZX8401_WRL = 39 };
+typedef struct { uint8_t sel_delayed; } zx8401_state_t;
+
+static bool zx8401_upper_sel(sim_t *s, part_t *p) {
+    bool access = !(pin_in(s, p, ZX8401_RDL) && pin_in(s, p, ZX8401_WRL));
+    return pin_in(s, p, ZX8401_MREQDL) || !(pin_in(s, p, ZX8401_A15) && access);
+}
+static void zx8401_eval(sim_t *s, part_t *p) {
+    bool lower = pin_in(s, p, ZX8401_DRASLL), upper = zx8401_upper_sel(s, p);
+    for (int i = 0; i < ZX8401_NMUX; i++) {
+        bool sel = i < 7 ? lower : upper;
+        pin_out(s, p, zx8401_mux[i][0], DRV_BIT(pin_in(s, p, zx8401_mux[i][sel ? 2 : 1])));
+    }
+    const zx8401_state_t *st = p->state;
+    pin_out(s, p, ZX8401_CASL, DRV_BIT(pin_in(s, p, ZX8401_MREQL) || st->sel_delayed));
+}
+static void zx8401_commit(sim_t *s, part_t *p) {
+    zx8401_state_t *st = p->state;
+    uint8_t v = zx8401_upper_sel(s, p);
+    if (v != st->sel_delayed) { st->sel_delayed = v; sim_mark_dirty(s, (int)(p - s->parts)); }
+}
+static void zx8401_reset(sim_t *s, part_t *p) { ((zx8401_state_t *)p->state)->sel_delayed = 1; }
+const part_type_t PT_ZX8401 = { "ZX8401",
+    "DRASLL:T A0:T A7:T DMA0:O A1:T A8:T DMA1:O A2:T A9:T DMA2:O A3:T A10:T DMA3:O A4:T A11:T DMA4:O A5:T "
+    "A12:T DMA5:O VSS:P A6:T A13:T DMA6:O TS1:T TS2:T MA7:O MA6:O MA5:O MA4:O MA3:O MA2:O MA1:O MA0:O "
+    "/CAS:O /MREQD:T /MREQ:T A15:T /RD:T /WR:T VDD:P",
+    zx8401_eval, zx8401_commit, zx8401_reset, sizeof(zx8401_state_t), TECH_TTL };
+
 /* LM1889 video modulator (IC14): analog, its pins are only named. */
 const part_type_t PT_LM1889 = { "LM1889",
     "CHROMA_LEAD:O R-Y_IN:O CHROMA_BIAS:O B-Y_IN:O GND:P TANK_B1:O TANK_B2:O TANK_A1:O TANK_A2:O "
     "OUT_B:O OUT_A:O VIDEO_IN:O SUBCARRIER:O VCC:P VCC:P VCC:P OSC_OUT:O CHROMA_LAG:O", 0, 0, 0, 0, TECH_NMOS };
+
+
+/* ------------------------------------------------------------------------ */
+/* C64 ASSY 250469: memories, clock and the Super PLA                        */
+/* ------------------------------------------------------------------------ */
+
+/* 41464 dynamic RAM 64K x 4 (U10, U11): a 4164 with four data pins. /OE
+ * is tied low on the board; an early write (/WE low before /CAS) takes
+ * DQ1-DQ4, a read drives them until /CAS rises. Pin names as the
+ * datasheet's; the board wires them to MA0-MA7 in another order (the
+ * cell of an address is c64.c's business). */
+static const int d41464_addr_pins[8] = { 14, 13, 12, 11, 8, 7, 6, 10 };
+static const int d41464_dq_pins[4] = { 2, 3, 15, 17 };
+
+static void d41464_eval(sim_t *s, part_t *p) {
+    dram4_state_t *st = p->state;
+    part_drive_bus_cached(s, p, d41464_dq_pins, 4, st->out_val, st->out_en && !pin_in(s, p, 1), &st->out_cache);
+}
+
+static void d41464_commit(sim_t *s, part_t *p) {
+    dram4_state_t *st = p->state;
+    int ras = pin_in(s, p, 5), cas = pin_in(s, p, 16);
+    uint8_t out_en = st->out_en, out_val = st->out_val;
+    if (st->ras_prev && !ras) st->row = (uint8_t)mem_addr(p, part_read_bus(s, p, d41464_addr_pins, 8));
+    if (st->cas_prev && !cas && !ras) {
+        st->col = (uint8_t)mem_addr(p, part_read_bus(s, p, d41464_addr_pins, 8));
+        int cell = (st->row << 8) | st->col;
+        if (!pin_in(s, p, 4)) {
+            st->cells[cell] = (uint8_t)part_read_bus(s, p, d41464_dq_pins, 4);
+            st->out_en = 0;
+        } else {
+            st->out_en = 1;
+            st->out_val = st->cells[cell];
+            if (p->mfault) st->out_val = (uint8_t)(mem_read(p, (unsigned)cell, st->out_val) & 15);
+        }
+    }
+    if (cas) st->out_en = 0;
+    st->ras_prev = (uint8_t)ras;
+    st->cas_prev = (uint8_t)cas;
+    if (st->out_en != out_en || st->out_val != out_val) sim_mark_dirty(s, (int)(p - s->parts));
+}
+
+/* Power-on pattern: the 4164's (64 bytes of $00, then 64 of $FF, by the
+ * CPU address bit 6), on the row bit the board wires A6 to. */
+static void d41464_reset(sim_t *s, part_t *p) {
+    (void)s;
+    dram4_state_t *st = p->state;
+    for (int row = 0; row < 256; row++)
+        memset(st->cells + (row << 8), (row >> st->a6_row_bit) & 1 ? 15 : 0, 256);
+    st->ras_prev = st->cas_prev = 1;
+    st->out_en = 0;
+    st->out_cache = 0;
+}
+
+const part_type_t PT_41464 = { "41464",
+    "/OE:m DQ1:B DQ2:B /WE:m /RAS:m A6:m A5:m A4:m VCC:P A7:m A3:m A2:m A1:m A0:m DQ3:B /CAS:m DQ4:B VSS:P",
+    d41464_eval, d41464_commit, d41464_reset, sizeof(dram4_state_t), TECH_NMOS };
+
+/* 27128 EPROM 16K x 8 (U4: BASIC and the KERNAL in one chip, 251913-01).
+ * The data comes out while /CE and /OE are low; VPP and /PGM are only for
+ * programming it. */
+static void rom27128_eval(sim_t *s, part_t *p) {
+    rom_state_t *st = p->state;
+    bool selected = !pin_in(s, p, 20) && !pin_in(s, p, 22);
+    unsigned addr = selected ? part_read_bus(s, p, rom23128_addr_pins, 14) : 0;
+    part_drive_bus_cached(s, p, rom23128_data_pins, 8, rom_byte(p, st, addr), selected, &st->out_cache);
+}
+const part_type_t PT_27128 = { "27128 EPROM",
+    "VPP:m A12:M A7:M A6:M A5:M A4:M A3:M A2:M A1:M A0:M D0:O D1:O D2:O GND:P D3:O D4:O D5:O D6:O "
+    "D7:O /CE:M A10:M /OE:M A11:M A9:M A8:M A13:M /PGM:m VCC:P", rom27128_eval, 0, 0, sizeof(rom_state_t), TECH_NMOS };
+
+/* 74LS14: hex Schmitt trigger inverter (the analog side of its inputs,
+ * the reset RC and the mains, is not simulated: see c64.c). */
+const part_type_t PT_74LS14 = { "74LS14",
+    "1A:T 1Y:O 2A:T 2Y:O 3A:T 3Y:O GND:P 4Y:O 4A:T 5Y:O 5A:T 6Y:O 6A:T VCC:P", ls04_eval, 0, 0, 0, TECH_TTL };
+
+/* MOS 8701 clock generator (U20): with the crystal Y1 it makes the color
+ * clock (pin 8) and, divided down, the dot clock (pin 6) for the VIC.
+ * Pin 7 selects PAL (to GND through J3) or NTSC. As the 250407's 74LS629:
+ * the clocks toggle once per half bus cycle, enough for the board to know
+ * they are alive; a broken crystal stops both (the dot clock comes from
+ * it too, unlike the 250407's). The pins without a job here are named
+ * NC: the datasheet's names for them weren't found. */
+static void mos8701_eval(sim_t *s, part_t *p) {
+    vco_state_t *st = p->state;
+    pin_out(s, p, 6, st->crystal_ok ? DRV_BIT(s->clock_level) : DRV_LO);
+    pin_out(s, p, 8, st->crystal_ok ? DRV_BIT(s->clock_level) : DRV_LO);
+}
+const part_type_t PT_8701 = { "8701 CLOCK",
+    "NC:O GND:P NC:O GND:P NC:O DOT:O PAL/NTSC:m COLOR:O GND:P NC:O NC:O VCC:P XTAL1:m XTAL2:m VCC:P NC:O",
+    mos8701_eval, 0, 0, sizeof(vco_state_t), TECH_NMOS };
+
+/* The 250469's 6510, VIC-II and SID: the 8500, 8565 and 8580, the HMOS
+ * versions of the same chips, run by the same cores. Same pins (the 8565
+ * and the 8580 have no 12 V: their VDD is +5V and +9V here). */
+const part_type_t PT_8500 = { "8500 CPU", PINS_6510, 0, 0, 0, 0, TECH_NMOS };
+const part_type_t PT_8565 = { "8565 VIC-II", PINS_6569, 0, 0, 0, 0, TECH_NMOS };
+const part_type_t PT_8580 = { "8580 SID", PINS_6581, 0, 0, 0, 0, TECH_NMOS };
+
+/* 251715-01 "Super PLA" (U8): the 250469's glue in one 64 pin chip. Its
+ * logic was never published, so it is modeled as the 250407 chips whose
+ * jobs its pins took over (pin names from bwack's replica), wired as they
+ * were on that board:
+ *   the 906114 PLA (U17): the same equations (pla_logic), its VA12/VA13
+ *     inputs on MA4/MA5 as the 250407's on VA4/VA5, /AEC inverted inside;
+ *   the 74LS139 (U15): its /IO output decoded by A10/A11 into /VIC, /SID,
+ *     the color RAM and the CIAs, these by A8/A9 into /CIA1, /CIA2, /I/O1,
+ *     /I/O2;
+ *   a 74LS08 gate (U27): the color RAM selected in VIC cycles too (AEC
+ *     low);
+ *   two 74LS257 (U25, U13): in CPU cycles (AEC high) CPU A0-A7 on MA0-MA7
+ *     while /CAS is high (the row), A8-A15 when it falls (the column);
+ *   the 74LS258 (U14): in VIC cycles MA6/MA7 from the VIC's A6/A7 (row)
+ *     and CIA2's bank bits /VA14, /VA15 inverted (column);
+ *   the 74LS373 (U26): in VIC cycles MA0-MA7, latched when /RAS falls,
+ *     on A0-A7 (the color RAM and the character ROM see the VIC address);
+ *   the 556 half that made the RESTORE NMI (U20): NMI follows RESTORE
+ *     (the 74LS14 output, the key debounced by R17 and C59).
+ * Assumed, not known: that the equations are the 906114's; RAM_R/W is
+ * the CPU's R/W, held high in VIC cycles, for the RAMs and the color RAM
+ * alike (the 250407 gave the color RAM the PLA's GR/W, timed by /CAS);
+ * the NMI has no timer of its own (the 556 made a 1 ms pulse); PHI0 and
+ * /CAS0-/CAS3 do nothing (the latter aren't connected on the board); no
+ * delays inside beyond the usual one step. */
+enum { SPLA_A13 = 1, SPLA_A14, SPLA_A15, SPLA_RW, SPLA_LORAM, SPLA_HIRAM, SPLA_CHAREN, SPLA_NMI, SPLA_RESTORE,
+       SPLA_VA14, SPLA_VA15, SPLA_CIA2, SPLA_CHARROM, SPLA_BASIC, SPLA_KERNAL, SPLA_COLRAM = 17, SPLA_CASRAM = 22,
+       SPLA_RAMRW, SPLA_CIA1 = 34, SPLA_CAS, SPLA_RAS, SPLA_PHI0, SPLA_AEC, SPLA_BA, SPLA_VIC, SPLA_VA6, SPLA_VA7,
+       SPLA_SID, SPLA_ROML, SPLA_IO2, SPLA_EXROM, SPLA_GAME, SPLA_IO1 = 49, SPLA_ROMH };
+static const int spla_ma[8] = { 26, 29, 27, 25, 28, 30, 24, 31 };         /* MA0-MA7 */
+static const int spla_a[16] = { 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 1, 2, 3 };    /* A0-A15 */
+typedef struct { uint8_t latch; int32_t ma_cache, a_cache; } superpla_state_t;
+
+/* The PLA's inputs, in the 82S100's order (pla_in_pin): VA12/VA13 are
+ * MA4/MA5, PI_AEC is AEC inverted. */
+const int superpla_in_pin[PLA_NIN] = {
+    [PI_A13] = SPLA_A13, [PI_A14] = SPLA_A14, [PI_A15] = SPLA_A15, [PI_VA14] = SPLA_VA14,
+    [PI_CHAREN] = SPLA_CHAREN, [PI_HIRAM] = SPLA_HIRAM, [PI_LORAM] = SPLA_LORAM, [PI_CAS] = SPLA_CAS,
+    [PI_VA12] = 28, [PI_VA13] = 30, [PI_GAME] = SPLA_GAME, [PI_EXROM] = SPLA_EXROM,
+    [PI_RW] = SPLA_RW, [PI_AEC] = SPLA_AEC, [PI_BA] = SPLA_BA, [PI_A12] = 63 };
+const int superpla_out_pin[PLA_NOUT] = {
+    [PO_ROMH] = SPLA_ROMH, [PO_ROML] = SPLA_ROML, [PO_IO] = 0, [PO_GRW] = 0,
+    [PO_CHAROM] = SPLA_CHARROM, [PO_KERNAL] = SPLA_KERNAL, [PO_BASIC] = SPLA_BASIC, [PO_CASRAM] = SPLA_CASRAM };
+
+unsigned superpla_read_inputs(sim_t *s, part_t *p) {
+    unsigned in = 0;
+    for (int k = 0; k < PLA_NIN; k++) in |= (unsigned)pin_in(s, p, superpla_in_pin[k]) << k;
+    return in ^ 1u << PI_AEC;
+}
+
+static void superpla_eval(sim_t *s, part_t *p) {
+    superpla_state_t *st = p->state;
+    bool cpu = pin_in(s, p, SPLA_AEC);
+    unsigned a = part_read_bus(s, p, spla_a, 16);
+    unsigned out = pla_logic(superpla_read_inputs(s, p));
+    static const int pla_outs[][2] = { { SPLA_ROMH, PO_ROMH }, { SPLA_ROML, PO_ROML }, { SPLA_CHARROM, PO_CHAROM },
+                                       { SPLA_KERNAL, PO_KERNAL }, { SPLA_BASIC, PO_BASIC }, { SPLA_CASRAM, PO_CASRAM } };
+    for (int i = 0; i < 6; i++) pin_out(s, p, pla_outs[i][0], DRV_BIT((out >> pla_outs[i][1]) & 1));
+    /* The I/O decoder. */
+    bool y1[4] = { true, true, true, true }, y2[4] = { true, true, true, true };
+    if (!((out >> PO_IO) & 1)) y1[a >> 10 & 3] = false;
+    if (!y1[3]) y2[a >> 8 & 3] = false;
+    pin_out(s, p, SPLA_VIC, DRV_BIT(y1[0]));
+    pin_out(s, p, SPLA_SID, DRV_BIT(y1[1]));
+    pin_out(s, p, SPLA_COLRAM, DRV_BIT(y1[2] && cpu));
+    pin_out(s, p, SPLA_CIA1, DRV_BIT(y2[0]));
+    pin_out(s, p, SPLA_CIA2, DRV_BIT(y2[1]));
+    pin_out(s, p, SPLA_IO1, DRV_BIT(y2[2]));
+    pin_out(s, p, SPLA_IO2, DRV_BIT(y2[3]));
+    pin_out(s, p, SPLA_RAMRW, DRV_BIT(!cpu || pin_in(s, p, SPLA_RW)));
+    pin_out(s, p, SPLA_NMI, DRV_BIT(pin_in(s, p, SPLA_RESTORE)));
+    /* The RAM address: the CPU's row or column, or in VIC cycles MA6/MA7
+     * (MA0-MA5 are the VIC's own pins). */
+    bool row = pin_in(s, p, SPLA_CAS);
+    if (cpu) {
+        part_drive_bus_cached(s, p, spla_ma, 8, row ? a & 0xFF : a >> 8, true, &st->ma_cache);
+    } else {
+        unsigned hi = row ? (unsigned)(pin_in(s, p, SPLA_VA6) | pin_in(s, p, SPLA_VA7) << 1) :
+                            (pin_in(s, p, SPLA_VA14) ? 0u : 1u) | (pin_in(s, p, SPLA_VA15) ? 0u : 2u);
+        int32_t key = (int32_t)hi + 1000;
+        if (st->ma_cache != key) {
+            st->ma_cache = key;
+            part_drive_bus(s, p, spla_ma, 6, 0, false);
+            part_drive_bus(s, p, spla_ma + 6, 2, hi, true);
+        }
+    }
+    /* The latch: the VIC address on A0-A7 in VIC cycles. */
+    unsigned latched = !cpu && pin_in(s, p, SPLA_RAS) ? part_read_bus(s, p, spla_ma, 8) : st->latch;
+    part_drive_bus_cached(s, p, spla_a, 8, latched, !cpu, &st->a_cache);
+}
+
+static void superpla_commit(sim_t *s, part_t *p) {
+    superpla_state_t *st = p->state;
+    if (!pin_in(s, p, SPLA_RAS)) return;
+    uint8_t v = (uint8_t)part_read_bus(s, p, spla_ma, 8);
+    if (v != st->latch) { st->latch = v; sim_mark_dirty(s, (int)(p - s->parts)); }
+}
+
+const part_type_t PT_SUPERPLA = { "251715-01 PLA",
+    "A13:T A14:T A15:T R/W:T /LORAM:T /HIRAM:T /CHAREN:T NMI:O RESTORE:T /VA14:T /VA15:T /CIA2:O /CHARROM:O "
+    "/BASIC:O /KERNAL:O VSS:P /COLRAM:O /CAS0:O /CAS1:O /CAS2:O /CAS3:O /CASRAM:O RAM_R/W:O MA6:X MA3:X MA0:X "
+    "MA2:X MA4:X MA1:X MA5:X MA7:X NC:O VSS:P /CIA1:O /CAS:T /RAS:T PHI0:m AEC:T BA:T /VIC:O VA6:T VA7:T "
+    "/SID:O /ROML:O /I/O2:O /EXROM:T /GAME:T VSS:P /I/O1:O /ROMH:O A0:X A1:X A2:X A3:X A4:X A5:X A6:X A7:X "
+    "A8:T A9:T A10:T A11:T A12:T VDD:P",
+    superpla_eval, superpla_commit, 0, sizeof(superpla_state_t), TECH_TTL };
+
+/* A memory chip that can take memory faults (part_t.mfault): its address
+ * lines and data bits (0 if it isn't one). A DRAM has its multiplexed
+ * lines: 7 for a 4116, the chip address is (row << 8) | column. */
+int part_memory(const part_t *p, int *data_bits, bool *dram) {
+    int lines = 0, bits = 8;
+    bool d = false;
+    if (p->eval == rom2364_eval) lines = 13;
+    else if (p->eval == rom2332_eval) lines = 12;
+    else if (p->eval == hn613128_eval || p->eval == upd23128_eval || p->eval == rom27128_eval) lines = 14;
+    else if (p->eval == sram_eval) { lines = 10; bits = 4; }
+    else if (part_is_dram64(p)) { lines = 8; bits = 1; d = true; }
+    else if (p->commit == dram4116_commit) { lines = 7; bits = 1; d = true; }
+    else if (p->commit == d41464_commit) { lines = 8; bits = 4; d = true; }
+    if (data_bits) *data_bits = bits;
+    if (dram) *dram = d;
+    return lines;
+}

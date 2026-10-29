@@ -58,8 +58,21 @@ typedef uint8_t drive_t;
 #define DRV_PULLUP  DRIVE(S_PULL, 1)
 #define DRV_BIT(v)  ((v) ? DRV_HI : DRV_LO)
 
-/* Pin faults the user can inject by clicking a pin. */
-enum { PF_OK = 0, PF_OPEN, PF_GND, PF_VCC };
+/* Pin faults the user can inject by clicking a pin. PF_OUT0 / PF_OUT1: an
+ * output dead inside the chip, stuck low or high. Unlike a short to a
+ * supply it drives like a normal output: another chip on a bus fights it. */
+enum { PF_OK = 0, PF_OPEN, PF_GND, PF_VCC, PF_OUT0, PF_OUT1 };
+
+/* Faults inside a memory chip (ROM, SRAM, DRAM), see part_t.mfault:
+ *  MF_DATA: data bit mf_bit reads mf_val at every address (a dead output
+ *           buffer: on a 4164, the whole chip reads 0 or 1)
+ *  MF_ADDR: address line mf_bit is dead inside the chip (reads as 0): half
+ *           the chip is never reached, the other half is seen twice
+ *  MF_FLIP: the byte (or cell) at chip address mf_addr reads XOR mf_val
+ *  MF_WEAK: a DRAM with weak cells: about 1 in 64 forget their charge
+ *           (read 0)
+ * Chip addresses are the chip's own: for a DRAM (row << 8) | column. */
+enum { MF_OK = 0, MF_DATA, MF_ADDR, MF_FLIP, MF_WEAK };
 
 /* Pin flags (from the part type description). */
 #define PIN_TTL    (1 << 0)   /* bipolar input: floating reads as 1 */
@@ -107,6 +120,8 @@ typedef struct {
     /* Electrical state (meaningful on roots only). */
     uint16_t count[10]; /* number of drives of each kind (index = drive_t value),
                            so resolving a change costs the same on any net */
+    uint16_t kinds;     /* bit d set when count[d] != 0: the strongest drive
+                           is the highest bit (see combine() in sim.c) */
     uint8_t level;      /* 0/1: driven level, or the charge when floating */
     uint8_t strength;   /* S_* of the winning drive, S_Z if floating */
     uint8_t contention; /* two equal drives fighting */
@@ -138,23 +153,35 @@ typedef struct {
 } group_t;
 
 #define PART_GROUPS 4
+/* Pin numbers 1-64 (the 250469's Super PLA has 64 pins). */
+#define PIN_NUMBERS 65
 
 struct part {
     const char *ref;    /* "U17" */
     const char *name;   /* "82S100 PLA", shown on the chip */
     int kind;           /* PART_* */
     int first_pin, npins;
-    int pinmap[48];     /* pin number -> pin index (ICs and connectors) */
+    int pinmap[PIN_NUMBERS];     /* pin number -> pin index (ICs and connectors) */
     bool removed;       /* pulled out of its socket */
+    bool unfitted;      /* not fitted on this board (an option: a 16K
+                           Spectrum's upper RAM), so 'removed' too, but
+                           not a fault: repairing leaves it out */
     bool no_supply;     /* a supply it needs is missing (set by the machine) */
+    uint8_t supply_cut; /* the copper to its supply is cut or shorted: bit 0
+                           VCC, bit 1 GND (set by the board, see board_rebuild) */
     uint8_t tech;       /* TECH_* */
     uint8_t power;      /* PWR_*, computed from 'removed' and power pin faults */
     bool dead;          /* computed: the chip doesn't work (no eval, no core) */
     int rfault;         /* RF_* for resistors and links */
+    uint8_t mfault;     /* MF_* for memory chips, with: */
+    uint8_t mf_bit, mf_val;
+    uint32_t mf_addr;
     part_fn eval;       /* compute output drives from inputs (may be NULL) */
     part_fn commit;     /* latch / store on clock edges (may be NULL) */
     part_fn reset;      /* power-on state (may be NULL) */
     void *state;        /* part specific state */
+    uint32_t state_size;    /* its size, copied by a save state (0: not
+                               copied, a cartridge: it doesn't change) */
     void *user;         /* back pointer to the board */
     group_t groups[PART_GROUPS];
 };
@@ -183,6 +210,11 @@ struct sim {
     uint32_t epoch;                 /* bumped by every rebuild */
     part_t parts[SIM_MAX_PARTS]; int nparts;
     int *commit_list; int ncommit;  /* parts that have a commit function */
+    /* Oscillation (sim_settle() ran out of budget): how many times, and
+     * after how many the budget gets small (0: never). A loop through a
+     * short oscillates all the time: every bus step would pay the whole
+     * budget, a run would take hours. */
+    uint32_t oscillations, osc_after;
     /* Dirty parts waiting for eval, in a FIFO ring. A part is in the queue
      * at most once, so the ring never holds more than SIM_MAX_PARTS. */
     uint8_t dirty[SIM_MAX_PARTS];
@@ -196,6 +228,15 @@ struct sim {
     uint64_t hold_time[2][2];       /* [ttl_loaded][level], see set_hold() */
     uint64_t *open_since;           /* per pin: cycle its leg was lifted */
     int *noisy, nnoisy;             /* parts with a lifted MOS input leg */
+    /* Every net's pins/readers/switches (see net_t) point into these three
+     * pools instead of owning their own small allocation: resolve() reads
+     * a net's readers as a run of nearby ints in one block shared by the
+     * whole board, rather than chasing a separate pointer per net.
+     * Rebuilt (and freed/reallocated whole) by every sim_rebuild(). */
+    int *pin_pool, *reader_pool, *switch_pool;
+    /* Pending joins for the next sim_rebuild() (sim_join()). Per sim, so
+     * boards can be rebuilt in parallel threads (the fault atlas). */
+    int *join_a, *join_b, njoin, join_cap;
 };
 
 /* Set up pins/nets/parts from the generated board tables. */
@@ -252,6 +293,31 @@ static inline int sim_read(sim_t *s, int pin) {
 /* Read a group of pins of a part (pin numbers in 'numbers', bit 0 first)
  * as a binary number. Same result as reading them one by one. */
 unsigned sim_read_group(sim_t *s, part_t *p, const int *numbers, int n);
+
+/* Combine the drives on a net, given as a 'kinds' bitmask (bit d: at least
+ * one drive d): the strongest wins, equal ones fighting produce a
+ * contention where low wins. A drive_t orders by strength first, so the
+ * strongest drive present is the highest bit: no need to scan the
+ * strengths one by one, whatever drives the net. */
+static inline drive_t sim_combine(unsigned kinds, int *contention) {
+    if (!kinds) { *contention = 0; return DRV_Z; }
+    int st = (31 - __builtin_clz(kinds)) >> 1;
+    unsigned lo = 1u << DRIVE(st, 0), both = lo | lo << 1;
+    *contention = (kinds & both) == both;
+    return DRIVE(st, !(kinds & lo));
+}
+
+/* sim_drive_except(s, pin, pin): the strongest drive the OTHER pins put on
+ * a pin's net (series resistors, called all the time on the Spectrum). */
+static inline drive_t sim_drive_others(const sim_t *s, int pin) {
+    const pin_t *p = &s->pins[pin];
+    if (p->root < 0 || p->fault == PF_OPEN) return DRV_Z;
+    const net_t *n = &s->nets[p->root];
+    unsigned kinds = n->kinds;
+    if ((p->eff >> 1) && n->count[p->eff] == 1) kinds &= ~(1u << p->eff);
+    int contention;
+    return sim_combine(kinds, &contention);
+}
 
 /* Change a pin fault (the caller must sim_rebuild() afterwards). An opened
  * MOS input remembers the level it saw at that moment. */

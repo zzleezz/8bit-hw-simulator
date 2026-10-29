@@ -26,8 +26,15 @@
 #include <unistd.h>
 
 #ifdef _WIN32
+/* Windows paths with '/' (the rest of the browser splits on it). */
+static void fwd_slashes(char *p) {
+    for (; *p; p++) if (*p == '\\') *p = '/';
+}
+
 static char *path_realpath(const char *path, char *resolved) {
-    return _fullpath(resolved, path, PATH_MAX);
+    if (!_fullpath(resolved, path, PATH_MAX)) return NULL;
+    fwd_slashes(resolved);
+    return resolved;
 }
 #else
 static char *path_realpath(const char *path, char *resolved) {
@@ -169,7 +176,8 @@ static void scan(const char *select_name) {
 /* Go to a folder (absolute, or relative to the current one). */
 static bool go(const char *path) {
     char want[PATH_MAX * 2], real[PATH_MAX];
-    if (path[0] == '/') snprintf(want, sizeof(want), "%s", path);
+    bool absolute = path[0] == '/' || path[0] == '\\' || (path[0] && path[1] == ':');   /* "J:/..." */
+    if (absolute) snprintf(want, sizeof(want), "%s", path);
     else snprintf(want, sizeof(want), "%s/%s", B.dir, path);
     if (!path_realpath(want, real)) return false;
     struct stat st;
@@ -193,6 +201,9 @@ static bool go(const char *path) {
 
 void browser_init(void) {
     if (!getcwd(B.start_dir, sizeof(B.start_dir))) strcpy(B.start_dir, "/");
+#ifdef _WIN32
+    fwd_slashes(B.start_dir);
+#endif
     const char *home = getenv("HOME");
     snprintf(B.home_dir, sizeof(B.home_dir), "%s", home ? home : "/");
     char carts[PATH_MAX + 16];
@@ -343,10 +354,17 @@ static void size_text(long size, char *buf, size_t len) {
 static void path_row(struct nk_context *ctx, float width) {
     static char prefix[64][PATH_MAX], names[64][256];
     const char *label[64];
-    int n = 0;
-    snprintf(prefix[n], PATH_MAX, "/");
-    label[n++] = "/";
-    for (const char *s = B.dir + 1; *s && n < 64; ) {
+    int n = 0, root = 1;
+    if (B.dir[0] && B.dir[1] == ':') {          /* Windows: the drive, "J:/" */
+        root = B.dir[2] == '/' ? 3 : 2;
+        snprintf(prefix[n], PATH_MAX, "%.2s/", B.dir);
+        snprintf(names[n], sizeof(names[n]), "%.2s", B.dir);
+        label[n++] = names[0];
+    } else {
+        snprintf(prefix[n], PATH_MAX, "/");
+        label[n++] = "/";
+    }
+    for (const char *s = B.dir + root; *s && n < 64; ) {
         size_t len = strcspn(s, "/");
         snprintf(names[n], sizeof(names[n]), "%.*s", (int)len, s);
         snprintf(prefix[n], PATH_MAX, "%.*s", (int)(s - B.dir + (long)len), B.dir);
@@ -448,10 +466,10 @@ const char *browser_window(struct nk_context *ctx, struct nk_rect area, bool *ru
     struct nk_rect hr;
     if (nk_widget(&hr, ctx) != NK_WIDGET_INVALID) {
         struct nk_command_buffer *cv = nk_window_get_canvas(ctx);
-        text_at(cv, ctx, hr.x + cx[0], hr.y + 9, 0, "name", COL_DIMTEXT);
-        text_at(cv, ctx, hr.x + hr.w * cx[1], hr.y + 9, 0, "type", COL_DIMTEXT);
-        text_at(cv, ctx, hr.x + hr.w * cx[3] - 12, hr.y + 9, 1, "size", COL_DIMTEXT);
-        text_at(cv, ctx, hr.x + hr.w * cx[3], hr.y + 9, 0, "what it is", COL_DIMTEXT);
+        text_at(cv, ctx, hr.x + cx[0], hr.y + 9, 0, "name", ink(COL_DIMTEXT));
+        text_at(cv, ctx, hr.x + hr.w * cx[1], hr.y + 9, 0, "type", ink(COL_DIMTEXT));
+        text_at(cv, ctx, hr.x + hr.w * cx[3] - 12, hr.y + 9, 1, "size", ink(COL_DIMTEXT));
+        text_at(cv, ctx, hr.x + hr.w * cx[3], hr.y + 9, 0, "what it is", ink(COL_DIMTEXT));
     }
 
     /* The list. */
@@ -474,22 +492,22 @@ const char *browser_window(struct nk_context *ctx, struct nk_rect area, bool *ru
             struct nk_rect rr;
             if (nk_widget(&rr, ctx) == NK_WIDGET_INVALID) continue;
             bool hover = on_top && nk_input_is_mouse_hovering_rect(in, rr);
-            if (i == B.sel) nk_fill_rect(cv, rr, 2, nk_rgb(45, 70, 120));
-            else if (hover) nk_fill_rect(cv, rr, 2, nk_rgb(40, 44, 52));
+            if (i == B.sel) nk_fill_rect(cv, rr, 2, g_theme.row_sel);
+            else if (hover) nk_fill_rect(cv, rr, 2, g_theme.row_hover);
             char name[300], sz[32] = "";
             snprintf(name, sizeof(name), "%s%s", e->name, e->kind == FE_DIR ? "/" : "");
             fit(ctx, name, rr.w * cx[1] - cx[0] - 8);
             float y = rr.y + rr.h / 2;
-            struct nk_color c = kind_color(e);
+            struct nk_color c = ink(kind_color(e));
             text_at(cv, ctx, rr.x + cx[0], y, 0, name, c);
             const char *type = e->fk ? e->fk->type : e->kind == FE_DIR ? "folder" : "";
-            text_at(cv, ctx, rr.x + rr.w * cx[1], y, 0, type, COL_DIMTEXT);
+            text_at(cv, ctx, rr.x + rr.w * cx[1], y, 0, type, ink(COL_DIMTEXT));
             if (e->kind == FE_FILE) size_text(e->size, sz, sizeof(sz));
-            text_at(cv, ctx, rr.x + rr.w * cx[3] - 12, y, 1, sz, COL_DIMTEXT);
+            text_at(cv, ctx, rr.x + rr.w * cx[3] - 12, y, 1, sz, ink(COL_DIMTEXT));
             char info[128];
             snprintf(info, sizeof(info), "%s", e->info);
             fit(ctx, info, rr.w * (1 - cx[3]) - 8);
-            text_at(cv, ctx, rr.x + rr.w * cx[3], y, 0, info, e->bad ? c : COL_DIMTEXT);
+            text_at(cv, ctx, rr.x + rr.w * cx[3], y, 0, info, e->bad ? c : ink(COL_DIMTEXT));
             /* A click selects, a second one soon after opens. */
             if (hover && nk_input_is_mouse_pressed(in, NK_BUTTON_LEFT)) {
                 double now = stm_sec(stm_now());

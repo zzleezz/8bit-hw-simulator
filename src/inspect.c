@@ -417,7 +417,7 @@ bool chip_diagram(struct nk_command_buffer *cv, struct nk_context *ctx, board_t 
     const part_t *p = &b->sim.parts[part];
     dc_t d = { cv, ctx, b, net_state, part, pos, u, pitch, fmaxf(1.0f, u / 24),
                p->removed ? COL_SOCKET : nk_rgb(215, 215, 205) };
-    bool used[48] = {0};
+    bool used[PIN_NUMBERS] = {0};
     for (int i = 0; i < dg->n; i++) {
         const gate_t *g = &dg->g[i];
         /* Skip a gate whose pins aren't all placed (shouldn't happen). */
@@ -440,7 +440,7 @@ bool chip_diagram(struct nk_command_buffer *cv, struct nk_context *ctx, board_t 
         case G_BOX: draw_box(&d, g, body); break;
         }
     }
-    for (int num = 1; num <= p->npins && num < 48; num++)
+    for (int num = 1; num <= p->npins && num < PIN_NUMBERS; num++)
         if (!used[num]) draw_stub(&d, num);
     return true;
 }
@@ -554,9 +554,9 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
     float npts[2 * 17];
     int nn = arc_points(npts, body.x + body.w / 2, body.y, 8, 0, NK_PI, 16);
     nk_stroke_polyline(cv, npts, nn, 1.5f, p->removed ? COL_SOCKET : COL_CHIP_EDGE);
-    pinpos_t pos[48] = {0};
+    pinpos_t pos[PIN_NUMBERS] = {0};
     float fh = ctx->style.font->height;
-    for (int num = 1; num <= p->npins && num < 48; num++) {
+    for (int num = 1; num <= p->npins && num < PIN_NUMBERS; num++) {
         int pin = part_pin(p, num);
         if (pin < 0) continue;
         bool left = num <= L->rows;
@@ -572,21 +572,36 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
         char numtxt[8];
         snprintf(numtxt, sizeof(numtxt), "%d", num);
         text_centered(cv, ctx, sq, numtxt, nk_rgb(0, 0, 0));
-        if (pp->fault != PF_OK) {
+        /* A solder bridge to the next leg (the row below on the left, above
+         * on the right): a blob of solder across the two squares. */
+        int nb = board_dip_neighbor(b, pin, +1);
+        bool bridged = nb >= 0 && board_find_bridge(b, pin, nb) >= 0;
+        if (!bridged) {
+            int pv = board_dip_neighbor(b, pin, -1);
+            bridged = pv >= 0 && board_find_bridge(b, pin, pv) >= 0;
+        }
+        if (nb >= 0 && board_find_bridge(b, pin, nb) >= 0) {
+            /* Between the squares, so both numbers stay readable. */
+            float dir = left ? 1 : -1, cx = sq.x + sq.w / 2;
+            float y0 = y + dir * (sq.h / 2 - 1), y1 = y + dir * (L->pitch - sq.h / 2 + 1);
+            nk_stroke_line(cv, cx, y0, cx, y1, sq.w * 0.8f + 4, COL_FAULT);
+            nk_stroke_line(cv, cx, y0, cx, y1, sq.w * 0.8f, nk_rgb(200, 200, 205));
+        }
+        if (!g_hide_faults && (pp->fault != PF_OK || bridged)) {
             nk_stroke_rect(cv, nk_rect(sq.x - 2, sq.y - 2, sq.w + 4, sq.h + 4), 0, 2, COL_FAULT);
             if (pp->fault == PF_OPEN) {
                 nk_stroke_line(cv, sq.x, sq.y, sq.x + sq.w, sq.y + sq.h, 1.5f, COL_FAULT);
                 nk_stroke_line(cv, sq.x + sq.w, sq.y, sq.x, sq.y + sq.h, 1.5f, COL_FAULT);
             }
         }
-        if (pin == b->scope_pin) nk_stroke_rect(cv, nk_rect(sq.x - 4, sq.y - 4, sq.w + 8, sq.h + 8), 0, 2, COL_TRACE);
-        if (pin == I.hover_pin) nk_stroke_rect(cv, nk_rect(sq.x - 1, sq.y - 1, sq.w + 2, sq.h + 2), 0, 1.5f, COL_HOVER);
+        if (pin == b->scope_pin || pin == b->scope_pin2) nk_stroke_rect(cv, nk_rect(sq.x - 4, sq.y - 4, sq.w + 8, sq.h + 8), 0, 2, ink(COL_TRACE));
+        if (pin == I.hover_pin) nk_stroke_rect(cv, nk_rect(sq.x - 1, sq.y - 1, sq.w + 2, sq.h + 2), 0, 1.5f, ink(COL_HOVER));
         /* The net outside. */
         char lab[96];
         net_label(b, pin, lab, sizeof(lab));
         fit_text(ctx, lab, L->label_w);
         text_at(cv, ctx, left ? sq.x - 6 : sq.x + sq.w + 6, y, left, lab,
-                pin == I.hover_pin ? COL_HOVER : COL_DIMTEXT);
+                ink(pin == I.hover_pin ? COL_HOVER : COL_DIMTEXT));
         /* What the mouse can point at: the square and its label. */
         hit[num] = left ? nk_rect(r.x, y - L->pitch / 2, sq.x + sq.w - r.x, L->pitch)
                         : nk_rect(sq.x, y - L->pitch / 2, r.x + r.w - sq.x, L->pitch);
@@ -595,7 +610,7 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
         chip_diagram(cv, ctx, b, ns, part, body, pos, L->pitch);
     } else {
         /* Pin names inside, the chip name in the middle. */
-        for (int num = 1; num <= p->npins && num < 48; num++) {
+        for (int num = 1; num <= p->npins && num < PIN_NUMBERS; num++) {
             int pin = part_pin(p, num);
             const char *name = pin >= 0 ? sim_pin_name(s, pin) : NULL;
             if (!name || !pos[num].valid) continue;
@@ -607,7 +622,7 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
                       p->removed ? COL_SOCKET : role_color[role]);
         text_centered(cv, ctx, nk_rect(body.x, cy - fh * 0.5f, body.w, fh), p->ref, COL_DIMTEXT);
         text_centered(cv, ctx, nk_rect(body.x, cy + fh * 0.5f, body.w, fh),
-                      p->removed ? "pulled out" : p->name, COL_DIMTEXT);
+                      p->unfitted ? "not fitted" : p->removed ? "pulled out" : p->name, COL_DIMTEXT);
     }
 }
 
@@ -624,9 +639,18 @@ static const int pla_show_order[PLA_NIN] = {
     PI_A15, PI_A14, PI_A13, PI_A12, PI_VA14, PI_VA13, PI_VA12,
     PI_LORAM, PI_HIRAM, PI_CHAREN, PI_GAME, PI_EXROM, PI_AEC, PI_RW, PI_BA, PI_CAS };
 
+/* The pin of an input or an output (0: none, an output kept inside the
+ * Super PLA). */
+static int pla_in(board_t *b, int k) { return b->pla_super ? superpla_in_pin[k] : pla_in_pin[k]; }
+static int pla_out(board_t *b, int o) { return b->pla_super ? superpla_out_pin[o] : pla_out_pin[o]; }
+
+/* A literal as its pin's level: the Super PLA's /AEC is its AEC pin
+ * inverted. */
 static void term_literal(board_t *b, int t, int k, char *buf, size_t len) {
     const part_t *pla = &b->sim.parts[b->p_pla];
-    snprintf(buf, len, "%s=%d", sim_pin_name(&b->sim, part_pin(pla, pla_in_pin[k])), (pla_terms[t].value >> k) & 1);
+    int v = (pla_terms[t].value >> k) & 1;
+    if (b->pla_super && k == PI_AEC) v ^= 1;
+    snprintf(buf, len, "%s=%d", sim_pin_name(&b->sim, part_pin(pla, pla_in(b, k))), v);
 }
 
 /* The widest term, to size the pane. */
@@ -645,6 +669,12 @@ static float pla_pane_width(struct nk_context *ctx, board_t *b) {
     return fmaxf(PLA_TERM_X + maxw + 8, text_width(ctx, "Product terms: lit while true. Inputs are pin levels, colored like the pins.") + 8);
 }
 
+/* What the Super PLA's outputs without a pin are, for the headings. */
+static const struct { int out; const char *what; } superpla_inside[] = {
+    { PO_IO, "inside /IO: to the I/O decoder (/VIC /SID /COLRAM /CIA1 /CIA2 /I/O1 /I/O2)" },
+    { PO_GRW, "inside GR/W: unused (RAM_R/W writes the color RAM; assumed)" },
+};
+
 static const struct { int out; const char *what; } pla_outputs[] = {
     { PO_BASIC, "BASIC ROM" }, { PO_KERNAL, "KERNAL ROM" }, { PO_CHAROM, "character ROM" },
     { PO_IO, "I/O chips at $D000-$DFFF" }, { PO_GRW, "color RAM write" },
@@ -652,8 +682,8 @@ static const struct { int out; const char *what; } pla_outputs[] = {
     { PO_CASRAM, "RAM: high = NOT selected" },
 };
 
-static float pla_pane_height(void) {
-    return (3 + PLA_NOUT + pla_nterms) * PLA_ROW_H + PLA_NOUT * 4 + 8;
+static float pla_pane_height(board_t *b) {
+    return (3 + (b->pla_super ? 2 : 0) + PLA_NOUT + pla_nterms) * PLA_ROW_H + PLA_NOUT * 4 + 8;
 }
 
 /* A term belongs to the first output it feeds besides /CASRAM, or to
@@ -676,18 +706,34 @@ static void draw_pla(struct nk_context *ctx, struct nk_command_buffer *cv, board
         I.act[t] = fmaxf(I.act[t] * 0.92f, frac);
     }
     text_at(cv, ctx, x, y, 0, "Product terms: lit while true. Inputs are pin levels, colored like the pins.",
-            COL_TEXT);
+            ink(COL_TEXT));
     y += PLA_ROW_H;
     text_at(cv, ctx, x, y, 0, "Every term but the GR/W one also holds /CASRAM high (RAM not selected).",
-            COL_DIMTEXT);
+            ink(COL_DIMTEXT));
+    if (b->pla_super) {
+        y += PLA_ROW_H;
+        text_at(cv, ctx, x, y, 0, "The 906114 PLA's terms: the 251715's own were never published", ink(COL_PULSE));
+        y += PLA_ROW_H;
+        text_at(cv, ctx, x, y, 0, "(assumed the same, see the README). VA12/VA13 are MA4/MA5.", ink(COL_PULSE));
+    }
     y += PLA_ROW_H * 1.5f;
+    /* An output kept inside: its level from the inputs (reading them
+     * changes nothing). */
+    unsigned inside = b->pla_super && !pla->removed && !pla->dead
+                          ? pla_logic(superpla_read_inputs((sim_t *)s, (part_t *)pla)) : 0;
     for (size_t o = 0; o < sizeof(pla_outputs) / sizeof(pla_outputs[0]); o++) {
-        int out = pla_outputs[o].out, opin = part_pin(pla, pla_out_pin[out]);
+        int out = pla_outputs[o].out, onum = pla_out(b, out), opin = onum ? part_pin(pla, onum) : -1;
         char head[128];
-        snprintf(head, sizeof(head), "pin %d %s: %s", pla_out_pin[out], sim_pin_name(s, opin),
-                 pla_outputs[o].what);
-        nk_fill_rect(cv, nk_rect(x, y - 6, 12, 12), 0, state_color(wire_state(b, ns, opin)));
-        text_at(cv, ctx, x + 18, y, 0, head, COL_TEXT);
+        if (opin >= 0) {
+            snprintf(head, sizeof(head), "pin %d %s: %s", onum, sim_pin_name(s, opin), pla_outputs[o].what);
+            nk_fill_rect(cv, nk_rect(x, y - 6, 12, 12), 0, state_color(wire_state(b, ns, opin)));
+        } else {
+            for (size_t i = 0; i < sizeof(superpla_inside) / sizeof(superpla_inside[0]); i++)
+                if (superpla_inside[i].out == out) snprintf(head, sizeof(head), "%s", superpla_inside[i].what);
+            int st = pla->removed ? NET_NONE : pla->dead ? NET_FLOATING : (inside >> out) & 1 ? NET_HIGH : NET_LOW;
+            nk_stroke_rect(cv, nk_rect(x, y - 6, 12, 12), 0, 2, state_color(st));
+        }
+        text_at(cv, ctx, x + 18, y, 0, head, ink(COL_TEXT));
         y += PLA_ROW_H;
         for (int t = 0; t < pla_nterms; t++) {
             if (term_group(t) != out) continue;
@@ -697,20 +743,20 @@ static void draw_pla(struct nk_context *ctx, struct nk_command_buffer *cv, board
                 float k = fminf(1.0f, 0.35f + a * 3);
                 nk_fill_rect(cv, box, 0, nk_rgb((int)(90 * k), (int)(255 * k), (int)(120 * k)));
             }
-            nk_stroke_rect(cv, box, 0, 1, COL_DIMTEXT);
+            nk_stroke_rect(cv, box, 0, 1, ink(COL_DIMTEXT));
             char pct[16] = "";
             if (b->pla_samples && b->pla_hits[t])
                 snprintf(pct, sizeof(pct), "%.0f%%", ceilf(100.0f * b->pla_hits[t] / b->pla_samples));
-            text_at(cv, ctx, x + 66, y, 1, pct, COL_DIMTEXT);
+            text_at(cv, ctx, x + 66, y, 1, pct, ink(COL_DIMTEXT));
             float lx = x + PLA_TERM_X;
             for (int j = 0; j < PLA_NIN; j++) {
                 int k = pla_show_order[j];
                 if (!((pla_terms[t].mask >> k) & 1)) continue;
-                int ipin = part_pin(pla, pla_in_pin[k]);
+                int ipin = part_pin(pla, pla_in(b, k));
                 char lit[24];
                 term_literal(b, t, k, lit, sizeof(lit));
                 struct nk_color c = state_color(wire_state(b, ns, ipin));
-                text_at(cv, ctx, lx, y, 0, lit, c);
+                text_at(cv, ctx, lx, y, 0, lit, ink(c));
                 lx += text_width(ctx, lit) + 7;
             }
             y += PLA_ROW_H;
@@ -749,11 +795,14 @@ static void pin_details(board_t *b, const uint8_t *ns, int pin, char *l1, char *
     const pin_t *p = &s->pins[pin];
     const part_t *part = &s->parts[p->part];
     const char *name = sim_pin_name(s, pin);
+    int f = g_hide_faults ? PF_OK : p->fault;      /* practice: not shown */
     snprintf(l1, len, "pin %d %s, %s.  Net %s: %s%s%s", p->number, name ? name : "", pin_kind(b, pin),
              pin_net_name(b, pin), p->net >= 0 ? state_name(ns[p->net]) : "-",
-             p->fault != PF_OK ? ".  Fault: " : "", p->fault != PF_OK ? pin_fault_name(p->fault) : "");
+             f != PF_OK ? ".  Fault: " : "", f != PF_OK ? pin_fault_name(f) : "");
     /* The chip side. */
-    if (part->removed) {
+    if (part->unfitted) {
+        snprintf(l2, len, "The chip is not fitted on this board.");
+    } else if (part->removed) {
         snprintf(l2, len, "The chip is pulled out of its socket.");
     } else if (part->dead) {
         snprintf(l2, len, "The chip has no power: it does nothing.");
@@ -768,8 +817,8 @@ static void pin_details(board_t *b, const uint8_t *ns, int pin, char *l1, char *
         else
             snprintf(l2, len, "The chip drives: high %u%%%s, low %u%%, nothing %u%%.", 100 * hi / tot,
                      b->pst_weak[pin] ? " (weakly)" : "", 100 * lo / tot, 100 * off / tot);
-        if (p->fault == PF_OPEN) strncat(l2, " The leg is lifted: the net doesn't see it.", len - strlen(l2) - 1);
-    } else if (p->fault == PF_OPEN) {
+        if (f == PF_OPEN) strncat(l2, " The leg is lifted: the net doesn't see it.", len - strlen(l2) - 1);
+    } else if (f == PF_OPEN) {
         snprintf(l2, len, (p->flags & PIN_TTL) ? "The leg is lifted: this TTL input reads 1."
                                                : "The leg is lifted: this MOS input floats and reads noise.");
     } else {
@@ -815,12 +864,13 @@ int inspect_window(struct nk_context *ctx, board_t *b, const uint8_t *ns, struct
     layout_t L = pinout_layout(ctx, b, I.part);
     bool pla = I.part == b->p_pla;
     float pane_w = pla ? pla_pane_width(ctx, b) : 0;
-    float cw = L.w + (pla ? pane_w + 16 : 0), ch = fmaxf(L.h, pla ? pla_pane_height() : 0);
+    float cw = L.w + (pla ? pane_w + 16 : 0), ch = fmaxf(L.h, pla ? pla_pane_height(b) : 0);
     /* Title, a line of help, the drawing, three lines of details (the last
-     * one wraps on two rows), the window padding. */
+     * one wraps on two rows), the repair records button, the window
+     * padding. */
     char title[160];
     snprintf(title, sizeof(title), "%s %s: %s", p->ref, board_part_label(b, I.part), board_part_detail(b, I.part));
-    float ww = fmaxf(fmaxf(cw, 540), text_width(ctx, title) + 40) + 20, wh = 30 + 24 + ch + 4 + 24 * 2 + 42 + 16;
+    float ww = fmaxf(fmaxf(cw, 540), text_width(ctx, title) + 40) + 20, wh = 30 + 24 + ch + 4 + 24 * 2 + 42 + 28 + 16;
     nk_flags scroll = NK_WINDOW_NO_SCROLLBAR;
     if (wh > area.h - 16) { wh = area.h - 16; scroll = 0; }
     if (I.reopen) {
@@ -840,7 +890,7 @@ int inspect_window(struct nk_context *ctx, board_t *b, const uint8_t *ns, struct
                          NK_TEXT_LEFT, COL_DIMTEXT);
         nk_layout_row_static(ctx, ch, (int)cw, 1);
         struct nk_rect r;
-        struct nk_rect hit[48];
+        struct nk_rect hit[PIN_NUMBERS];
         memset(hit, 0, sizeof(hit));
         if (nk_widget(&r, ctx) != NK_WIDGET_INVALID) {
             draw_pinout(ctx, cv, b, ns, I.part, &L, nk_rect(r.x, r.y, L.w, L.h), hit);
@@ -851,7 +901,7 @@ int inspect_window(struct nk_context *ctx, board_t *b, const uint8_t *ns, struct
          * click on the menu above must not reach the pins below it. */
         bool on_top = !(ctx->current->layout->flags & NK_WINDOW_ROM);
         I.hover_pin = -1;
-        for (int num = 1; num <= p->npins && num < 48 && on_top; num++)
+        for (int num = 1; num <= p->npins && num < PIN_NUMBERS && on_top; num++)
             if (hit[num].w > 0 && nk_input_is_mouse_hovering_rect(in, hit[num]))
                 I.hover_pin = part_pin(p, num);
         if (!on_top) I.press_pin = -1;
@@ -872,6 +922,8 @@ int inspect_window(struct nk_context *ctx, board_t *b, const uint8_t *ns, struct
         nk_label(ctx, l2, NK_TEXT_LEFT);
         nk_layout_row_dynamic(ctx, 38, 1);
         nk_label_colored_wrap(ctx, l3, COL_DIMTEXT);
+        nk_layout_row_static(ctx, 24, 300, 1);
+        chip_records_button(ctx, I.part);
     } else {
         I.part = -1;        /* closed */
     }

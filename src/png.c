@@ -6,13 +6,17 @@
 #include <string.h>
 
 static uint32_t crc_table[256];
+static bool crc_ready;
 
+/* Built once (call png_init() before writing PNGs from several threads). */
 static void crc_init(void) {
+    if (crc_ready) return;
     for (uint32_t n = 0; n < 256; n++) {
         uint32_t c = n;
         for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
         crc_table[n] = c;
     }
+    crc_ready = true;
 }
 
 static uint32_t crc(const unsigned char *buf, size_t len, uint32_t c) {
@@ -37,6 +41,8 @@ static void write_chunk(FILE *f, const char *type, const unsigned char *data, si
     put32(tail, c ^ 0xFFFFFFFFu);
     fwrite(tail, 1, 4, f);
 }
+
+void png_init(void) { crc_init(); }
 
 bool png_write(const char *path, const uint32_t *pixels, int w, int h) {
     crc_init();

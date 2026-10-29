@@ -1,4 +1,4 @@
-/* c64.c - the Commodore 64, board C64 ASSY 250407.
+/* c64.c - the Commodore 64, boards C64 ASSY 250407 and 250469.
  *
  * HOW A BUS CYCLE IS SIMULATED
  *
@@ -18,7 +18,15 @@
  * the bus, perform register reads/writes and advance one clock; finally the
  * CPU samples the data bus. Nothing here knows the C64 memory map: chip
  * selects, banking, the address multiplexing, everything comes from the
- * netlist and the glue chip models. */
+ * netlist and the glue chip models.
+ *
+ * THE 250469 (the C64C's board, also in late breadbins) has the same big
+ * chips in their HMOS versions (8500, 8565, 8580), two 41464 RAMs (64K x 4)
+ * for the eight 4164s, BASIC and the KERNAL in one ROM, an 8701 clock
+ * generator, and the 251715-01 "Super PLA" doing the work of the PLA, the
+ * address multiplexers, the latch and the I/O decoder (see parts.c for
+ * how it is modeled, and what is assumed). Its bus cycle is the same.
+ * What differs between the boards is in c64_variant_t. */
 #include "c64.h"
 #include "c64-roms.h"
 #include "sokol/sokol_app.h"   /* key codes */
@@ -40,6 +48,21 @@ static const int sid_data_pins[8] = { 15, 16, 17, 18, 19, 20, 21, 22 };
 enum { DOUT_VIC, DOUT_CIA1, DOUT_CIA2, DOUT_SID };
 
 static part_t *P(board_t *b, int idx) { return &b->sim.parts[idx]; }
+
+/* What differs between the two boards (machine_t.variant): where the
+ * chips are, and the circuits around them that aren't simulated. */
+typedef struct {
+    const char *cpu, *vic, *cia1, *cia2, *sid, *osc, *pla, *paddles, *vram;
+    const char *basic, *kernal, *chr;       /* the 250469 has BASIC and the KERNAL in 'kernal' */
+    const char *timer;                      /* the 556 (power-on reset, RESTORE), NULL if none */
+    const char *mains_r1, *mains_r2, *mains_pad;    /* the mains reach a 74LS through these, onto this pad */
+    const char *motor, *motor_pad;          /* the cassette motor transistor, its emitter */
+    const char *por, *por_pad;              /* the power-on reset capacitor, its + pad (if no 556) */
+    const char *gnd;                        /* the ground net */
+    bool superpla;
+} c64_variant_t;
+
+static const c64_variant_t *CV(board_t *b) { return b->m->variant; }
 
 /* The part that owns a register read data slot. */
 static int dout_part(board_t *b, int i) {
@@ -82,7 +105,7 @@ static void cpu_tick(board_t *b) {
     sim_mark_dirty(s, c64->p_cpu);
 }
 
-static void cpu_eval(sim_t *s, part_t *p) {
+static void c64_cpu_eval(sim_t *s, part_t *p) {
     board_t *b = p->user;
     c64_t *c64 = C64(b);
     /* PHI2 output follows the PHI0 input: it clocks the CIAs and the SID. */
@@ -114,8 +137,29 @@ static void cpu_eval(sim_t *s, part_t *p) {
  * the CPU must read the KERNAL exactly, and the VIC must see in bank 0 the
  * character ROM at $1000-$1FFF and the DRAM contents elsewhere. This code
  * knows the memory map; the simulation itself doesn't use it. */
+/* The cell of a CPU address in the 250469's 41464s: the row is A0-A7 on
+ * MA0-MA7, the column A8-A15, and MA0-MA7 reach the chips' address pins
+ * in the order of the board. */
+static int dram4_cell(board_t *b, uint16_t addr) {
+    c64_t *c64 = C64(b);
+    int row = 0, col = 0;
+    for (int k = 0; k < 8; k++) {
+        row |= ((addr >> c64->dram4_ma[k]) & 1) << k;
+        col |= ((addr >> (8 + c64->dram4_ma[k])) & 1) << k;
+    }
+    return row << 8 | col;
+}
+
+static dram4_state_t *dram4(board_t *b, int half) {
+    return b->sim.parts[C64(b)->dram4_part[half]].state;
+}
+
 static uint8_t dram_peek(board_t *b, uint16_t addr) {
     c64_t *c64 = C64(b);
+    if (board_is_250469(b)) {
+        int cell = dram4_cell(b, addr);
+        return (uint8_t)(dram4(b, 0)->cells[cell] | dram4(b, 1)->cells[cell] << 4);
+    }
     int cell = ((addr & 0xFF) << 8) | (addr >> 8);
     uint8_t v = 0;
     for (int bit = 0; bit < 8; bit++)
@@ -185,7 +229,7 @@ static void bus_step(board_t *b, int step) {
     /* The VIC drives /RAS, /CAS and the address; the clock oscillator
      * changes level with the phase. */
     sim_mark_dirty(s, c64->p_vic);
-    if (step == STEP_ROW) sim_mark_dirty(s, c64->p_u31);
+    if (step == STEP_ROW) sim_mark_dirty(s, c64->p_osc);
     sim_settle(s);
     sim_commit(s);      /* latches and memories see the edge */
     sim_settle(s);      /* and their outputs propagate */
@@ -454,7 +498,7 @@ static void mains_tick(board_t *b) {
         c64->mains_edges = (s->cycle * (2 * MAINS_HZ)) / C64_FREQ + 1;
         c64->mains_next = (c64->mains_edges * C64_FREQ + 2 * MAINS_HZ - 1) / (2 * MAINS_HZ);
     }
-    bool on = s->parts[c64->p_r5].rfault != RF_OPEN && s->parts[c64->p_r100].rfault != RF_OPEN;
+    bool on = c64->ac_ok && s->parts[c64->p_r5].rfault != RF_OPEN && s->parts[c64->p_r100].rfault != RF_OPEN;
     int level = (int)((c64->mains_edges - 1) & 1);
     sim_drive(s, c64->pin_mains, on ? DRIVE(S_STRONG, level) : DRV_Z);
 }
@@ -463,6 +507,24 @@ static void mains_tick(board_t *b) {
  * the Darlington Q1/Q3 off. With P5 low (or not driven: R3 pulls Q2's
  * base down) Q3 puts about 6 V on the MOTOR pin. Analog, so modeled here
  * by what it does: MOTOR is driven high while P5 isn't high. */
+/* The 250469's power-on reset: RP3 charges C43, and until it is charged
+ * the 74LS14 (U23) keeps /RESET low through the 74LS06 (U22). Capacitors
+ * aren't simulated, so C43 holds its + side low for the time it takes
+ * (about 50 ms, as the 250407's 556) after the power comes on. Removed or
+ * open, it holds nothing (no reset); shorted, the board joins it to GND
+ * (reset forever). */
+#define POR_CYCLES 50000
+
+static void por_tick(board_t *b) {
+    c64_t *c64 = C64(b);
+    sim_t *s = &b->sim;
+    if (c64->pin_por < 0) return;
+    const part_t *c = &s->parts[c64->p_por];
+    bool hold = s->cycle < c64->por_until && !c->removed && c->rfault != RF_OPEN &&
+                s->pins[c64->pin_por].fault != PF_OPEN;
+    sim_drive(s, c64->pin_por, hold ? DRV_LO : DRV_Z);
+}
+
 static void motor_tick(board_t *b) {
     c64_t *c64 = C64(b);
     sim_t *s = &b->sim;
@@ -477,6 +539,7 @@ static void board_cycle(board_t *b) {
     sim_t *s = &b->sim;
     s->cycle++;
     mains_tick(b);
+    por_tick(b);
     motor_tick(b);
     harness_tick(b);
     cpu_tick(b);
@@ -493,6 +556,10 @@ static void board_cycle(board_t *b) {
 }
 
 static void c64_run(board_t *b, int cycles) {
+    if (C64(b)->cold_start) {   /* the power came back (see c64_power) */
+        C64(b)->cold_start = false;
+        board_power_on(b);
+    }
     for (int i = 0; i < cycles; i++) board_cycle(b);
 }
 
@@ -510,11 +577,19 @@ static int c64_rail_of(const char *name) {
     return RAIL_NONE;
 }
 
+/* The 250469's: GND and +5V, as they come in on CN7 (GND', +5V'), and the
+ * SID's 9 V. */
+static int c64c_rail_of(const char *name) {
+    if (!strcmp(name, "GND") || !strcmp(name, "GND'")) return RAIL_GND;
+    if (!strcmp(name, "+5V") || !strcmp(name, "+5V'") || !strcmp(name, "+9V/12V")) return RAIL_VCC;
+    return RAIL_NONE;
+}
+
 static int c64_kind_of(const char *ref) {
     if (ref[0] == 'U') return PART_IC;
     if (ref[0] == 'R') return PART_RESISTOR;   /* R and RP */
-    if (!strncmp(ref, "FB", 2) || ref[0] == 'L' || ref[0] == 'F' ||
-        (ref[0] == 'E' && ref[1] >= '0' && ref[1] <= '9')) return PART_LINK;
+    if (!strncmp(ref, "FB", 2) || ref[0] == 'L' || ref[0] == 'F' || !strncmp(ref, "EM", 2) ||
+        (ref[0] == 'E' && ref[1] >= '0' && ref[1] <= '9')) return PART_LINK;    /* EM: the 250469's EMI filters */
     if (!strncmp(ref, "CN", 2)) return PART_CONNECTOR;
     return PART_OTHER;
 }
@@ -522,7 +597,7 @@ static int c64_kind_of(const char *ref) {
 /* Every chip of the board. The eight DRAMs don't split the memory by
  * address: each one stores one bit of every byte, so RAMn holds data bit
  * n-1 of all of $0000-$FFFF. */
-static const part_def_t part_defs[] = {
+static const part_def_t c64_part_defs[] = {
     { "U21", &PT_4164, "RAM1", ROLE_RAM, "4164\nbit D0\n$0000-$FFFF", "4164 DRAM, holds data bit D0 of every byte, $0000-$FFFF" },
     { "U9",  &PT_4164, "RAM2", ROLE_RAM, "4164\nbit D1\n$0000-$FFFF", "4164 DRAM, holds data bit D1 of every byte, $0000-$FFFF" },
     { "U22", &PT_4164, "RAM3", ROLE_RAM, "4164\nbit D2\n$0000-$FFFF", "4164 DRAM, holds data bit D2 of every byte, $0000-$FFFF" },
@@ -563,12 +638,127 @@ static const part_def_t part_defs[] = {
     { "U32", &PT_MC4044, "PLL", ROLE_CLOCK, "MC4044", "MC4044 phase detector, part of the clock PLL (not simulated)" },
 };
 
+/* The 250469's. The two 41464s split each byte in two: RAM1 holds the low
+ * nibble of every byte, RAM2 the high one. */
+static const part_def_t c64c_part_defs[] = {
+    { "U10", &PT_41464, "RAM1", ROLE_RAM, "41464\nbits D0-D3\n$0000-$FFFF",
+      "41464 DRAM (64K x 4), holds data bits D0-D3 of every byte, $0000-$FFFF" },
+    { "U11", &PT_41464, "RAM2", ROLE_RAM, "41464\nbits D4-D7\n$0000-$FFFF",
+      "41464 DRAM (64K x 4), holds data bits D4-D7 of every byte, $0000-$FFFF" },
+    { "U19", &PT_2114, "VRAM", ROLE_VRAM, "2114\ncolor RAM\n$D800-$DBFF",
+      "2114 color RAM (video), $D800-$DBFF, 4 bits, read by the VIC every character" },
+    { "U4",  &PT_27128, "ROM", ROLE_ROM, "251913 ROM\nBASIC $A000\nKERNAL $E000",
+      "27128 ROM (251913-01): BASIC at $A000-$BFFF and the KERNAL at $E000-$FFFF in one chip" },
+    { "U5",  &PT_2332, "CHAR", ROLE_ROM, "2332 ROM\n$D000-$DFFF",
+      "2332 character ROM, $D000-$DFFF (the VIC sees it at $1000 and $9000)" },
+    { "U8",  &PT_SUPERPLA, "PLA", ROLE_PLA, "251715-01\nSuper PLA",
+      "251715-01 Super PLA: memory map, I/O decoder, RAM address multiplexers and latch, RESTORE NMI "
+      "(simulated as the 250407 chips it replaced: logic assumed, see the README)" },
+    { "U6",  &PT_8500, "CPU", ROLE_CHIP, "8500", "8500 CPU (the HMOS 6510)" },
+    { "U7",  &PT_8565, "VIC", ROLE_CHIP, "8565 VIC-II\n$D000-$D3FF",
+      "8565 VIC-II video chip, $D000-$D3FF (PAL, HMOS); also makes the system clock" },
+    { "U9",  &PT_8580, "SID", ROLE_CHIP, "8580\n$D400-$D7FF", "8580 SID sound chip, $D400-$D7FF (HMOS, 9 V)" },
+    { "U1",  &PT_6526, "CIA1", ROLE_CHIP, "6526\n$DC00-$DCFF", "6526 CIA #1, $DC00-$DCFF: keyboard, joysticks, IRQ" },
+    { "U2",  &PT_6526, "CIA2", ROLE_CHIP, "6526\n$DD00-$DDFF",
+      "6526 CIA #2, $DD00-$DDFF: serial bus, user port, VIC bank, NMI" },
+    { "U3",  &PT_74LS08, "AND", ROLE_GLUE, "74LS08", "74LS08 AND gates: CPU AEC and RDY (with /DMA), the ROM select" },
+    { "U22", &PT_7406, "INV", ROLE_GLUE, "74LS06",
+      "74LS06 open collector inverters: /RESET (internal and external), /NMI, serial bus" },
+    { "U23", &PT_74LS14, "SCHMITT", ROLE_GLUE, "74LS14",
+      "74LS14 Schmitt triggers: power-on reset, RESTORE key, TOD clock from the mains" },
+    { "U21", &PT_4066, "SW", ROLE_GLUE, "4066", "4066 switch: connects the color RAM to D0-D3 in CPU cycles" },
+    { "U18", &PT_4066, "SW", ROLE_GLUE, "4066", "4066 switch: selects the paddles read by the SID" },
+    { "U20", &PT_8701, "OSC", ROLE_CLOCK, "8701", "8701 clock generator: dot clock and color clock, with the crystal Y1" },
+};
+
+/* The power path. The power supply brings 5 V DC and 9 V AC through CN7
+ * and the power switch SW1:
+ *   +5V      CN7.4/5 -> SW1.5-4 -> L5: nearly every chip
+ *   9 V AC   CN7.6 -> SW1.2-1 -> L4, and CN7.7 -> L4 -> F1: rectified by
+ *            CR4 (+9V_UNREG); VR2 (7805) makes CAN+5V, for the VIC and
+ *            the clock circuit (U29-U32, through L2 and FB19); a doubler
+ *            (C90, CR6, CR5) feeds VR1 (7812), +12V for the VIC and the
+ *            SID; and the mains clock comes through R5 (see mains_tick).
+ * The supplies are rails by name, always there, so what cuts them is here:
+ * a chip whose supply is missing has no_supply (like the Spectrum's
+ * zx_power). Copper cut further on (an open ferrite bead) is found by
+ * board.c's supply check. SW1 "open" is the switch off. */
+static bool power_part_ok(sim_t *s, int part, bool short_ok) {
+    if (part < 0) return true;
+    const part_t *p = &s->parts[part];
+    if (p->removed || p->rfault == RF_OPEN || (!short_ok && p->rfault != RF_OK)) return false;
+    for (int k = 0; k < p->npins; k++) if (s->pins[p->first_pin + k].fault == PF_OPEN) return false;
+    return true;
+}
+
+static bool pad_ok(sim_t *s, int part, int num) {
+    int pi = part >= 0 ? part_pin(&s->parts[part], num) : -1;
+    return pi < 0 || s->pins[pi].fault != PF_OPEN;
+}
+
+/* The 250469's power path: CN7 through the choke L1 (a winding each) and
+ * the switch SW1:
+ *   +5V      CN7.4/5 -> L1.2-1 -> SW1.5-4: every chip
+ *   9 V AC   CN7.6 -> L1.6-5 -> SW1.2-1, and CN7.7 -> L1.8-7 -> F1:
+ *            rectified by CR2 (+9V_UNREG, the cassette motor) and, for
+ *            the SID's 9 V, doubled by CR3 and CR4 and regulated by Q5
+ *            (+9V/12V); the mains clock comes through R16 (mains_tick).
+ * As c64_power(), what isn't a rail by name is checked here. The VIC
+ * (8565) runs on +5V alone. */
+static void c64c_power(board_t *b) {
+    c64_t *c64 = C64(b);
+    sim_t *s = &b->sim;
+    bool on = c64->p_sw1 < 0 || (!s->parts[c64->p_sw1].removed && s->parts[c64->p_sw1].rfault != RF_OPEN);
+    bool v5 = on && pad_ok(s, c64->p_sw1, 5) && pad_ok(s, c64->p_sw1, 4) &&
+              (pad_ok(s, c64->p_cn7, 4) || pad_ok(s, c64->p_cn7, 5)) && power_part_ok(s, c64->p_l5, true);
+    c64->ac_ok = on && pad_ok(s, c64->p_sw1, 2) && pad_ok(s, c64->p_sw1, 1) && pad_ok(s, c64->p_cn7, 6) &&
+                 pad_ok(s, c64->p_cn7, 7) && power_part_ok(s, c64->p_l5, true) && power_part_ok(s, c64->p_f1, true);
+    bool v9 = c64->ac_ok && power_part_ok(s, c64->p_cr4, false) && power_part_ok(s, c64->p_cr5, false) &&
+              power_part_ok(s, c64->p_q5, false);
+    for (int i = 0; i < s->nparts; i++) {
+        part_t *p = &s->parts[i];
+        if (p->kind != PART_IC) continue;
+        p->no_supply = i == c64->p_sid ? !v5 || !v9 : !v5;
+    }
+    bool powered = v5 && v9;
+    if (powered && !c64->powered) c64->cold_start = true;
+    c64->powered = powered;
+}
+
+static void c64_power(board_t *b) {
+    c64_t *c64 = C64(b);
+    sim_t *s = &b->sim;
+    if (board_is_250469(b)) { c64c_power(b); return; }
+    bool on = c64->p_sw1 < 0 || (!s->parts[c64->p_sw1].removed && s->parts[c64->p_sw1].rfault != RF_OPEN);
+    bool v5 = on && pad_ok(s, c64->p_sw1, 5) && pad_ok(s, c64->p_sw1, 4) &&
+              (pad_ok(s, c64->p_cn7, 4) || pad_ok(s, c64->p_cn7, 5)) && power_part_ok(s, c64->p_l5, true);
+    c64->ac_ok = on && pad_ok(s, c64->p_sw1, 2) && pad_ok(s, c64->p_sw1, 1) && pad_ok(s, c64->p_cn7, 6) &&
+                 pad_ok(s, c64->p_cn7, 7) && power_part_ok(s, c64->p_l4, true) && power_part_ok(s, c64->p_f1, true);
+    bool unreg = c64->ac_ok && power_part_ok(s, c64->p_cr4, false);
+    bool can5 = unreg && power_part_ok(s, c64->p_vr2, false);
+    bool p12 = unreg && power_part_ok(s, c64->p_c90, false) && power_part_ok(s, c64->p_cr6, false) &&
+               power_part_ok(s, c64->p_cr5, false) && power_part_ok(s, c64->p_vr1, false);
+    for (int i = 0; i < s->nparts; i++) {
+        part_t *p = &s->parts[i];
+        if (p->kind != PART_IC) continue;
+        if (i == c64->p_vic) p->no_supply = !can5 || !p12;
+        else if (i == c64->p_sid) p->no_supply = !v5 || !p12;
+        else if (board_part_role(b, i) == ROLE_CLOCK) p->no_supply = !can5;     /* U29-U32, on +Vc */
+        else p->no_supply = !v5;
+    }
+    /* Switched on (or repaired): a cold start, once this rebuild is done. */
+    bool powered = v5 && can5 && p12;
+    if (powered && !c64->powered) c64->cold_start = true;
+    c64->powered = powered;
+}
+
 /* Joins of nets for board_rebuild(). Keyboard: a pressed key connects a PA
  * line to a PB line through the keyboard connector CN1. RESTORE connects
  * its line to ground. The dongles of the harness. And the crystal. */
 static void c64_joins(board_t *b) {
     c64_t *c64 = C64(b);
     sim_t *s = &b->sim;
+    c64_power(b);
     for (int line = 0; line < 8; line++)
         for (int col = 0; col < 8; col++) {
             if (!((c64->key_matrix[line] >> col) & 1)) continue;
@@ -579,11 +769,16 @@ static void c64_joins(board_t *b) {
     if ((c64->key_matrix[8] & 1) && c64->pin_restore >= 0 && s->pins[c64->pin_restore].fault != PF_OPEN)
         sim_join(s, s->pins[c64->pin_restore].net, c64->net_gnd);
     harness_joins(b);
-    vco_state_t *vco = s->parts[c64->p_u31].state;
-    vco->crystal_ok = c64->p_y1 < 0 || s->parts[c64->p_y1].rfault != RF_OPEN;
+    vco_state_t *vco = s->parts[c64->p_osc].state;
+    vco->crystal_ok = c64->p_y1 < 0 || (s->parts[c64->p_y1].rfault == RF_OK && !s->parts[c64->p_y1].removed);
+    /* A lifted leg of the crystal (pads 1 and 2; 3 is its can) stops it too. */
+    for (int n = 1; n <= 2 && c64->p_y1 >= 0; n++) {
+        int pi = part_pin(&s->parts[c64->p_y1], n);
+        if (pi >= 0 && s->pins[pi].fault == PF_OPEN) vco->crystal_ok = false;
+    }
 }
 
-static void init_keymap(board_t *b) {
+static void c64_init_keymap(board_t *b) {
     c64_t *c64 = C64(b);
     /* Same matrix as c64-llm/c64.h: line = CIA1 PA bit, column = PB bit. */
     kbd_init(&c64->kbd, 2);
@@ -633,7 +828,7 @@ static int cn1_pin_on_net_of(board_t *b, int part, int number) {
  * checked against the netlist: keyboard COL lines go to CIA1 port A, ROW
  * lines to port B; control port 1 is the one with the light pen). Pins are
  * named by their pad ("1", "A"...); '_' is shown as a space. */
-static const conn_def_t conn_defs[] = {
+static const conn_def_t c64_conn_defs[] = {
     { "CN1", "KEYBOARD", "1=GND 3=RESTORE 4=+5V 5=ROW3 6=ROW6 7=ROW5 8=ROW4 9=ROW7 10=ROW2 "
       "11=ROW1 12=ROW0 13=COL0 14=COL6 15=COL5 16=COL4 17=COL3 18=COL2 19=COL1 20=COL7" },
     { "CN2", "USER PORT", "1=GND 2=+5V 3=/RESET 4=CNT1 5=SP1 6=CNT2 7=SP2 8=/PC2 9=SERIAL_ATN "
@@ -654,35 +849,70 @@ static const conn_def_t conn_defs[] = {
     { "CN10", "POWER LED", "1=LED+ 2=LED- 3=LED+" },
 };
 
+/* A 250469 ROM image: BASIC in the low half (A13 of the chip is the
+ * CPU's A14: low at $A000), KERNAL (8K) in the high half. */
+void c64_basic_kernal(uint8_t out[16384], const uint8_t *kernal) {
+    memcpy(out, dump_c64_basic_bin, 8192);
+    memcpy(out + 8192, kernal, 8192);
+}
+
+/* The 250469's stock ROM. Made once, the same for every board. */
+static const uint8_t *basic_kernal_rom(void) {
+    static uint8_t rom[16384];
+    static bool ready;
+    if (!ready) {
+        memcpy(rom, dump_c64_basic_bin, 8192);
+        memcpy(rom + 8192, dump_c64_kernalv3_bin, 8192);
+        ready = true;
+    }
+    return rom;
+}
+
 static void c64_create(board_t *b) {
     c64_t *c64 = C64(b);
     sim_t *s = &b->sim;
-    c64->p_cpu = sim_find_part(s, "U7");
-    c64->p_vic = sim_find_part(s, "U19");
-    c64->p_cia[0] = sim_find_part(s, "U1");
-    c64->p_cia[1] = sim_find_part(s, "U2");
-    c64->p_sid = sim_find_part(s, "U18");
-    c64->p_u31 = sim_find_part(s, "U31");
+    const c64_variant_t *v = CV(b);
+    c64->p_cpu = sim_find_part(s, v->cpu);
+    c64->p_vic = sim_find_part(s, v->vic);
+    c64->p_cia[0] = sim_find_part(s, v->cia1);
+    c64->p_cia[1] = sim_find_part(s, v->cia2);
+    c64->p_sid = sim_find_part(s, v->sid);
+    c64->p_osc = sim_find_part(s, v->osc);
     c64->p_y1 = sim_find_part(s, "Y1");
     c64->p_cn1 = sim_find_part(s, "CN1");
-    c64->net_gnd = sim_find_net(s, "Earth");
+    c64->net_gnd = sim_find_net(s, v->gnd);
     /* The big chips: models are here, around their cores. */
-    s->parts[c64->p_cpu].eval = cpu_eval;
+    s->parts[c64->p_cpu].eval = c64_cpu_eval;
     s->parts[c64->p_vic].eval = vic_eval;
     s->parts[c64->p_vic].commit = vic_commit;
     s->parts[c64->p_cia[0]].eval = cia_eval;
     s->parts[c64->p_cia[1]].eval = cia_eval;
     s->parts[c64->p_sid].eval = sid_eval;
     /* ROM images. */
-    ((rom_state_t *)s->parts[sim_find_part(s, "U3")].state)->data = dump_c64_basic_bin;
-    ((rom_state_t *)s->parts[sim_find_part(s, "U4")].state)->data = dump_c64_kernalv3_bin;
-    ((rom_state_t *)s->parts[sim_find_part(s, "U5")].state)->data = dump_c64_char_bin;
-    /* Which DRAM holds which data bit: the one whose D pin is on net Dn. */
+    if (v->basic) ((rom_state_t *)s->parts[sim_find_part(s, v->basic)].state)->data = dump_c64_basic_bin;
+    ((rom_state_t *)s->parts[sim_find_part(s, v->kernal)].state)->data =
+        v->basic ? dump_c64_kernalv3_bin : basic_kernal_rom();
+    ((rom_state_t *)s->parts[sim_find_part(s, v->chr)].state)->data = dump_c64_char_bin;
+    /* Which DRAM holds which data bit: the one whose D pin is on net Dn.
+     * The 250469's 41464s: the one whose DQ1 is on D0 or D4, and the MA
+     * line on each address pin (A0-A7: pins 14, 13, 12, 11, 8, 7, 6, 10). */
+    for (int i = 0; i < 8; i++) c64->dram_part[i] = -1;
+    c64->dram4_part[0] = c64->dram4_part[1] = -1;
     for (int i = 0; i < s->nparts; i++) {
-        if (s->parts[i].reset != PT_4164.reset) continue;
+        bool four = s->parts[i].reset == PT_41464.reset;
+        if (s->parts[i].reset != PT_4164.reset && !four) continue;
         int net = s->pins[part_pin(&s->parts[i], 2)].net;
         const char *name = net >= 0 ? s->nets[net].name : "";
-        if (name[0] == 'D' && name[1] >= '0' && name[1] <= '7' && !name[2]) c64->dram_part[name[1] - '0'] = i;
+        if (name[0] != 'D' || name[1] < '0' || name[1] > '7' || name[2]) continue;
+        if (!four) { c64->dram_part[name[1] - '0'] = i; continue; }
+        c64->dram4_part[name[1] >= '4'] = i;
+        static const int apins[8] = { 14, 13, 12, 11, 8, 7, 6, 10 };
+        for (int k = 0; k < 8; k++) {
+            int an = s->pins[part_pin(&s->parts[i], apins[k])].net;
+            const char *ma = an >= 0 ? s->nets[an].name : "";
+            c64->dram4_ma[k] = !strncmp(ma, "MA", 2) ? ma[2] - '0' : k;
+            if (c64->dram4_ma[k] == 6) ((dram4_state_t *)s->parts[i].state)->a6_row_bit = (uint8_t)k;
+        }
     }
     /* Keyboard lines on CN1, and the RESTORE line. */
     for (int i = 0; i < 8; i++) {
@@ -690,9 +920,11 @@ static void c64_create(board_t *b) {
         c64->pin_cn1_pb[i] = cn1_pin_on_net_of(b, c64->p_cia[0], 10 + i);
     }
     c64->pin_restore = part_pin(&s->parts[c64->p_cn1], 3);
-    timer556_state_t *t = s->parts[sim_find_part(s, "U20")].state;
-    t->restore_net = s->pins[c64->pin_restore].net;
-    init_keymap(b);
+    if (v->timer) {
+        timer556_state_t *t = s->parts[sim_find_part(s, v->timer)].state;
+        t->restore_net = s->pins[c64->pin_restore].net;
+    }
+    c64_init_keymap(b);
     /* The bus lines get consecutive bits in the bus bitmap, so the chips can
      * read them as words (speed only, see sim.h). */
     char name[32];
@@ -704,17 +936,44 @@ static void c64_create(board_t *b) {
             snprintf(name, sizeof(name), "%s%d", buses[k].prefix, i);
             sim_set_bus_bit(s, sim_find_net(s, name), bit++);
         }
-    /* The color RAM nibble (D8-D11 of the VIC), named after U16 pads. */
+    /* The color RAM nibble (D8-D11 of the VIC), named after the 4066's pads. */
     for (int i = 0; i < 4; i++)
         sim_set_bus_bit(s, s->pins[part_pin(&s->parts[c64->p_vic], 38 - i)].net, bit++);
-    c64->p_r5 = sim_find_part(s, "R5");
-    c64->p_r100 = sim_find_part(s, "R100");
-    c64->pin_mains = c64->p_r5 >= 0 && c64->p_r100 >= 0 ? part_pin(&s->parts[c64->p_r100], 2) : -1;
-    b->p_pla = sim_find_part(s, "U17");
+    c64->p_r5 = sim_find_part(s, v->mains_r1);
+    c64->p_r100 = sim_find_part(s, v->mains_r2);
+    c64->pin_mains = c64->p_r5 >= 0 && c64->p_r100 >= 0 ? board_pad_pin(b, c64->p_r100, v->mains_pad) : -1;
+    c64->p_sw1 = sim_find_part(s, "SW1");
+    c64->p_cn7 = sim_find_part(s, "CN7");
+    if (v->superpla) {      /* the parts c64c_power() checks, in the 250407's fields */
+        c64->p_l5 = sim_find_part(s, "L1");
+        c64->p_f1 = sim_find_part(s, "F1");
+        c64->p_cr4 = sim_find_part(s, "CR4");
+        c64->p_cr5 = sim_find_part(s, "CR3");
+        c64->p_q5 = sim_find_part(s, "Q5");
+        c64->p_l4 = c64->p_cr6 = c64->p_c90 = c64->p_vr1 = c64->p_vr2 = -1;
+    } else {
+        c64->p_l5 = sim_find_part(s, "L5");
+        c64->p_l4 = sim_find_part(s, "L4");
+        c64->p_f1 = sim_find_part(s, "F1");
+        c64->p_cr4 = sim_find_part(s, "CR4");
+        c64->p_cr5 = sim_find_part(s, "CR5");
+        c64->p_cr6 = sim_find_part(s, "CR6");
+        c64->p_c90 = sim_find_part(s, "C90");
+        c64->p_vr1 = sim_find_part(s, "VR1");
+        c64->p_vr2 = sim_find_part(s, "VR2");
+        c64->p_q5 = -1;
+    }
+    c64->powered = true;
+    /* The PLA inspector shows the 82S100's table, on the Super PLA too
+     * (on its pins: the same equations, assumed). */
+    b->p_pla = sim_find_part(s, v->superpla ? "U8" : v->pla);
+    b->pla_super = v->superpla;
     c64->p_cn6 = sim_find_part(s, "CN6");
-    c64->p_u28 = sim_find_part(s, "U28");
-    int q3 = sim_find_part(s, "Q3");
-    c64->pin_motor = q3 >= 0 ? part_pin(&s->parts[q3], 3) : -1;              /* emitter */
+    c64->p_u28 = sim_find_part(s, v->paddles);
+    c64->p_por = v->por ? sim_find_part(s, v->por) : -1;
+    c64->pin_por = c64->p_por >= 0 ? board_pad_pin(b, c64->p_por, v->por_pad) : -1;
+    int q = sim_find_part(s, v->motor);
+    c64->pin_motor = q >= 0 ? board_pad_pin(b, q, v->motor_pad) : -1;          /* emitter */
     c64->pin_motor_ctl = part_pin(&s->parts[c64->p_cpu], 24);                    /* P5 */
     c64->pin_hmotor = c64->pin_hwrite = -1;
     /* The RESET button sits on the user port, like a reset cartridge. */
@@ -727,6 +986,7 @@ static void c64_create(board_t *b) {
 static void c64_power_on(board_t *b) {
     c64_t *c64 = C64(b);
     c64->mains_next = 0;
+    c64->por_until = POR_CYCLES;      /* board_power_on() starts the cycles at 0 */
     c64->cpu_pins = m6502_init(&c64->cpu, &(m6502_desc_t){
         .m6510_in_cb = cpu_port_in,
         .m6510_out_cb = cpu_port_out,
@@ -761,7 +1021,7 @@ static void c64_power_on(board_t *b) {
 /* ------------------------------------------------------------------------ */
 
 /* If the set of closed key switches changed, rebuild the network. */
-static void sync_keys(board_t *b) {
+static void c64_sync_keys(board_t *b) {
     c64_t *c64 = C64(b);
     bool changed = false;
     for (int line = 0; line < 9; line++) {
@@ -771,8 +1031,8 @@ static void sync_keys(board_t *b) {
     if (changed) board_rebuild(b);
 }
 
-static void c64_key_down(board_t *b, int key) { kbd_key_down(&C64(b)->kbd, key); sync_keys(b); }
-static void c64_key_up(board_t *b, int key) { kbd_key_up(&C64(b)->kbd, key); sync_keys(b); }
+static void c64_key_down(board_t *b, int key) { kbd_key_down(&C64(b)->kbd, key); c64_sync_keys(b); }
+static void c64_key_up(board_t *b, int key) { kbd_key_up(&C64(b)->kbd, key); c64_sync_keys(b); }
 
 /* Once per frame: release keys that were pressed long enough. 'us' is
  * emulated time, so a key stays down long enough for the KERNAL to scan it
@@ -780,12 +1040,18 @@ static void c64_key_up(board_t *b, int key) { kbd_key_up(&C64(b)->kbd, key); syn
 static void c64_frame_update(board_t *b, uint32_t us) {
     c64_t *c64 = C64(b);
     kbd_update(&c64->kbd, us);
-    sync_keys(b);
+    c64_sync_keys(b);
 }
 
 /* Write a byte straight into the eight DRAM chips. */
-static void ram_poke(board_t *b, uint16_t addr, uint8_t v) {
+static void c64_ram_poke(board_t *b, uint16_t addr, uint8_t v) {
     c64_t *c64 = C64(b);
+    if (board_is_250469(b)) {
+        int cell = dram4_cell(b, addr);
+        dram4(b, 0)->cells[cell] = v & 15;
+        dram4(b, 1)->cells[cell] = v >> 4;
+        return;
+    }
     int cell = ((addr & 0xFF) << 8) | (addr >> 8);     /* row = A0-A7, column = A8-A15 */
     for (int bit = 0; bit < 8; bit++) {
         dram_state_t *st = b->sim.parts[c64->dram_part[bit]].state;
@@ -796,23 +1062,24 @@ static void ram_poke(board_t *b, uint16_t addr, uint8_t v) {
 bool c64_load_prg(board_t *b, const char *path, bool run, char *err, int errlen) {
     FILE *f = fopen(path, "rb");
     if (!f) { snprintf(err, errlen, "can't open %s", path); return false; }
-    static uint8_t buf[65536 + 2];
-    size_t n = fread(buf, 1, sizeof(buf), f);
+    uint8_t *buf = malloc(65536 + 2);      /* not static: boards may load in parallel threads */
+    size_t n = buf ? fread(buf, 1, 65536 + 2, f) : 0;
     fclose(f);
-    if (n < 3) { snprintf(err, errlen, "%s is too short", path); return false; }
+    if (n < 3) { free(buf); snprintf(err, errlen, "%s is too short", path); return false; }
     uint16_t start = buf[0] | (buf[1] << 8);
     uint16_t end = (uint16_t)(start + n - 2);
-    for (size_t i = 2; i < n; i++) ram_poke(b, (uint16_t)(start + i - 2), buf[i]);
+    for (size_t i = 2; i < n; i++) c64_ram_poke(b, (uint16_t)(start + i - 2), buf[i]);
+    free(buf);
     /* BASIC pointers: end of program / start of variables. */
     static const uint16_t ptrs[] = { 0x2D, 0x2F, 0x31, 0x33, 0xAE };
     for (size_t i = 0; i < sizeof(ptrs) / sizeof(ptrs[0]); i++) {
-        ram_poke(b, ptrs[i], end & 0xFF);
-        ram_poke(b, (uint16_t)(ptrs[i] + 1), end >> 8);
+        c64_ram_poke(b, ptrs[i], end & 0xFF);
+        c64_ram_poke(b, (uint16_t)(ptrs[i] + 1), end >> 8);
     }
     if (run) {      /* type RUN<return> through the keyboard buffer */
         const char *cmd = "RUN\r";
-        for (int i = 0; i < 4; i++) ram_poke(b, (uint16_t)(0x277 + i), (uint8_t)cmd[i]);
-        ram_poke(b, 0xC6, 4);
+        for (int i = 0; i < 4; i++) c64_ram_poke(b, (uint16_t)(0x277 + i), (uint8_t)cmd[i]);
+        c64_ram_poke(b, 0xC6, 4);
     }
     snprintf(err, errlen, "loaded %s at $%04X-$%04X", path, start, end);
     return true;
@@ -828,12 +1095,12 @@ static void c64_monitor(board_t *b, uint32_t *out) {
     bool sync = !vic->dead && s->cycle - c64->vic_last_tick < 20000 &&
                 s->pins[part_pin(vic, 15)].fault == PF_OK;
     bool color = c64->seen_color[0] != c64->seen_color[1] && s->pins[part_pin(vic, 14)].fault == PF_OK;
-    static uint32_t seed = 12345;
+    b->no_signal = !sync;
     for (int i = 0; i < C64_SCREEN_W * C64_SCREEN_H; i++) {
         uint32_t c = b->screen[i];
         if (!sync) {
-            seed = seed * 1103515245u + 12345u;
-            uint32_t g = (seed >> 24) & 0xFF;
+            b->snow_seed = b->snow_seed * 1103515245u + 12345u;
+            uint32_t g = (b->snow_seed >> 24) & 0xFF;
             g = g * 3 / 4;
             c = 0xFF000000u | (g << 16) | (g << 8) | g;
         } else if (!color) {
@@ -850,10 +1117,31 @@ static void c64_monitor(board_t *b, uint32_t *out) {
  * plugged). */
 static const file_kind_t c64_prg = { "program", "Load and RUN", true, -1 };
 static const file_kind_t c64_crt = { "cartridge", "Plug the cartridge", false, ROLE_ROM };
+static const file_kind_t c64_raw = { "ROM image", "Plug the ROM", false, ROLE_ROM };
+
+static bool is_raw_rom(const char *path) {
+    size_t pl = strlen(path);
+    return pl > 4 && (!strcasecmp(path + pl - 4, ".rom") || !strcasecmp(path + pl - 4, ".bin"));
+}
 
 static const file_kind_t *c64_file_kind(const char *path, char *info, int len, bool *bad) {
+    const file_kind_t *state = board_state_file_kind(path, info, len, bad);
+    if (state) return state;
     size_t pl = strlen(path);
     bool prg = pl > 4 && !strcasecmp(path + pl - 4, ".prg"), crt = pl > 4 && !strcasecmp(path + pl - 4, ".crt");
+    if (is_raw_rom(path)) {
+        /* No header: the whole image tells (it is small). */
+        FILE *f = fopen(path, "rb");
+        size_t cap = 1024 * 1024 + 3;
+        uint8_t *buf = f ? malloc(cap) : NULL;
+        size_t n = buf ? fread(buf, 1, cap, f) : 0;
+        if (f) fclose(f);
+        *bad = !buf || n == cap || !c64_raw_rom_info(buf, n, info, len);
+        if (buf && n == cap) snprintf(info, len, "too big for a ROM image");
+        if (!buf) snprintf(info, len, "can't read the file");
+        free(buf);
+        return &c64_raw;
+    }
     if (!prg && !crt) return NULL;
     FILE *f = fopen(path, "rb");
     uint8_t h[64] = {0};
@@ -888,11 +1176,19 @@ static const file_kind_t *c64_file_kind(const char *path, char *info, int len, b
     return &c64_crt;
 }
 
-/* A .prg goes into RAM; a .crt cartridge into the expansion port. */
+/* A .prg goes into RAM; a .crt cartridge or a raw .rom/.bin image into the
+ * expansion port (or a KERNAL image into U4). */
 static bool c64_load(board_t *b, const char *path, bool run, char *msg, int msglen) {
     size_t n = strlen(path);
-    if (n > 4 && !strcasecmp(path + n - 4, ".crt")) return c64_insert_cart(b, path, msg, msglen);
+    if ((n > 4 && !strcasecmp(path + n - 4, ".crt")) || is_raw_rom(path)) return c64_insert_cart(b, path, msg, msglen);
     return c64_load_prg(b, path, run, msg, msglen);
+}
+
+void c64_set_kernal(board_t *b, const uint8_t *image) {
+    sim_t *s = &b->sim;
+    const uint8_t *stock = board_is_250469(b) ? basic_kernal_rom() : dump_c64_kernalv3_bin;
+    ((rom_state_t *)s->parts[sim_find_part(s, CV(b)->kernal)].state)->data = image ? image : stock;
+    board_config_changed(b);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -910,6 +1206,8 @@ static void c64_cpu_regs(board_t *b, char *buf, int len) {
              m6502_x(&c64->cpu), m6502_y(&c64->cpu), m6502_s(&c64->cpu),
              !c64->cpu_running ? "(no clock)" : c64->cpu_in_reset ? "(in reset)" : "");
 }
+
+const uint8_t *c64_char_rom(void) { return dump_c64_char_bin; }
 
 /* Read the text on the monitor picture, like a person would: match every
  * 8x8 cell of the text area against the character ROM glyphs. Cells that
@@ -934,7 +1232,7 @@ static int match_cell(const uint32_t *px, int x0, int y0, uint32_t bg) {
 }
 
 static void c64_print_text(board_t *b) {
-    static uint32_t px[C64_SCREEN_W * C64_SCREEN_H];
+    uint32_t *px = malloc(C64_SCREEN_W * C64_SCREEN_H * sizeof(uint32_t));
     c64_monitor(b, px);
     /* The text window starts where the border ends (32,36 on a healthy
      * machine); if there is no border, assume the normal position. */
@@ -959,6 +1257,7 @@ static void c64_print_text(board_t *b) {
         while (end > 0 && line[end - 1] == ' ') line[--end] = 0;
         printf("|%s\n", line);
     }
+    free(px);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -993,41 +1292,94 @@ static int c64_host_char(int c) {
     return c;
 }
 
+/* The DRAM cell of a CPU address (see dram_peek), or the color RAM's. */
+static int c64_ram_cell(board_t *b, int part, uint16_t addr) {
+    for (int i = 0; i < 8; i++)
+        if (C64(b)->dram_part[i] == part) return ((addr & 0xFF) << 8) | (addr >> 8);
+    for (int i = 0; i < 2; i++)
+        if (C64(b)->dram4_part[i] == part) return dram4_cell(b, addr);
+    if (part == sim_find_part(&b->sim, CV(b)->vram) && addr >= 0xD800 && addr < 0xDC00) return addr & 0x3FF;
+    return -1;
+}
+
+static const c64_variant_t c64_250407 = {
+    .cpu = "U7", .vic = "U19", .cia1 = "U1", .cia2 = "U2", .sid = "U18", .osc = "U31", .pla = "U17",
+    .paddles = "U28", .vram = "U6", .basic = "U3", .kernal = "U4", .chr = "U5", .timer = "U20",
+    .mains_r1 = "R5", .mains_r2 = "R100", .mains_pad = "2", .motor = "Q3", .motor_pad = "3", .gnd = "Earth",
+};
+
+/* The 250469: no 556 (C43 and the 74LS14 make the power-on reset, see
+ * por_tick; the RESTORE key reaches the Super PLA through the 74LS14), the
+ * mains through R16, the motor driven by Q1. */
+static const c64_variant_t c64_250469 = {
+    .cpu = "U6", .vic = "U7", .cia1 = "U1", .cia2 = "U2", .sid = "U9", .osc = "U20", .pla = "U8",
+    .paddles = "U18", .vram = "U19", .basic = NULL, .kernal = "U4", .chr = "U5", .timer = NULL,
+    .mains_r1 = "R16", .mains_r2 = "R16", .mains_pad = "1", .motor = "Q1", .motor_pad = "E",
+    .por = "C43", .por_pad = "1", .gnd = "GND", .superpla = true,
+};
+
+#define C64_MACHINE_COMMON \
+    .size = sizeof(c64_t), \
+    .cpu_hz = C64_FREQ, \
+    .cycles_per_frame = C64_CYCLES_PER_FRAME, \
+    .steps_per_cycle = C64_STEPS_PER_CYCLE, \
+    .screen_w = C64_SCREEN_W, .screen_h = C64_SCREEN_H, \
+    .ready_cycles = 3 * C64_FREQ, \
+    .conns = c64_conn_defs, .nconns = sizeof(c64_conn_defs) / sizeof(c64_conn_defs[0]), \
+    .crystals = "Y1", \
+    .diodes = "CR", \
+    .jumpers = "JP", \
+    .keys_help = "Keys: ESC=RUN/STOP  PgUp=RESTORE  TAB=CTRL  ALT=C=", \
+    .reset_help = "Hold to press RESET: shorts /RESET to GND (user port pin 3 to pin 1)", \
+    .create = c64_create, \
+    .power_on = c64_power_on, \
+    .run = c64_run, \
+    .joins = c64_joins, \
+    .key_down = c64_key_down, \
+    .key_up = c64_key_up, \
+    .frame_update = c64_frame_update, \
+    .host_key = c64_host_key, \
+    .host_char = c64_host_char, \
+    .monitor = c64_monitor, \
+    .files_title = "Open a program (.prg), a cartridge (.crt) or a ROM (.rom, .bin)", \
+    .cart_slot = "CN6", \
+    .cart_name = c64_cart_name, \
+    .remove_cart = c64_remove_cart, \
+    .cart_banks = c64_cart_banks, \
+    .cart_bank = c64_cart_bank, \
+    .cart_bank_info = c64_cart_bank_info, \
+    .set_cart_bank = c64_set_cart_bank, \
+    .file_kind = c64_file_kind, \
+    .load = c64_load, \
+    .cpu_status = c64_cpu_status, \
+    .cpu_regs = c64_cpu_regs, \
+    .print_text = c64_print_text, \
+    .ram_cell = c64_ram_cell
+
+const machine_t machine_c64c = {
+    .id = "c64c",
+    .name = "Commodore 64",
+    .board_name = "C64 ASSY 250469",
+    .issue = "250469",
+    .variant = &c64_250469,
+    .data = &bd_c64c,
+    .sim = { .rail_of = c64c_rail_of, .kind_of = c64_kind_of, .cycles_per_us = 1.0 },
+    .parts = c64c_part_defs, .nparts = sizeof(c64c_part_defs) / sizeof(c64c_part_defs[0]),
+    .link_resistors = "R101",
+    .supplies = "9V_AC1 9V_AC2 9VAC1' 9VAC2' +9V_UNREG",
+    C64_MACHINE_COMMON,
+};
+
 const machine_t machine_c64 = {
     .id = "c64",
     .name = "Commodore 64",
     .board_name = "C64 ASSY 250407",
-    .size = sizeof(c64_t),
+    .issue = "250407",
+    .variant = &c64_250407,
     .data = &bd_c64,
     .sim = { .rail_of = c64_rail_of, .kind_of = c64_kind_of, .cycles_per_us = 1.0 },
-    .cpu_hz = C64_FREQ,
-    .cycles_per_frame = C64_CYCLES_PER_FRAME,
-    .steps_per_cycle = C64_STEPS_PER_CYCLE,
-    .screen_w = C64_SCREEN_W, .screen_h = C64_SCREEN_H,
-    .ready_cycles = 3 * C64_FREQ,
-    .parts = part_defs, .nparts = sizeof(part_defs) / sizeof(part_defs[0]),
-    .conns = conn_defs, .nconns = sizeof(conn_defs) / sizeof(conn_defs[0]),
+    .parts = c64_part_defs, .nparts = sizeof(c64_part_defs) / sizeof(c64_part_defs[0]),
     .link_resistors = "RP1 RP2 R42",
-    .crystals = "Y1",
-    .keys_help = "Keys: ESC=RUN/STOP  PgUp=RESTORE  TAB=CTRL  ALT=C=",
-    .reset_help = "Hold to press RESET: shorts /RESET to GND (user port pin 3 to pin 1)",
-    .create = c64_create,
-    .power_on = c64_power_on,
-    .run = c64_run,
-    .joins = c64_joins,
-    .key_down = c64_key_down,
-    .key_up = c64_key_up,
-    .frame_update = c64_frame_update,
-    .host_key = c64_host_key,
-    .host_char = c64_host_char,
-    .monitor = c64_monitor,
-    .files_title = "Open a program (.prg) or a cartridge (.crt)",
-    .cart_slot = "CN6",
-    .cart_name = c64_cart_name,
-    .remove_cart = c64_remove_cart,
-    .file_kind = c64_file_kind,
-    .load = c64_load,
-    .cpu_status = c64_cpu_status,
-    .cpu_regs = c64_cpu_regs,
-    .print_text = c64_print_text,
+    .supplies = "9VAC 9VAC~ '9VAC~ +9V_UNREG",
+    C64_MACHINE_COMMON,
 };

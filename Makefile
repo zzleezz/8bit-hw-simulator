@@ -7,8 +7,8 @@ CC      ?= cc
 OPT     ?= -O3 -flto
 CFLAGS  := $(OPT) -g -Wall -Wextra -Wno-unused-parameter -Isrc -Ichips -Ithird_party -DSOKOL_GLCORE
 
-SIM_SRC = src/sim.c src/parts.c src/board.c src/c64.c src/cart.c src/harness.c src/c64_board_data.c src/zx48.c src/ula.c src/zx48_board_data.c src/png.c src/chips_impl.c
-APP_SRC = src/main.c src/ui.c src/inspect.c src/browser.c
+SIM_SRC = src/sim.c src/parts.c src/board.c src/c64.c src/cart.c src/harness.c src/c64_board_data.c src/c64c_board_data.c src/zx48.c src/ula.c src/zx48_board_data.c src/zx48i2_board_data.c src/zx48i1_board_data.c src/zx48i4b_board_data.c src/zx48i6a_board_data.c src/png.c src/chips_impl.c
+APP_SRC = src/main.c src/ui.c src/inspect.c src/browser.c src/diagnose.c src/repairs.c src/icon_data.c src/atlas_browse.c src/thumbtex.c src/probe.c src/probe_db.c src/filedialog.c src/atlas.c src/atlas_match.c src/stb_image_impl.c
 
 EXE =
 ifeq ($(OS),Windows_NT)
@@ -19,7 +19,7 @@ ifeq ($(OS),Windows_NT)
   EXE = .exe
   SOKOL_FLAGS = -Wno-unused-but-set-variable -Wno-sign-compare -Wno-unused-variable \
                 -Wno-cast-function-type -Wno-unknown-pragmas
-  LIBS = -static -lkernel32 -luser32 -lgdi32 -lshell32 -lopengl32 -lm
+  LIBS = -mwindows -static -lpthread -lkernel32 -luser32 -lgdi32 -lshell32 -lcomdlg32 -lopengl32 -ladvapi32 -lm
 else ifeq ($(shell uname -s),Darwin)
   SOKOL_FLAGS = -x objective-c -Wno-deprecated-declarations -Wno-unused-but-set-variable \
                 -Wno-sign-compare -Wno-unused-variable

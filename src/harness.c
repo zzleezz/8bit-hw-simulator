@@ -112,6 +112,7 @@ void board_set_harness(board_t *b, bool plugged) {
     c64->pin_hwrite = find_pin(b, "CN3.E");
     c64->harness = plugged;
     c64->harness_write = false;
+    board_config_changed(b);
     if (c64->pin_hwrite >= 0) b->sim.pins[c64->pin_hwrite].drive = DRV_Z;
     /* Dongles go in with the power off: switch the C64 on again. */
     board_rebuild(b);

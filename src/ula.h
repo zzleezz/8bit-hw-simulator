@@ -37,6 +37,9 @@ typedef struct {
      * 7 the EAR level it reads, 8-15 D0-D7, 16-20 KB0-KB4), kept only
      * while 'logging' (set by the machine for ula_log()). */
     bool logging;
+    /* A 5C ULA (set by the machine): its clock output pulls up itself.
+     * The 6C001's is open collector, pulled up by R73. */
+    bool clk_pulls_up;
     uint32_t inputs;
     uint8_t pix;                    /* the colour of the last pixel (bit 3 bright) */
 } ula_state_t;

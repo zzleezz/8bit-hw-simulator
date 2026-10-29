@@ -4,5 +4,7 @@
 #define PNG_H
 #include <stdbool.h>
 #include <stdint.h>
+/* Build the CRC table now (before writing from several threads). */
+void png_init(void);
 bool png_write(const char *path, const uint32_t *pixels, int w, int h);
 #endif

@@ -1,6 +1,6 @@
-/* c64.h - the Commodore 64 board, ASSY 250407: netlist + part models +
- * the four big chip cores (6510, VIC-II, two CIAs, SID), and the bus
- * cycle that moves them. Shared by c64.c, cart.c and harness.c. */
+/* c64.h - the Commodore 64 boards, ASSY 250407 and 250469: netlist + part
+ * models + the four big chip cores (6510, VIC-II, two CIAs, SID), and the
+ * bus cycle that moves them. Shared by c64.c, cart.c and harness.c. */
 #ifndef C64_H
 #define C64_H
 #include "board.h"
@@ -47,8 +47,11 @@ typedef struct c64 {
     m6569_t vic;    int p_vic;
     m6526_t cia[2]; int p_cia[2];
     m6581_t sid;    int p_sid;
-    int p_u31, p_y1, p_cn1;
+    int p_osc, p_y1, p_cn1;     /* the clock oscillator (U31, the 250469's U20) */
     int dram_part[8];           /* the DRAM holding each data bit */
+    /* The 250469's two 41464s: the one holding D0-D3, the one holding
+     * D4-D7, and the MA line on each of their address pins A0-A7. */
+    int dram4_part[2], dram4_ma[8];
     int pin_cn1_pa[8], pin_cn1_pb[8], pin_restore, net_gnd;
     /* State of the current bus half cycle. */
     int phase;                  /* 1 = phi1 (VIC), 2 = phi2 (CPU or VIC) */
@@ -81,7 +84,16 @@ typedef struct c64 {
     /* The mains, as the board sees it through R5 and R100, and the
      * cassette motor driver (see c64.c). */
     int pin_mains, p_r5, p_r100, pin_motor, pin_motor_ctl;
+    /* The 250469's power-on reset: C43 holds the 74LS14 input low until
+     * this cycle (see c64.c). */
+    int pin_por, p_por;
+    uint64_t por_until;
     uint64_t mains_next, mains_edges;     /* next flip of the mains, flips so far */
+    /* The power path (see c64_power): its parts, whether the 9 V AC gets
+     * through, and whether the board was powered at the last rebuild (when
+     * the power comes back, the C64 starts cold, as switched on). */
+    int p_sw1, p_cn7, p_l5, p_l4, p_f1, p_cr4, p_cr5, p_cr6, p_c90, p_vr1, p_vr2, p_q5;
+    bool ac_ok, powered, cold_start;
     /* The 586220 diagnostic harness (harness.c): plugged, and the level of
      * WRITE that sets its switches. */
     bool harness, harness_write;
@@ -92,7 +104,10 @@ typedef struct c64 {
 } c64_t;
 
 static inline c64_t *C64(board_t *b) { return (c64_t *)b; }
-static inline bool board_is_c64(const board_t *b) { return b->m == &machine_c64; }
+/* A C64 board, of either assembly? The 250469 (the C64C's, with the Super
+ * PLA) is the other one. */
+static inline bool board_is_c64(const board_t *b) { return b->m == &machine_c64 || b->m == &machine_c64c; }
+static inline bool board_is_250469(const board_t *b) { return b->m == &machine_c64c; }
 
 /* Load a .prg straight into the DRAM chips (a "backdoor", like a freezer
  * cartridge: it works even on a broken machine). Optionally type RUN. */
@@ -103,6 +118,27 @@ bool c64_load_prg(board_t *b, const char *path, bool run, char *err, int errlen)
 bool c64_insert_cart(board_t *b, const char *path, char *msg, int msglen);
 void c64_remove_cart(board_t *b);
 const char *c64_cart_name(board_t *b);
+/* Raw .rom/.bin images (cart.c). Several 8K banks are a DesTestSwitch
+ * EPROM: how many (0 for none or a .crt), the one selected, a line about
+ * one, and flipping the switch. An 8K image goes in the expansion port or
+ * in the KERNAL socket U4 (on the 250469 with BASIC below it, as one
+ * 27128); a 16K BASIC + KERNAL image only in U4: c64_cart_socket() is 1
+ * in U4, 0 in the port, -1 if it can't move. All of them restart the C64. */
+int c64_cart_banks(board_t *b);
+int c64_cart_bank(board_t *b);
+const char *c64_cart_bank_info(board_t *b, int bank);
+void c64_set_cart_bank(board_t *b, int bank);
+int c64_cart_socket(board_t *b);
+bool c64_cart_in_u4(board_t *b);
+void c64_set_cart_socket(board_t *b, bool u4);
+/* What a raw image is, a line for the file browser (false: not one the C64
+ * takes), and whether it looks like a C64 ROM rather than a Spectrum one. */
+bool c64_raw_rom_info(const uint8_t *buf, size_t n, char *info, int len);
+/* The image in the KERNAL socket U4, NULL for the stock one: 8K on the
+ * 250407, 16K (BASIC + KERNAL, see c64_basic_kernal()) on the 250469. */
+void c64_set_kernal(board_t *b, const uint8_t *image);
+/* BASIC and an 8K KERNAL, as one 16K image for the 250469's U4. */
+void c64_basic_kernal(uint8_t out[16384], const uint8_t *kernal);
 /* Plug or unplug the 586220 diagnostic harness (harness.c); the C64 is
  * switched off and on. board_harness() is false on other machines. */
 void board_set_harness(board_t *b, bool plugged);
@@ -112,5 +148,7 @@ bool board_harness(board_t *b);
 void harness_joins(board_t *b);
 void harness_tick(board_t *b);
 int board_pot_value(board_t *b, int sid_pin);
+/* The character ROM (U5): 2K upper case and graphics, 2K lower case. */
+const uint8_t *c64_char_rom(void);
 
 #endif
