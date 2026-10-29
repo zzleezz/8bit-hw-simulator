@@ -161,6 +161,7 @@ static struct {
     char focus_note[240];
     /* "Diagnose screenshot..." clicked: the system's dialog, after the frame. */
     bool want_pick;
+    bool want_paste;            /* "Paste screenshot" or Ctrl+V: the clipboard's picture, after the frame */
     int want_records_file;      /* a repair records file to pick (diagnose_action_t.records_file) */
     char diag_status[300];      /* what the last diagnosis did */
     /* The machine on the bench changed: the screenshot is matched again,
@@ -2001,6 +2002,7 @@ static void unlock_board(void);
  * moment, and reads no board; the simulation goes on meanwhile). */
 static void diagnose_picture(const char *path) {
     lock_board();
+    U.diag_status[0] = 0;
     int machine = bench_machine();
     unlock_board();
     diagnose_open(path, machine);
@@ -2420,19 +2422,26 @@ static void controls_window(struct nk_context *ctx, float x, float y, float h) {
                 nk_tooltip(ctx, "Look through every picture the fault atlas has of this board, narrowed by what the "
                                 "screen shows (kind, colors, behavior...), and the faults behind each");
             if (nk_button_label(ctx, "Browse the atlas...")) U.want_browse = true;
-            nk_layout_row_dynamic(ctx, 26, diagnose_has_results() ? 2 : 1);
+            nk_layout_row_dynamic(ctx, 26, 2);
             if (nk_widget_is_hovered(ctx))
                 nk_tooltip(ctx, "Pick a screenshot of the broken machine's screen (PNG, JPG or BMP, from a USB capture "
                                 "card): the faults that give that picture, ready to put on the board");
             if (nk_button_label(ctx, "Diagnose screenshot...")) U.want_pick = true;
-            if (diagnose_has_results() && nk_button_label(ctx, "Show the last diagnosis")) diagnose_show();
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "Diagnose the picture on the clipboard (Ctrl+V): a screenshot copied from the capture "
+                                "program, or a picture file copied in the file manager");
+            if (nk_button_label(ctx, "Paste screenshot")) U.want_paste = true;
+            if (diagnose_has_results()) {
+                nk_layout_row_dynamic(ctx, 26, 1);
+                if (nk_button_label(ctx, "Show the last diagnosis")) diagnose_show();
+            }
             nk_layout_row_dynamic(ctx, 26, 1);
             if (nk_widget_is_hovered(ctx))
                 nk_tooltip(ctx, "Repairs of real machines you (or others) recorded: the screenshot and the chips "
                                 "that were faulty. Look, leave out, edit, delete, merge, export");
             if (nk_button_label(ctx, "Repair records...")) diagnose_records_open(bench_machine());
             nk_layout_row_dynamic(ctx, 20, 1);
-            nk_label_colored(ctx, U.diag_status[0] ? U.diag_status : "or drop a .png, .jpg or .bmp screenshot on the window",
+            nk_label_colored(ctx, U.diag_status[0] ? U.diag_status : "or drop a .png, .jpg or .bmp screenshot on the window, or Ctrl+V",
                              NK_TEXT_LEFT, U.diag_status[0] ? COL_FAULT : COL_DIMTEXT);
             nk_tree_pop(ctx);
         }
@@ -2904,6 +2913,18 @@ void ui_frame(void) {
             unlock_board();
         }
     }
+    if (U.want_paste) {
+        U.want_paste = false;
+        char path[4096];
+        int got = filedialog_paste_picture(path, sizeof(path));
+        if (got == FILEDIALOG_PICKED) diagnose_picture(path);
+        else if (got == FILEDIALOG_NONE) {
+            snprintf(U.diag_status, sizeof(U.diag_status),
+                     "Can't read the clipboard here (install wl-paste or xclip): drop the screenshot on the window");
+        } else {
+            snprintf(U.diag_status, sizeof(U.diag_status), "No picture on the clipboard: copy the screenshot first");
+        }
+    }
     if (U.want_pick) {
         U.want_pick = false;
         char path[4096];
@@ -2987,6 +3008,13 @@ static void handle_event(const sapp_event *ev) {
     if (U.notes_typing) return;             /* typing notes */
     if (atlas_browse_wants_keyboard()) return;  /* typing a pin name */
     if (diagnose_wants_keyboard()) return;      /* typing a repair record's notes */
+    /* Ctrl+V: the clipboard's screenshot diagnosed (no text field is being
+     * typed in, and the machine has no use for it). */
+    if (ev->type == SAPP_EVENTTYPE_KEY_DOWN && ev->key_code == SAPP_KEYCODE_V && !ev->key_repeat &&
+        (ev->modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER))) {
+        U.want_paste = true;
+        return;
+    }
     if (ev->type == SAPP_EVENTTYPE_CHAR) {
         int c = (int)ev->char_code;
         if (c < 32 || c >= 127 || (ev->modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER))) return;

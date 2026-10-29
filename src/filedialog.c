@@ -4,9 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <time.h>
 #ifdef _WIN32
 #include <windows.h>
 #include <commdlg.h>
+#include <shellapi.h>
 #else
 #include <limits.h>
 #include <sys/wait.h>
@@ -72,6 +75,126 @@ int filedialog_open_picture(char *path, int len) {
                       " --getopenfilename . 'image/png image/jpeg image/bmp' 2>/dev/null;"
                       " else exit 127; fi",
                       path, len);
+#endif
+}
+
+/* Where a pasted picture goes: the temp folder, a name of its own. */
+static void paste_name(char *path, int len, const char *ext) {
+    char dir[4096];
+#ifdef _WIN32
+    wchar_t w[MAX_PATH + 1];
+    DWORD n = GetTempPathW(MAX_PATH + 1, w);
+    if (!n || n > MAX_PATH || !WideCharToMultiByte(CP_UTF8, 0, w, -1, dir, sizeof(dir), NULL, NULL))
+        snprintf(dir, sizeof(dir), ".");
+    slashes(dir);
+#else
+    const char *t = getenv("TMPDIR");
+    snprintf(dir, sizeof(dir), "%s", t && t[0] ? t : "/tmp");
+#endif
+    size_t dl = strlen(dir);
+    if (dl && dir[dl - 1] == '/') dir[dl - 1] = 0;
+    time_t now = time(NULL);
+    char stamp[32];
+    strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", localtime(&now));
+    snprintf(path, (size_t)len, "%s/pasted-screenshot-%s.%s", dir, stamp, ext);
+}
+
+static bool write_file(const char *path, const void *a, size_t alen, const void *b, size_t blen) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return false;
+    bool ok = fwrite(a, 1, alen, f) == alen && (!blen || fwrite(b, 1, blen, f) == blen);
+    return fclose(f) == 0 && ok;
+}
+
+static bool is_picture_name(const char *p) {
+    const char *dot = strrchr(p, '.');
+    return dot && (!strcasecmp(dot, ".png") || !strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg") ||
+                   !strcasecmp(dot, ".bmp"));
+}
+
+int filedialog_paste_picture(char *path, int len) {
+    path[0] = 0;
+#ifdef _WIN32
+    if (!OpenClipboard(GetActiveWindow())) return FILEDIALOG_CANCELLED;
+    int got = FILEDIALOG_CANCELLED;
+    HANDLE h;
+    UINT png = RegisterClipboardFormatW(L"PNG");
+    /* A picture file copied in Explorer: that file. */
+    if ((h = GetClipboardData(CF_HDROP))) {
+        wchar_t file[MAX_PATH * 4];
+        if (DragQueryFileW((HDROP)h, 0, file, sizeof(file) / sizeof(file[0])) &&
+            WideCharToMultiByte(CP_UTF8, 0, file, -1, path, len, NULL, NULL)) {
+            slashes(path);
+            if (is_picture_name(path)) got = FILEDIALOG_PICKED;
+            else path[0] = 0;
+        }
+    }
+    /* PNG bytes (browsers, Snipping Tool): written as they are, small. */
+    if (got != FILEDIALOG_PICKED && png && (h = GetClipboardData(png))) {
+        const void *p = GlobalLock(h);
+        if (p) {
+            paste_name(path, len, "png");
+            if (write_file(path, p, GlobalSize(h), NULL, 0)) got = FILEDIALOG_PICKED;
+            GlobalUnlock(h);
+        }
+    }
+    /* A bitmap (Print Screen, most programs): a .bmp file, its header
+     * put before the DIB the clipboard holds. */
+    if (got != FILEDIALOG_PICKED && (h = GetClipboardData(CF_DIB))) {
+        const BITMAPINFOHEADER *bi = GlobalLock(h);
+        if (bi) {
+            size_t size = GlobalSize(h), colors = bi->biClrUsed;
+            if (!colors && bi->biBitCount <= 8) colors = (size_t)1 << bi->biBitCount;
+            size_t masks = (bi->biSize == sizeof(BITMAPINFOHEADER) && bi->biCompression == BI_BITFIELDS) ? 12 : 0;
+            BITMAPFILEHEADER fh;
+            memset(&fh, 0, sizeof(fh));
+            fh.bfType = 0x4D42;                     /* "BM" */
+            fh.bfSize = (DWORD)(sizeof(fh) + size);
+            fh.bfOffBits = (DWORD)(sizeof(fh) + bi->biSize + masks + colors * 4);
+            paste_name(path, len, "bmp");
+            if (write_file(path, &fh, sizeof(fh), bi, size)) got = FILEDIALOG_PICKED;
+            GlobalUnlock(h);
+        }
+    }
+    CloseClipboard();
+    if (got != FILEDIALOG_PICKED) path[0] = 0;
+    return got;
+#else
+    char cmd[4600];
+    paste_name(path, len, "png");
+#ifdef __APPLE__
+    /* Fails (nothing written) when the clipboard holds no picture. */
+    snprintf(cmd, sizeof(cmd),
+             "osascript -e 'set f to open for access POSIX file \"%s\" with write permission'"
+             " -e 'try' -e 'write (the clipboard as «class PNGf») to f' -e 'end try'"
+             " -e 'close access f' >/dev/null 2>&1",
+             path);
+#else
+    snprintf(cmd, sizeof(cmd),
+             "if command -v wl-paste >/dev/null 2>&1 && [ -n \"$WAYLAND_DISPLAY\" ]; then"
+             " wl-paste --type image/png > '%s' 2>/dev/null;"
+             " elif command -v xclip >/dev/null 2>&1; then"
+             " xclip -selection clipboard -t image/png -o > '%s' 2>/dev/null;"
+             " else exit 127; fi",
+             path, path);
+#endif
+    int st = system(cmd);
+    if (st != -1 && WIFEXITED(st) && WEXITSTATUS(st) == 127) {
+        remove(path);
+        path[0] = 0;
+        return FILEDIALOG_NONE;
+    }
+    FILE *f = fopen(path, "rb");
+    long n = 0;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        n = ftell(f);
+        fclose(f);
+    }
+    if (n > 0) return FILEDIALOG_PICKED;
+    remove(path);
+    path[0] = 0;
+    return FILEDIALOG_CANCELLED;
 #endif
 }
 

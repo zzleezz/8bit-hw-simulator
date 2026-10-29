@@ -209,9 +209,9 @@ trust.
 
 A picture of a real broken machine's screen (a USB capture card
 screenshot: PNG, JPG or BMP) can be matched against `fault_atlas.bin`,
-the screens of thousands of simulated faults: drop it on the window, or
+the screens of thousands of simulated faults: drop it on the window,
 use "Diagnose screenshot..." in the control panel (`--diagnose FILE` on
-the command line). The window lists the faults whose screen looks most
+the command line), or copy it and press "Paste screenshot" (or Ctrl+V). The window lists the faults whose screen looks most
 alike; "Apply & Inspect" puts one on the board, power cycles it and shows
 where it is. It only matches against the board on the bench. All six
 boards have their own pictures in the atlas. An atlas file with none of

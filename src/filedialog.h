@@ -13,6 +13,12 @@ enum { FILEDIALOG_PICKED, FILEDIALOG_CANCELLED, FILEDIALOG_NONE };
  * in PATH, FILEDIALOG_CANCELLED, or FILEDIALOG_NONE if this system has no
  * dialog to show. Blocks until the dialog is closed. */
 int filedialog_open_picture(char *path, int len);
+/* The picture on the clipboard (a screenshot copied, or a picture file
+ * copied in the file manager): FILEDIALOG_PICKED and its path in PATH (a
+ * copied image is first written to a file in the temp folder),
+ * FILEDIALOG_CANCELLED if the clipboard holds no picture, FILEDIALOG_NONE
+ * if this system has no way to read it (Linux without wl-paste or xclip). */
+int filedialog_paste_picture(char *path, int len);
 /* Ask for a save file (.hwstate): one to write (save, the extension
  * added if left out) or to read. Same results as above. */
 int filedialog_state(bool save, char *path, int len);
