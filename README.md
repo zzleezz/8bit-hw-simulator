@@ -227,7 +227,7 @@ pictures too.
 
 Keep `fault_atlas.bin` and `carts/` next to the program (or pass `--atlas`
 and `--carts`). The atlas is not in the source code: download it from the
-Releases page, or build it with `--build-atlas=full` (hours on a fast PC). The file dialog is Windows' own, AppleScript's on macOS,
+[Releases page](https://github.com/zzleezz/8bit-hw-simulator/releases), or build it with `--build-atlas=full` (hours on a fast PC). The file dialog is Windows' own, AppleScript's on macOS,
 and zenity or kdialog on Linux; without either, drop the file on the
 window. `--build-atlas=full` builds the atlas again (see Command line).
 It only adds the faults the file doesn't have yet. After a change to how
@@ -502,11 +502,11 @@ Other things assumed or simplified on this board:
 - The 41464's address pins are named as in the datasheet; the board
   wires MA0-MA7 to them in another order (MA0 on A6, MA6 on A0). That
   only matters for which cells a fault inside the chip hits.
-- The fault atlas has no pictures of this board yet. Until it does, a
-  screenshot is matched against the 250407's pictures (the same circuit),
-  but their causes name the 250407's parts (its U7 is the CPU, the
-  250469's the VIC), so they are listed without an "Apply & Inspect"
-  button. The probing guide needs the board's own readings and says so.
+- The fault atlas has this board's own 1516 faults (188
+  different pictures), so screenshots and probing use its parts. An atlas
+  built before them falls back to the 250407's pictures, listed without
+  an "Apply & Inspect" button (the 250407's U7 is the CPU, the 250469's
+  the VIC); the probing guide then asks for the atlas to be rebuilt.
 
 ## ZX Spectrum 48K
 

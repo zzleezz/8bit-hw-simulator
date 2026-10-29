@@ -232,7 +232,10 @@ near-healthy screens (a few garbage cells) are close neighbours.
         crystal like Y1:open. The atlas has no Y1:removed fault, so no
         outcome changed.
   - [ ] 250469 left to do:
-    - [ ] Its fault atlas (--build-atlas: ask first, it is hours).
+    - [x] Its fault atlas (2026-10-29): 1516 runs in 39:12 on 28 threads
+          (idle priority), 188 outcomes, 0 failed; the atlas: 10398 runs,
+          2591 outcomes, seven boards. Backup fault_atlas.bin.bak-20261029.
+          A 250469 capture of the 4066 pulled matches U21 alone, 99.8%.
     - [x] tests/faults.sh and diag.sh (2026-10-29): MACHINE=c64c runs the
           250469's cases (25 faults; Dead Test with U10, U11 and U8 out,
           the 586220 with U18 and R16 for the 250407's U28 and R100).
