@@ -643,7 +643,7 @@ static void add_reading(board_t *b) {
 /* The probe readings: the pin field, what the probe shows, the readings
  * taken, each with what a healthy board shows there. */
 static void readings(struct nk_context *ctx, float cw, board_t *b) {
-    static const char *const shows[PROBE_NREADINGS] = { "low", "high", "pulsing", "floating / no light" };
+    static const char *const shows[PROBE_NREADINGS] = { "low", "high", "pulsing", "floating / no light", "bad levels" };
     nk_layout_row_begin(ctx, NK_STATIC, 26, 5);
     nk_layout_row_push(ctx, 150);
     nk_label(ctx, "Probe reading at pin:", NK_TEXT_LEFT);
@@ -654,7 +654,7 @@ static void readings(struct nk_context *ctx, float cw, board_t *b) {
                                                  sizeof(A.pin_text), nk_filter_ascii);
     A.typing = (ev & NK_EDIT_ACTIVE) != 0;
     nk_layout_row_push(ctx, 170);
-    A.reading = nk_combo(ctx, shows, PROBE_NREADINGS, A.reading, 22, nk_vec2(170, 130));
+    A.reading = nk_combo(ctx, shows, PROBE_NREADINGS, A.reading, 22, nk_vec2(170, 155));
     nk_layout_row_push(ctx, 70);
     bool add = nk_button_label(ctx, "Add") || (ev & NK_EDIT_COMMITED);
     nk_layout_row_push(ctx, cw - 150 - 100 - 170 - 70 - 30);

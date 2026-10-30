@@ -12,7 +12,7 @@ Spectrums, roughly in order of value. Tick items off as they're done.
 - [x] Build on the fault atlas: it now also records what a logic probe shows
       on every net under every fault (5-6 s after power on).
 - [x] "The screen shows" choice, so faults a probe can't see are still found.
-- [ ] Follow-up: probing a chip's leg as well as its pad. Lifted or open legs
+- [x] Follow-up: probing a chip's leg as well as its pad. Lifted or open legs
       look the same as a healthy board at the pad (a whole group of 75 such
       faults on the C64), but differ on the chip side.
       Code done 2026-10-29: LEGS chunks in the atlas (what the probe shows
@@ -26,7 +26,9 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         before-legs): 2650 runs in 1:45 on 28 threads (not ~70 min), 0
         failed, 2646 LEGS chunks. --atlas-diff: 10377 outcomes the same,
         0 changed, 4 new, 21 cut out (C64HW_ATLAS_PRUNE, see 5.).
-  - [ ] STALE SCREENS IN THE ATLAS (found 2026-10-30, also in V1.0's).
+  - [x] STALE SCREENS IN THE ATLAS (found 2026-10-30, also in V1.0's;
+        the open legs and all the bridges of the four older Spectrums
+        refreshed. What's left is the item after this one).
         The 295 faults below, run again whole into a copy
         (C64HW_ATLAS_REDO_FAULTS=list, new: "zx48 IC23.8:open" per line;
         12 min): 274 of their stored screens change (zx48 66, zx48i1 77,
@@ -51,6 +53,8 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         changed, nothing else). Not sampled yet: the C64s and the 6A (the
         6A's PINS all matched in the LEGS run; a 200-fault sample of each,
         ~8 min, would tell).
+  - [ ] Stale check left: a 200-fault sample of the 250407, the 250469
+        and the Issue 6A (~8 min each, all cores), as above.
   - [x] "The atlas runner and the simulator disagree" (2026-10-30): no,
         a misreading. --atlas A --atlas-diff B prints A's outcome, then
         "-> " B's: the old screens were the wrong ones. zx48 IC15.7:open
@@ -58,7 +62,9 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         V1.0's runner and --headless all say it boots (the ROM's RAM test
         finds 16K, as on a real Spectrum with dead upper RAM; IC15:removed
         is the same). So the refresh swapped in fixed wrong screens.
-  - [ ] 295 of the re-run faults got PINS different from the old ones:
+  - [x] 295 of the re-run faults got PINS different from the old ones
+        (settled by the refresh: those faults were run again whole and
+        their new PINS are what loads):
         all ":open", all Spectrum (zx48 71, zx48i2 70, zx48i1 85, zx48i4b
         69; none on the 6A or the C64s). Spread over many nets, each in
         only some faults (low/high/pulsing swapped), so not tonight's
@@ -66,7 +72,7 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         (IC23.8 was the first seen). The loader takes the last chunk, so
         the new ones count. To confirm: re-run a few into a copy and
         compare.
-  - [ ] Legs vs pads, --probe-test 5 --seed 7 (35 faults), probing only,
+  - [x] Legs vs pads, --probe-test 5 --seed 7 (35 faults), probing only,
         legs / pads: bench #1 54% / 57%, likeliest first 60% / 68%,
         fewest probes 62% / 62%; "in the running" 100% / 97%. Screen
         known: about the same (80-88% both). One fault is ~3%: too few to
@@ -79,7 +85,7 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         U9.10 (missed on pads), IC12.15 (#121 -> #1, fewest probes),
         IC22.3 (#9 -> #1, bench) and a few places on most; worse on
         IC1.38 (bench #1 -> #3).
-  - [ ] Most open legs still end far down after 25 probes (U19.32 #321,
+  - [-] (Dropped 2026-10-30, see Dropped.) Most open legs still end far down after 25 probes (U19.32 #321,
         U9.10 #204, R68 #213, IC27.3 #165, IC10.12 #124...). The probe
         rarely gets to the one leg that tells: suggest the leg of a pin
         whose pad reads "floating input" or "healthy" sooner, and look
@@ -93,7 +99,6 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         chip (as a technician does with a magnifier or a continuity
         test), or a final "legs to check" list of the open-leg faults
         still in the running.
-  - [ ] The zip/atlas for the release.
 - [x] Follow-up: pre-select the screen from a screenshot diagnosis, when one
       has been done (2026-10-28: "Diagnose by probing..." in the control
       panel takes a screenshot diagnosed since it last took one; "Narrow
@@ -423,6 +428,37 @@ Best done after item 6, which can then show them too.
       dataset (whose it is).
 - [ ] Bonus: score the screenshot matcher against the real records (a real
       --match-test), to see how well it does on real captures.
+      First look 2026-10-30, by hand (`--match --top 400 --causes all
+      --machine zx48i2`): only one record yet, so the user's labelled
+      Test images, all Issue 2. Bad ULA (ZXULAbad 1-3, bad-ula.png): the
+      ULA is in group #1 or #2 every time, but only as "ULA (inside)" or a
+      ULA pin, cause 2-10 of the group (10 of 15 is behind "show all").
+      Not held out: the matcher was tuned on ZXULAbad.jpg and bad-ula.png.
+      Dead Z80 (ZX-CPU-bad 1-3): not found; IC2 shows only as unrelated
+      pin faults (#8, #7, and #1 at 67% by chance), IC2:removed #288,
+      #293, #33 (see item 11). The C64 u*.jpg images: cause unknown, left
+      out. Ideas: order causes in a group by likelihood with the ULA high
+      (it fails a lot); a real --match-test over repairs.bin once it holds
+      more records.
+      UNDONE 2026-10-30 at the user's word: the Spectrum weights (TR4,
+      lower RAM, upper RAM, then CPU/ULA/ROM alike) are the user's, from
+      repair experience (CHANGELOG "Unreleased"); 4 test pictures, 2 of
+      them tuned on, don't overrule that. ULA_WEIGHT is 5 again. What
+      raising it did, for the record:
+      Tried 2026-10-30: the matcher's ULA_WEIGHT 5 -> 10 (a lower RAM
+      chip's; atlas_match.c only, probing still has the ULA at 5). The ULA
+      now comes right after the lower RAM chips' causes and before
+      everything else: ZXULAbad 10th -> 7th of 15 (still behind "show
+      all", 6 shown), ZXULAbad2 2nd -> 1st, the others unchanged (3rd,
+      2nd). Groups didn't move. Left: ties with the lower RAM (weight 10)
+      keep the ULA last among them; "ULA first on a tie" would make it
+      1st in three of four, but these pictures aren't held out. Also: a
+      net shorted to +5V/GND gets its driver's full weight (IC7.2:vcc as
+      likely as IC7 dead), too high for a short on a trace.
+      Tried 2026-10-30 and UNDONE at the user's word: REF.PIN:gnd/vcc at
+      half net_weight() (with the ULA at 10: ULA cause 5/15, 1/7, 2/6,
+      2/2, top 9 groups unchanged). A pin stuck at a supply also stands
+      for a chip shorted inside on that pin, a common failure.
 - [ ] What was wrong with the chip is optional: many repairs are just "swapped
       it and it worked". Three levels of detail:
       1. chip only (the default);
@@ -431,10 +467,10 @@ Best done after item 6, which can then show them too.
       3. the exact fault as the atlas names it: once the chip and the
          screenshot are given, list that chip's simulated faults that also
          match the screenshot, to confirm one of.
-- [ ] How sure: tested bad in a chip tester / swapping it fixed it /
-      replaced several, not sure which (done, per record). Still to do,
-      per chip: replaced, or
-      confirmed bad (eight RAMs swapped at once say much less than one).
+- [x] How sure, per record: tested bad in a chip tester / swapping it
+      fixed it / replaced several, not sure which.
+- [ ] How sure, per chip: replaced, or confirmed bad (eight RAMs swapped
+      at once say much less than one).
 - [x] Each dataset has its owner's display name (changeable) and a random
       ID made when it's created (never changes: two people can both be
       "Dave"). Shown beside every record in the lists, so you can see where
@@ -449,10 +485,11 @@ Best done after item 6, which can then show them too.
 - [ ] Chip markings: maker and date code (MOS, MT, TI...), optional. Real
       failure counts per maker can replace the guessed weights in the
       probing ranking.
-- [ ] Records without a screenshot (done: chips only, they count in the
-      statistics and the probing ranking). Still to do: describe the symptom with the atlas
-      browser's characteristics (yellow border, vertical bars, blinking),
-      so a record's symptom and a browser search are the same thing.
+- [x] Records without a screenshot: chips only, they count in the
+      statistics and the probing ranking.
+- [ ] A record's symptom in the atlas browser's terms (yellow border,
+      vertical bars, blinking), for records without a screenshot, so a
+      record's symptom and a browser search are the same thing.
 - [ ] Phone photos of a CRT: record what the picture is (capture card /
       photo) and trust photos less in matching. (Correcting a photo's angle
       would be a project of its own.)
@@ -567,6 +604,8 @@ commit-message.txt).
       the issue to antirez posted.
 - [ ] Afterwards: work changed here has to be copied to ../github-upload
       again before a new commit (or move the work into that folder).
+- [x] V1.1 released 2026-10-30 (by the user, from github-release/). The
+      next one (V1.2) when enough is under "Unreleased" in CHANGELOG.md.
 
 ## 10. Stretch goal: the real machine's bus, read into the simulator
 (the user's idea, 2026-10-29; reworked 2026-10-30)
@@ -608,6 +647,63 @@ software: read its captures.
       doesn't carry (/CASRAM, /KERNAL, /CHAROM, the VIC's RAM addresses,
       color RAM): all of a chip's pins at once.
 
+## 11. Dead Z80s on the Spectrum not recognised (found 2026-10-30, for the weekend)
+Two bad Z80s (Backbit Chip Tester Pro: completely faulty), screenshots
+`Test images/ZX-CPU-bad1.png` and `ZX-CPU-bad2.png`: a white border and
+thin vertical stripes with colour blocks, the power-on contents of the
+screen RAM (the CPU never runs). `--diagnose-text` puts ULA faults first
+(75%), no IC2 cause in the top 5. The simulated dead CPU (IC2:removed)
+looks nothing like it: a black border and two big white blocks, because
+the ULA's border powers up 0 (`ula_reset`, ula.c) and the 4116s power up
+as whole rows of 00/FF (parts.c:860). Faults inside the Z80 wouldn't help:
+the dead CPU is there, its picture is wrong. For now: a repair record
+(bad1 recorded as IC2 matched bad2 at 86%, tried in a scratch file).
+A third chip, `ZX-CPU-bad3.png`: a magenta border (the border is random
+at power-on), but the same black and white vertical stripes in the same
+places, the two halves of the screen alike, with random colours (some
+flashing: FLASH bits in the garbage attributes). The bad1 record matched
+it at only 65% (under 75%: not shown): the border colour and the
+attribute colours count too much. So B should match on the stripes of
+the bitmap and leave out the border colour and the attribute colours.
+- [ ] B (recommended): a picture class in the matcher, "screen and border
+      never written" (power-on RAM garbage, nothing ran), causes the
+      CPU, the ROM, the clock, reset. Matches by kind, not by the exact
+      pattern, so any board's RAM chips. Then rebuild the Spectrum
+      pictures (estimate first).
+- [ ] A: a power-on closer to the real one: a random border colour, the
+      4116s' fine stripes instead of whole 00/FF rows. Only ever like one
+      board's chips, so a weak match on its own; maybe with B.
+- [x] One record shown twice in `--diagnose-text`: not a bug (checked
+      2026-10-30). The 97% line was `--add-repair`'s own diagnosis of
+      bad1 (it prints one after recording), the 86% line `--diagnose-text`
+      on bad2: two commands' output read as one.
+- [x] Re-run `--probe-test` after the probing readings changed
+      (2026-10-30): a fifth reading "bad levels" (PROBE_BAD, matched to
+      NET_CONTENTION, which used to read as floating; cost table in
+      probe_db.c) and a "Same as a healthy board" button. The test's
+      simulated probe now reads fights as bad levels and misreads over
+      five readings, not four, so compare with the last figures (true
+      fault in the best fits 93-96%, README "Diagnosing by probing").
+      Uses every core: say how long first (5 faults took 17 min).
+      Run 2026-10-30 (68 min each, 28 threads), --probe-test 20 --seed 11
+      (140 faults), also with bad levels against pulsing raised 0.3 -> 0.6:
+      clean: #1 65/70/68% (bench/likeliest/fewest; 62/67/65% on
+      2026-10-29), best fits 92%, in the running 95%, 229/211/208 faults
+      fit best (176 bench before); screen known #1 81-84%, best fits 95%.
+      --probe-noise 10: in the running 92% (README: 95-97%), first 6
+      65-69% (65-74%), screen known first 6 84-87% (86-91%), in the
+      running 96-97%. Not a clean A/B: the 10-29 figures predate the atlas
+      refresh, and the README's are 120 faults on other seeds. To settle
+      it: the same two runs with the exe from before the change
+      (github-upload/c64-hw-sim.exe, built 13:20) on today's atlas.
+      Settled 2026-10-30: the old probing code (github-upload/src, today's
+      atlas, same seed) gives the same within 1% clean (#1 65/70/69%,
+      best fits 91-92%, 228.6 fit best) and with 10% noise in the running
+      91-92% too, the rest within a few points both ways (the misreads are
+      drawn over five readings, not four, so they differ). No change from
+      bad levels; the drop against the README's figures is the atlas
+      refresh / this fault set, not the probing code.
+
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
       power-path faults (F1, L4, L5 said "CPU running"). Rebuilt with item 1.
@@ -615,6 +711,9 @@ software: read its captures.
 ## Dropped
 - Intermittent faults (bad sockets, faults that appear once the board is warm):
   too vague to model well.
+- A "legs to check" list or "check every leg of chip X" step for open legs
+  in probing (2026-10-30): the user's call, not a good diagnostic
+  scenario on the bench. The open-leg faults stay in the atlas.
 
 ## Notes
 - Check with the user before anything that uses every core (atlas runs);

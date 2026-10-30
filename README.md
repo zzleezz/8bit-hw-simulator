@@ -305,6 +305,17 @@ cyan on the board: probe it on the solder side, where pad and trace are
 one, and click Low, High, Pulsing or Floating. Each reading narrows the
 list. Any other pin can be probed instead: click it on the board, or type
 it (`U7.3`).
+- Pulsing is any activity at all: a line mostly high with an occasional
+  pulse is pulsing, as a logic probe's pulse light shows it.
+- Floating is nothing driving it: no light, or a steady level around 1.4 V.
+- Bad levels (on a scope) is activity that doesn't reach a proper low or
+  high: two chips driving the line at once, or a weak or dead output. It
+  matches the nets where the simulation saw outputs fight.
+- "Same as a healthy board": the scope looks like the simulator's healthy
+  board there (whatever it shows: pulsing, high...).
+
+A level a logic chip still reads right (a high wobbling between 4.0 and
+4.8 V) is that level: the simulation knows logic levels, not volts.
 
 Faults aren't all as likely. The window weights each one the way they
 come to the bench: the PLA first, then the CIAs, the CPU, the RAM and the
@@ -337,12 +348,13 @@ reads differently on the chip's side.
 `--probe-test` (see Command line) puts faults with a symptom on a board,
 probes it later than the atlas did, and lets the tool diagnose it, for
 each "Next pin by" on the same faults, picked as often as they come to
-the bench. With every reading right (120 faults over the six boards),
-the true fault is among the best fits 93-96% of the time and listed
-first 75-81% (96-97% and 90-95% when the screen is picked too). With one reading in ten wrong on
-purpose, it stays on the list 95-97% of the time and is in the first six
-groups shown 65-74% (86-91% with the screen). The bench procedure costs
-about one probe more than the others and does as well. About a quarter of the
+the bench. With every reading right (`--probe-test 20 --seed 11`: 140 faults
+over the seven boards), the true fault is among the best fits 92% of the
+time and listed first 65-70% (95% and 81-84% when the screen is picked
+too). With one reading in ten wrong on purpose, it stays on the list 92%
+of the time (96-98% with the screen) and is in the first six groups
+shown 65-69% (84-88% with the screen). The bench procedure costs about
+one probe more than the others and does as well. About a quarter of the
 C64's faults and a fifth of the Spectrum's look healthy on every net:
 probing can't find those, and the screen is what tells them apart.
 

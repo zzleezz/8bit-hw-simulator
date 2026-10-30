@@ -36,9 +36,11 @@
 #include "atlas.h"
 #include "board.h"
 
-/* What the probe shows. FLOATING: no light, or a dim one (an in-between
- * level). */
-enum { PROBE_LOW, PROBE_HIGH, PROBE_PULSING, PROBE_FLOATING, PROBE_NREADINGS };
+/* What the probe shows. PULSING: any activity, even rare. FLOATING: no
+ * light, or a dim one (an in-between level), nothing driving it. BAD:
+ * active, but not reaching a proper low or high on a scope (two chips
+ * fighting, a weak output: the atlas's NET_CONTENTION). */
+enum { PROBE_LOW, PROBE_HIGH, PROBE_PULSING, PROBE_FLOATING, PROBE_BAD, PROBE_NREADINGS };
 
 /* One reading wrong is forgiven (--probe-test: with 10% of the readings
  * wrong, the true fault stays in the running 94-99% of the time against

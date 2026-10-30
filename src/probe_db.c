@@ -11,14 +11,18 @@
  * probe catches the shortest pulse, so PULSING against a steady level is a
  * near miss only when the simulation saw a net mostly at that level (we
  * don't know: half). A floating TTL input sits at ~1.4 V, which some
- * probes show as high. A fight is an in-between level, or a fast one. */
+ * probes show as high. A fight is an in-between level, or a fast one.
+ * Bad levels (seen on a scope) are a fight. A fight on fewer than 1 in 20
+ * samples is PULSING in the atlas, but a healthy net is PULSING too: bad
+ * levels against it count as a reading off (at 0.3, faults that look
+ * healthy everywhere passed as fitting it). */
 static const float cost_table[NET_NONE][PROBE_NREADINGS] = {
-    /*                  low   high  pulse float */
-    [NET_LOW]        = { 0.0f, 1.0f, 0.6f, 1.0f },
-    [NET_HIGH]       = { 1.0f, 0.0f, 0.6f, 1.0f },
-    [NET_PULSING]    = { 0.6f, 0.6f, 0.0f, 1.0f },
-    [NET_FLOATING]   = { 1.0f, 0.5f, 0.6f, 0.0f },
-    [NET_CONTENTION] = { 0.5f, 0.5f, 0.4f, 0.25f },
+    /*                  low   high  pulse float bad */
+    [NET_LOW]        = { 0.0f, 1.0f, 0.6f, 1.0f, 0.8f },
+    [NET_HIGH]       = { 1.0f, 0.0f, 0.6f, 1.0f, 0.8f },
+    [NET_PULSING]    = { 0.6f, 0.6f, 0.0f, 1.0f, 0.6f },
+    [NET_FLOATING]   = { 1.0f, 0.5f, 0.6f, 0.0f, 0.5f },
+    [NET_CONTENTION] = { 0.5f, 0.5f, 0.4f, 0.25f, 0.0f },
 };
 
 float probe_cost(int net_state, int reading) {
@@ -31,13 +35,14 @@ int probe_reading_of(int net_state) {
     case NET_LOW: return PROBE_LOW;
     case NET_HIGH: return PROBE_HIGH;
     case NET_PULSING: return PROBE_PULSING;
-    case NET_FLOATING: case NET_CONTENTION: return PROBE_FLOATING;
+    case NET_FLOATING: return PROBE_FLOATING;
+    case NET_CONTENTION: return PROBE_BAD;
     default: return -1;
     }
 }
 
 const char *probe_reading_name(int reading) {
-    static const char *const names[PROBE_NREADINGS] = { "low", "high", "pulsing", "floating" };
+    static const char *const names[PROBE_NREADINGS] = { "low", "high", "pulsing", "floating", "bad levels" };
     return reading >= 0 && reading < PROBE_NREADINGS ? names[reading] : "?";
 }
 

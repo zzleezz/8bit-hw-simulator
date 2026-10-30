@@ -260,7 +260,8 @@ static void wrapped(struct nk_context *ctx, const char *text, float width, struc
 }
 
 static struct nk_color reading_color(int r) {
-    return r == PROBE_LOW ? COL_LOW : r == PROBE_HIGH ? COL_HIGH : r == PROBE_PULSING ? COL_PULSE : COL_FLOAT;
+    return r == PROBE_LOW ? COL_LOW : r == PROBE_HIGH ? COL_HIGH : r == PROBE_PULSING ? COL_PULSE
+         : r == PROBE_BAD ? COL_FIGHT : COL_FLOAT;
 }
 
 /* What a healthy board shows on a net, "" if the atlas doesn't say. */
@@ -473,23 +474,48 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
         if (pin == P.sug_pin) {
             int nk = 0;
             for (int r = 0; r < PROBE_NREADINGS; r++) nk += P.counts[r];
-            snprintf(line, sizeof(line), "Splits the %d groups of suspects: low %d, high %d, pulsing %d, floating %d", nk,
-                     P.counts[PROBE_LOW], P.counts[PROBE_HIGH], P.counts[PROBE_PULSING], P.counts[PROBE_FLOATING]);
+            snprintf(line, sizeof(line),
+                     "Splits the %d groups of suspects: low %d, high %d, pulsing %d, floating %d, bad levels %d", nk,
+                     P.counts[PROBE_LOW], P.counts[PROBE_HIGH], P.counts[PROBE_PULSING], P.counts[PROBE_FLOATING],
+                     P.counts[PROBE_BAD]);
             wrapped(ctx, line, cw, COL_DIMTEXT);
         }
-        /* What the probe shows: the reading buttons. */
-        static const char *const labels[PROBE_NREADINGS] = { "Low", "High", "Pulsing", "Floating / no light" };
-        static const int at[PROBE_NREADINGS] = { PROBE_LOW, PROBE_HIGH, PROBE_PULSING, PROBE_FLOATING };
-        nk_layout_row_begin(ctx, NK_STATIC, 30, 4);
+        /* What the probe shows: the reading buttons, two rows. */
+        static const char *const labels[PROBE_NREADINGS] = { "Low", "High", "Pulsing", "Floating / no light",
+                                                             "Bad levels" };
+        static const char *const tips[PROBE_NREADINGS] = {
+            "Steady low, no activity",
+            "Steady high, no activity",
+            "Any activity at all, even an occasional pulse on a line that is mostly high or low",
+            "Nothing drives it: no light on a logic probe, or a steady level around 1.4 V with no activity",
+            "Active, but the levels are wrong on the scope: swings that don't reach a proper low or high "
+            "(two chips driving it at once, a weak or dead output)" };
+        static const float width[PROBE_NREADINGS] = { 90, 90, 90, 170, 170 };
         for (int i = 0; i < PROBE_NREADINGS; i++) {
-            nk_layout_row_push(ctx, i == 3 ? 170 : 90);
-            struct nk_color c = reading_color(at[i]);
+            if (i == 0) nk_layout_row_begin(ctx, NK_STATIC, 30, 4);
+            if (i == 4) nk_layout_row_begin(ctx, NK_STATIC, 30, 2);
+            nk_layout_row_push(ctx, width[i]);
+            struct nk_color c = reading_color(i);
+            if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tips[i]);
             nk_style_push_color(ctx, &ctx->style.button.text_normal, ink(c));
             nk_style_push_color(ctx, &ctx->style.button.text_hover, ink(c));
-            if (nk_button_label(ctx, labels[i])) add_reading(pin, at[i]);
+            if (nk_button_label(ctx, labels[i])) add_reading(pin, i);
             nk_style_pop_color(ctx);
             nk_style_pop_color(ctx);
+            if (i == 3) nk_layout_row_end(ctx);
         }
+        /* The scope looks like the simulator's healthy board: whatever it
+         * shows there, without putting it into words. */
+        int healthy = P.db.healthy >= 0 && net >= 0 ? probe_reading_of(P.db.groups[P.db.healthy].nets[net]) : -1;
+        nk_layout_row_push(ctx, 200);
+        if (healthy >= 0) {
+            if (nk_widget_is_hovered(ctx)) {
+                snprintf(line, sizeof(line), "The real board looks like the simulator's healthy board here: "
+                         "enters what it shows (%s)", probe_reading_name(healthy));
+                nk_tooltip(ctx, line);
+            }
+            if (nk_button_label(ctx, "Same as a healthy board")) add_reading(pin, healthy);
+        } else nk_label_colored(ctx, "(healthy board not known here)", NK_TEXT_LEFT, COL_DIMTEXT);
         nk_layout_row_end(ctx);
     }
     /* Another pin: shown on the board, typed, or clicked there. */
@@ -525,6 +551,41 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
         if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, desc);
         if (nk_button_label(ctx, line)) { P.cur_pin = P.sug_pin; act->show_pin = P.sug_pin; }
     }
+}
+
+/* Bad levels on NET: the chips that drive it, and one resistor further.
+ * The simulation can't make an output weak, so the atlas rarely has the
+ * cause: the board's wiring says where to look. */
+static void bad_levels_note(int net, char *buf, size_t len) {
+    const sim_t *s = &P.b->sim;
+    char desc[160];
+    size_t n = (size_t)snprintf(buf, len, "Bad levels on %s. A weak output can't be simulated, so the atlas "
+                                "may not have the cause: check what drives it:", s->nets[net].name);
+    const char *sep = " ";
+    for (int i = 0; i < s->npins && n < len; i++) {
+        const pin_t *p = &s->pins[i];
+        if (p->net != net || !(p->flags & PIN_OUT) || s->parts[p->part].kind != PART_IC) continue;
+        pin_desc(P.b, i, desc, sizeof(desc));
+        n += (size_t)snprintf(buf + n, len - n, "%s%s", sep, desc);
+        sep = ", ";
+    }
+    /* Through a series resistor: the outputs on its other side. */
+    for (int i = 0; i < s->npins && n < len; i++) {
+        const pin_t *p = &s->pins[i];
+        if (p->net != net || s->parts[p->part].kind != PART_RESISTOR) continue;
+        for (int j = 0; j < s->npins && n < len; j++) {
+            const pin_t *q = &s->pins[j];
+            if (q->part != p->part || j == i || q->net < 0) continue;
+            for (int k = 0; k < s->npins && n < len; k++) {
+                const pin_t *o = &s->pins[k];
+                if (o->net != q->net || !(o->flags & PIN_OUT) || s->parts[o->part].kind != PART_IC) continue;
+                pin_desc(P.b, k, desc, sizeof(desc));
+                n += (size_t)snprintf(buf + n, len - n, "%s%s through %s", sep, desc, s->parts[p->part].ref);
+                sep = ", ";
+            }
+        }
+    }
+    if (n < len) snprintf(buf + n, len - n, ". A short to a neighbor pin or trace does it too.");
 }
 
 /* The readings so far, each with what a healthy board shows there. */
@@ -564,6 +625,11 @@ static void readings(struct nk_context *ctx, float cw) {
         nk_layout_row_push(ctx, 26);
         if (nk_button_label(ctx, "x")) { remove_reading(i); nk_layout_row_end(ctx); break; }
         nk_layout_row_end(ctx);
+        if (r->reading == PROBE_BAD) {
+            char note[1000];
+            bad_levels_note(r->net, note, sizeof(note));
+            wrapped(ctx, note, cw, COL_FIGHT);
+        }
     }
 }
 

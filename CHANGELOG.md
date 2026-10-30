@@ -36,6 +36,25 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 - An "Electrolytic caps: original / replaced" choice in both diagnosis
   windows. With original capacitors they warn that worn ones make faults
   the simulator doesn't have, so the results may not be reliable.
+- Diagnose from screenshot: the screenshot stays at the top of the window
+  while the list of matches scrolls under it, so it can be compared with
+  every match.
+- Diagnose by probing: a fifth reading, "Bad levels", for a line that is
+  active on a scope but never reaches a proper low or high (two chips
+  driving it at once, a weak or dead output). It matches the nets where
+  the simulation saw outputs fight, and against a healthy-looking net it
+  counts as a reading off. Under each such reading the window lists the
+  chips that drive that net, and those one resistor further, since the
+  simulator can't make an output weak and the atlas rarely has the cause.
+  Before, a fight counted as "floating".
+- Diagnose by probing: "Same as a healthy board" enters whatever the
+  simulated healthy board shows on that pin, for when the scope looks
+  like the simulator's. Each reading button explains itself when pointed
+  at: pulsing is any activity at all, even a rare pulse; floating is
+  nothing driving the line.
+- The README's probing figures measured again on today's atlas (140
+  faults over the seven boards). "Bad levels" changes them by no more
+  than chance: the probing code from before it gives the same.
 
 ## V1.1 (2026-10-30)
 

@@ -1083,7 +1083,7 @@ static void main_window(struct nk_context *ctx, struct nk_rect area, diagnose_ac
     }
     if (!nk_begin_titled(ctx, "Diagnose", "Diagnose from screenshot", r,
                          NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_TITLE |
-                         NK_WINDOW_CLOSABLE)) {
+                         NK_WINDOW_CLOSABLE | NK_WINDOW_NO_SCROLLBAR)) {
         D.open = false;
         nk_end(ctx);
         return;
@@ -1170,9 +1170,22 @@ static void main_window(struct nk_context *ctx, struct nk_rect area, diagnose_ac
     nk_layout_row_end(ctx);
     diagnose_caps(ctx, cw);
 
-    if (D.ok) {
-        real_matches(ctx, cw);
-        for (int k = 0; k < D.r.ngroups; k++) group(ctx, k, cw, act);
+    /* The matches scroll under the screenshot, which stays in sight to
+     * compare them with. */
+    static nk_uint list_x, list_y;
+    if (fresh) list_x = list_y = 0;
+    struct nk_rect region = nk_window_get_content_region(ctx);
+    float list_h = region.y + region.h - (ctx->current->layout->at_y + ctx->current->layout->row.height) -
+                   ctx->style.window.spacing.y - 4;
+    if (list_h < 120) list_h = 120;
+    nk_layout_row_dynamic(ctx, list_h, 1);
+    if (nk_group_scrolled_offset_begin(ctx, &list_x, &list_y, "diag list", 0)) {
+        float lw = cw - ctx->style.window.scrollbar_size.x - 2 * ctx->style.window.group_padding.x;
+        if (D.ok) {
+            real_matches(ctx, lw);
+            for (int k = 0; k < D.r.ngroups; k++) group(ctx, k, lw, act);
+        }
+        nk_group_end(ctx);
     }
     nk_end(ctx);
 }
