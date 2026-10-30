@@ -93,8 +93,12 @@ enum { PWR_OK = 0, PWR_OFF, PWR_NO_VCC, PWR_NO_GND };
 /* Part kinds, mostly used by the UI. */
 enum { PART_IC, PART_RESISTOR, PART_LINK, PART_CONNECTOR, PART_OTHER };
 
-/* Resistor / link faults. */
-enum { RF_OK = 0, RF_OPEN, RF_SHORT };
+/* Resistor / link faults, and the parts that aren't chips. A transistor
+ * also fails at one junction (RF_BE_*, RF_BC_*: base-emitter or
+ * base-collector, shorted or open), or weak (RF_WEAK: it still tests as a
+ * transistor, but fails under load; only on one the machine doesn't
+ * simulate, the Spectrum's DC-DC converter). */
+enum { RF_OK = 0, RF_OPEN, RF_SHORT, RF_BE_SHORT, RF_BC_SHORT, RF_BE_OPEN, RF_BC_OPEN, RF_WEAK };
 
 typedef struct sim sim_t;
 typedef struct part part_t;
@@ -168,6 +172,8 @@ struct part {
                            Spectrum's upper RAM), so 'removed' too, but
                            not a fault: repairing leaves it out */
     bool no_supply;     /* a supply it needs is missing (set by the machine) */
+    bool supply_weak;   /* its supplies sag under load (set by the machine): a
+                           DRAM's cells then forget, as with MF_WEAK */
     uint8_t supply_cut; /* the copper to its supply is cut or shorted: bit 0
                            VCC, bit 1 GND (set by the board, see board_rebuild) */
     uint8_t tech;       /* TECH_* */

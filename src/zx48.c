@@ -760,13 +760,23 @@ static void zx_power_on(board_t *b) {
  * the zener D16 (the 4B: see the top of the file, and zx_variant_t). The
  * 4116s need all three: without one they don't work (and without -5V the
  * real ones overheat and die). The crystal X1 is the ULA's oscillator:
- * without it there is no clock and no picture. */
+ * without it there is no clock and no picture.
+ *
+ * TR4 (or TR5) failing at either junction, shorted or open, stops the
+ * converter like a transistor taken out. A weak one (it still tests as a
+ * transistor) keeps it going, but the supplies sag under the 4116s' load:
+ * their cells forget (part_t.supply_weak). */
 static bool broken(board_t *b, const char *ref) {
     part_t *p = find(b, ref);
     if (!p) return false;
     /* A lifted leg breaks it too. */
     for (int k = 0; k < p->npins; k++) if (b->sim.pins[p->first_pin + k].fault == PF_OPEN) return true;
-    return p->removed || p->rfault != RF_OK;
+    return p->removed || (p->rfault != RF_OK && p->rfault != RF_WEAK);
+}
+
+static bool weak(board_t *b, const char *ref) {
+    part_t *p = find(b, ref);
+    return p && p->rfault == RF_WEAK;
 }
 
 /* Is a part of a list ("D11 D12") broken? */
@@ -789,12 +799,14 @@ static void zx_power(board_t *b) {
                !broken(b, "R59") && !broken(b, "R60") && !broken(b, "R61");
     bool p12 = osc && !any_broken(b, V(b)->p12_parts);
     bool m5 = osc && !any_broken(b, V(b)->m5_parts);
+    bool sag = osc && (weak(b, "TR4") || weak(b, "TR5"));
     sim_drive(s, z->pin_12v, p12 ? DRIVE(S_SUPPLY, 1) : DRV_Z);
     sim_drive(s, z->pin_m5v, m5 ? DRIVE(S_SUPPLY, 0) : DRV_Z);
     for (int i = 0; i < s->nparts; i++) {
         part_t *p = &s->parts[i];
         if (p->kind != PART_IC) continue;
         p->no_supply = !v5 || (p->commit == PT_4116.commit && (!p12 || !m5));
+        p->supply_weak = sag && p->commit == PT_4116.commit;
     }
     ((ula_state_t *)s->parts[z->p_ula].state)->running = !broken(b, "X1");
 }

@@ -50,8 +50,11 @@ const char *probe_strategy_name(int strategy) {
 /* How likely a fault is                                                     */
 /* ------------------------------------------------------------------------ */
 
+static bool zx_board(board_t *b) { return atlas_family(atlas_machine_of(b->m)) == ATLAS_ZX48; }
+
 int probe_part_markable(board_t *b, int part) {
-    if (part < 0 || b->sim.parts[part].kind != PART_IC) return MARK_UNKNOWN;
+    /* The makers' records are the C64's (the Spectrum's ranking has none). */
+    if (part < 0 || b->sim.parts[part].kind != PART_IC || zx_board(b)) return MARK_UNKNOWN;
     switch (board_part_role(b, part)) {
     case ROLE_PLA: case ROLE_GLUE: case ROLE_CLOCK: return MARK_MOS;
     case ROLE_RAM: case ROLE_VRAM: return MARK_MT;
@@ -62,9 +65,44 @@ int probe_part_markable(board_t *b, int part) {
 /* The bench ranking: PLA, CIAs, CPU, RAM, ROMs; then the video and sound
  * chips, the logic. MT RAM comes up to the PLA's level, MOS logic to the
  * CIAs', and a PLA another maker made (the early ones) is very reliable.
- * The Spectrum's ULA counts as its PLA. */
+ *
+ * The Spectrum's: TR4 (the DC-DC converter's switch, broken in most
+ * faulty machines), the lower RAM, the upper RAM a little less, the CPU,
+ * then the ULA and the ROM alike, then the logic.
+ *
+ * Parts that aren't chips: a transistor fails now and then, a regulator
+ * like a logic chip; resistors, capacitors, diodes, links, coils and
+ * crystals hardly ever (a resistor shorting is very rare on the bench). */
+static float other_weight(board_t *b, int part) {
+    const part_t *p = &b->sim.parts[part];
+    const char *ref = p->ref;
+    if (p->kind == PART_RESISTOR || p->kind == PART_LINK) return 0.1f;
+    if (p->kind == PART_CONNECTOR) return 0.5f;
+    if (!strcmp(ref, "TR4") && zx_board(b)) return 15;
+    if (!strncmp(ref, "TR", 2) || ref[0] == 'Q') return 1;
+    if (!strncmp(ref, "REG", 3) || !strncmp(ref, "VR", 2)) return 2;
+    if (strchr("CDLRTXY", ref[0])) return 0.1f;     /* also CR (diodes), T1 (the coil) */
+    return 0.5f;
+}
+
+static float zx_part_weight(board_t *b, int part) {
+    const char *label = board_part_label(b, part);
+    switch (board_part_role(b, part)) {
+    case ROLE_VRAM: return 10;      /* the lower RAM */
+    case ROLE_RAM: return 8;
+    case ROLE_ROM: return 5;
+    case ROLE_CHIP:
+        if (label && !strcmp(label, "CPU")) return 6;
+        if (label && !strcmp(label, "ULA")) return 5;
+        return 2;
+    default: return 2;
+    }
+}
+
 float probe_part_weight(board_t *b, int part, int mark) {
-    if (part < 0 || b->sim.parts[part].kind != PART_IC) return 0.5f;
+    if (part < 0) return 0.5f;
+    if (b->sim.parts[part].kind != PART_IC) return other_weight(b, part);
+    if (zx_board(b)) return zx_part_weight(b, part);
     const char *label = board_part_label(b, part);
     switch (board_part_role(b, part)) {
     case ROLE_PLA: return mark == MARK_MOS ? 12 : mark == MARK_OTHER ? 2.5f : 10;
@@ -72,7 +110,6 @@ float probe_part_weight(board_t *b, int part, int mark) {
     case ROLE_ROM: return 3;
     case ROLE_CHIP:
         if (label && !strncmp(label, "CIA", 3)) return 7;
-        if (label && !strcmp(label, "ULA")) return 8;
         if (label && !strcmp(label, "CPU")) return 5;
         return 2.5f;
     case ROLE_GLUE: case ROLE_CLOCK: return mark == MARK_MOS ? 6 : 1;
@@ -118,7 +155,7 @@ static float spec_weight(board_t *b, const char *spec, const uint8_t *marks) {
     if (sscanf(spec, "%15[^.:].%7[^:]:%23s", ref, pad, what) == 3) {
         int part = sim_find_part(s, ref), pin = part >= 0 ? board_pad_pin(b, part, pad) : -1;
         if (!strcmp(what, "gnd") || !strcmp(what, "vcc")) return net_weight(b, pin, marks);
-        if (!strcmp(what, "open")) return part >= 0 && s->parts[part].kind == PART_IC ? 0.3f * marked_weight(b, part, marks) : 0.5f;
+        if (!strcmp(what, "open")) return 0.3f * marked_weight(b, part, marks);
         return marked_weight(b, part, marks);
     }
     if (sscanf(spec, "%15[^:]:%23s", ref, what) == 2) return marked_weight(b, sim_find_part(s, ref), marks);
@@ -136,6 +173,8 @@ static float fault_weight(board_t *b, const char *spec, const uint8_t *marks) {
     }
     return w > 0 ? w : 1;       /* the healthy board */
 }
+
+float probe_fault_weight(board_t *b, const char *spec) { return fault_weight(b, spec, NULL); }
 
 static uint64_t fnv64(const uint8_t *p, size_t n) {
     uint64_t h = 0xCBF29CE484222325ull;
@@ -553,28 +592,31 @@ int probe_pin_for_net(board_t *b, int net) {
 
 /* The bench procedure: what a repair checks first on a dead machine. A
  * family's steps (ATLAS_C64, ATLAS_ZX48) are for every board of it that
- * has none of its own (the 250469 has). */
-static const struct { int machine; const char *pin, *what; } bench_pins[] = {
-    { ATLAS_C64C, "U6.40", "reset at the CPU" },
-    { ATLAS_C64C, "U6.1", "the clock (PHI0) into the CPU" },
-    { ATLAS_C64C, "U8.22", "Super PLA output /CASRAM (the RAM)" },
-    { ATLAS_C64C, "U8.15", "Super PLA output /KERNAL" },
-    { ATLAS_C64C, "U8.14", "Super PLA output /BASIC" },
-    { ATLAS_C64C, "U8.13", "Super PLA output /CHARROM" },
-    { ATLAS_C64C, "U8.40", "Super PLA output /VIC" },
-    { ATLAS_C64C, "U8.17", "Super PLA output /COLRAM (the color RAM)" },
-    { ATLAS_C64, "U7.40", "reset at the CPU" },
-    { ATLAS_C64, "U7.1", "the clock (PHI0) into the CPU" },
-    { ATLAS_C64, "U17.18", "PLA output /CASRAM (the RAM)" },
-    { ATLAS_C64, "U17.16", "PLA output /KERNAL" },
-    { ATLAS_C64, "U17.17", "PLA output /BASIC" },
-    { ATLAS_C64, "U17.15", "PLA output /CHAROM" },
-    { ATLAS_C64, "U17.12", "PLA output /IO" },
-    { ATLAS_C64, "U17.13", "PLA output GR/W (the color RAM)" },
-    { ATLAS_ZX48, "IC2.26", "reset at the CPU" },
-    { ATLAS_ZX48, "IC2.6", "the clock into the CPU" },
-    { ATLAS_ZX48, "IC5.20", "the ROM select" },
-    { ATLAS_ZX48, "IC2.19", "/MREQ at the CPU" },
+ * has none of its own (the 250469 has). FIRST steps are first principles
+ * (reset, then the clock, at the CPU): always asked for, even when the
+ * suspects left all show the same there; the others only if they tell
+ * some of the suspects apart. */
+static const struct { int machine; const char *pin, *what; bool first; } bench_pins[] = {
+    { ATLAS_C64C, "U6.40", "reset at the CPU", true },
+    { ATLAS_C64C, "U6.1", "the clock (PHI0) into the CPU", true },
+    { ATLAS_C64C, "U8.22", "Super PLA output /CASRAM (the RAM)", false },
+    { ATLAS_C64C, "U8.15", "Super PLA output /KERNAL", false },
+    { ATLAS_C64C, "U8.14", "Super PLA output /BASIC", false },
+    { ATLAS_C64C, "U8.13", "Super PLA output /CHARROM", false },
+    { ATLAS_C64C, "U8.40", "Super PLA output /VIC", false },
+    { ATLAS_C64C, "U8.17", "Super PLA output /COLRAM (the color RAM)", false },
+    { ATLAS_C64, "U7.40", "reset at the CPU", true },
+    { ATLAS_C64, "U7.1", "the clock (PHI0) into the CPU", true },
+    { ATLAS_C64, "U17.18", "PLA output /CASRAM (the RAM)", false },
+    { ATLAS_C64, "U17.16", "PLA output /KERNAL", false },
+    { ATLAS_C64, "U17.17", "PLA output /BASIC", false },
+    { ATLAS_C64, "U17.15", "PLA output /CHAROM", false },
+    { ATLAS_C64, "U17.12", "PLA output /IO", false },
+    { ATLAS_C64, "U17.13", "PLA output GR/W (the color RAM)", false },
+    { ATLAS_ZX48, "IC2.26", "reset at the CPU", true },
+    { ATLAS_ZX48, "IC2.6", "the clock into the CPU", true },
+    { ATLAS_ZX48, "IC5.20", "the ROM select", false },
+    { ATLAS_ZX48, "IC2.19", "/MREQ at the CPU", false },
 };
 
 /* The board whose steps a board follows: its own, or its family's. */
@@ -636,7 +678,8 @@ int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readi
         if (net < 0 || net >= db->nnets) continue;
         bool done = false;
         for (int k = 0; k < n && !done; k++) done = readings[k].net == net;
-        if (done || net_info(db, net, p, db->on_legs, order, nrunning, counts) < 1e-6) continue;
+        if (done || (net_info(db, net, p, db->on_legs, order, nrunning, counts) < 1e-6 && !bench_pins[i].first))
+            continue;
         *pin = p;
         if (bench) *bench = (int)step;
         return net;
@@ -652,8 +695,15 @@ int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readi
         int p = probe_pin_for_net(b, net);
         if (p < 0) continue;
         double info = net_info(db, net, p, db->on_legs, order, nrunning, c);
+        /* A net with no chip on it (only a connector, behind a diode or a
+         * resistor): only if it tells clearly more than a chip's leg. It
+         * mostly repeats one (the Spectrum's keyboard rows are A8-A15
+         * behind diodes), and a chip's leg is where the fault is. */
+        const part_t *pp = &b->sim.parts[b->sim.pins[p].part];
+        bool chip = pp->kind == PART_IC;
+        if (!chip) info *= 0.75;
         if (info < best_info - 1e-9) continue;
-        int size = b->sim.parts[b->sim.pins[p].part].npins;
+        int size = chip ? pp->npins : 1000 + pp->npins;
         if (info > best_info + 1e-9 || size < best_size) {
             best_info = info;
             best_net = net;
@@ -738,6 +788,9 @@ static void diagnose_one(probe_db_t *db, board_t *ref, board_t *b, int *order, i
         if ((int)(rng_next(&rng) % 100) < noise_pct)
             r = (r + 1 + (int)(rng_next(&rng) % (PROBE_NREADINGS - 1))) % PROBE_NREADINGS;
         rd[n++] = (probe_reading_t){ pin, net, r, leg };
+        if (getenv("C64HW_PROBE_TRACE"))
+            printf("      probe %s.%d%s: %s\n", ref->sim.parts[ref->sim.pins[pin].part].ref,
+                   ref->sim.pins[pin].number, leg ? " (leg)" : "", probe_reading_name(r));
         nrun = probe_rank(db, rd, n, order);
     }
     int pos = 0;
@@ -824,6 +877,9 @@ int probe_test(const char *atlas_path, int count, unsigned seed, int noise_pct) 
                 for (int s = 0; s < PROBE_NSTRATEGIES; s++) {
                     db.strategy = s;
                     probe_db_set_screen(&db, known ? db.fault_screen[fi] : -1);
+                    if (getenv("C64HW_PROBE_TRACE"))
+                        printf("    %s, %s, %s:\n", db.atlas.faults[fi].spec, probe_strategy_name(s),
+                               known ? "screen known" : "probing only");
                     diagnose_one(&db, ref, b, order, fi, g, noise_pct, noise, &st[s][known], lines[known][s], 40);
                 }
             const char *spec = db.atlas.faults[fi].spec;

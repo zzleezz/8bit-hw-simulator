@@ -676,8 +676,7 @@ static int part_faults(int part, char *out, int len) {
         l_ = strlen(out); snprintf(out + l_, (size_t)len - l_, __VA_ARGS__); } n++; } while (0)
     if (p->removed && !p->unfitted) ADD("pulled out");
     if (p->rfault != RF_OK)
-        ADD("%s", p->rfault == RF_SHORT ? "shorted" :
-                  !strcmp(board_part_kind_name(U.b, part), "switch") ? "switched off" : "open");
+        ADD("%s", board_rfault_name(U.b, part, p->rfault));
     if (p->mfault != MF_OK) {
         char d[160];
         mem_fault_t mf = { p->mfault, p->mf_bit, p->mf_val, p->mf_addr };
@@ -1481,6 +1480,14 @@ static void fault_menu(struct nk_context *ctx) {
                                              "Shorted (its two nets joined)", f == RF_SHORT)) {
                     board_set_rfault(U.b, part, RF_SHORT); U.menu_open = false;
                 }
+                /* A transistor's junctions, and weak. */
+                for (int k = RF_BE_SHORT; k <= RF_WEAK; k++) {
+                    if (!board_rfault_fits(U.b, part, k)) continue;
+                    char lbl[64];
+                    snprintf(lbl, sizeof(lbl), "%s", board_rfault_name(U.b, part, k));
+                    lbl[0] = (char)(lbl[0] - 'a' + 'A');
+                    if (option(ctx, lbl, f == k)) { board_set_rfault(U.b, part, k); U.menu_open = false; }
+                }
             }
         }
     }
@@ -1517,7 +1524,8 @@ static void board_tooltip(struct nk_context *ctx) {
             snprintf(tip, sizeof(tip), "%s %s %s%s   click: break or short it", hp->ref,
                      board_part_kind_name(U.b, U.hover_part), hp->name,
                      !shown || hp->rfault == RF_OK ? "" : hp->rfault == RF_SHORT ? " (shorted)" :
-                     !strcmp(board_part_kind_name(U.b, U.hover_part), "switch") ? " (off)" : " (open)");
+                     !strcmp(board_part_kind_name(U.b, U.hover_part), "switch") ? " (off)" :
+                     hp->rfault == RF_OPEN ? " (open)" : " (faulty)");
         /* A chip's faults (a passive says it above). */
         char faults[240];
         if (shown && hp->kind != PART_RESISTOR && hp->kind != PART_LINK && hp->kind != PART_OTHER &&
@@ -1982,8 +1990,7 @@ static void fault_list(struct nk_context *ctx) {
         bool pulled = p->removed && !p->unfitted;
         if (!pulled && p->rfault == RF_OK) continue;
         snprintf(line, sizeof(line), "%s %s: %s", p->ref, board_part_label(U.b, i),
-                 pulled ? "pulled out" : p->rfault == RF_SHORT ? "shorted" :
-                 !strcmp(board_part_kind_name(U.b, i), "switch") ? "switched off" : "open");
+                 pulled ? "pulled out" : board_rfault_name(U.b, i, p->rfault));
         if (fault_line(ctx, line, i, -1, -1)) {
             if (pulled) board_set_removed(U.b, i, false);
             else board_set_rfault(U.b, i, RF_OK);

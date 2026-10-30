@@ -26,7 +26,11 @@
  * the likeliest first, and the pin to probe next splits the likely faults
  * rather than all of them alike. PROBE_BENCH also starts the way a repair
  * does (reset and clock at the CPU, then the PLA outputs: bench_pins in
- * probe_db.c), skipping the pins that can't tell the suspects apart. */
+ * probe_db.c): reset and clock always, the others skipped when they
+ * can't tell the suspects apart. A net found only at a connector (the
+ * Spectrum's keyboard rows) is suggested only if it tells clearly more
+ * than a chip's leg. C64HW_PROBE_TRACE=1 makes --probe-test print every
+ * pin it probes. */
 #ifndef PROBE_DB_H
 #define PROBE_DB_H
 #include "atlas.h"
@@ -54,6 +58,10 @@ int probe_part_markable(board_t *b, int part);
 /* How likely a part is to fail on the bench, marked MARK (1: a logic
  * chip, 10: the PLA). */
 float probe_part_weight(board_t *b, int part, int mark);
+/* How likely a fault spec (the atlas's, "R17:short") is, on board B with
+ * no chip markings known: its likeliest part's weight, less for a leg or a
+ * bridge (1 for the healthy board). */
+float probe_fault_weight(board_t *b, const char *spec);
 
 typedef struct {
     int pin;                    /* the pin probed (a pin index of the board) */

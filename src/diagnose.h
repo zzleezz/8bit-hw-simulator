@@ -34,6 +34,11 @@ bool diagnose_is_open(void);
 int diagnose_best_labels(char (*labels)[256], int max);
 /* The window on the screen, so the board below ignores the mouse. */
 bool diagnose_bounds(struct nk_rect *r);
+/* The electrolytic capacitors of the real machine: original or replaced
+ * (one choice for both diagnosis windows; original until told). A row to
+ * pick it, CW wide, and with original ones a warning: worn capacitors
+ * make faults the simulator doesn't have, so its answers may not hold. */
+void diagnose_caps(struct nk_context *ctx, float cw);
 
 /* Recording a real repair (repairs.h): its window is open while the
  * faulty chips are clicked on the board, which then toggles them (REF,

@@ -242,6 +242,8 @@ int atlas_match(const atlas_match_opts_t *o);
 typedef struct {
     char spec[96];              /* what board_apply_fault_spec() takes, space separated; "" healthy */
     char desc[700];
+    bool suspect;               /* a part the atlas can't break the way it fails
+                                   (the ULA inside): named, not applied */
 } atlas_cause_t;
 
 typedef struct {

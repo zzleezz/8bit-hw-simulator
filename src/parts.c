@@ -337,6 +337,7 @@ static void dram_cycle(sim_t *s, part_t *p, int bits, int half) {
             st->out_en = 1;
             st->out_bit = bad ? (uint8_t)(((unsigned)cell * 2654435761u) >> 31) : st->cells[cell];
             if (p->mfault) st->out_bit = (uint8_t)(mem_read(p, (unsigned)cell, st->out_bit) & 1);
+            if (p->supply_weak && !(((unsigned)cell * 2654435761u) >> 26)) st->out_bit = 0;
         }
     }
     /* Q is valid until /CAS rises (it outlives /RAS: the ZX Spectrum's

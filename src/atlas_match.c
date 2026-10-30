@@ -8,6 +8,8 @@
  * A captured picture is brought to the machine's full resolution and
  * palette first, then halved the same way the thumbnails were. */
 #include "atlas.h"
+#include "board.h"
+#include "probe_db.h"
 #include "c64.h"
 #include "zx48.h"
 #include "png.h"
@@ -1684,6 +1686,10 @@ typedef struct {
     feat_t *f[2];
     uint64_t *pic;              /* hash of the pictures, 0 for snow */
     uint64_t *one[2];           /* hash of each picture alone, 0 if none */
+    /* How likely each fault is (probe_fault_weight()), and whether it is
+     * on the ULA's side of the lower RAM (a Spectrum's: see ula_suspect). */
+    float *fw;
+    uint8_t *ula_side;
 } ctx_t;
 
 static uint64_t fnv(uint64_t h, const void *p, size_t n) {
@@ -1704,6 +1710,113 @@ static void report_error(char *err, int len, const char *fmt, ...) {
         memcpy(err, msg, n);
         err[n] = 0;
     } else if (!err) fprintf(stderr, "%s\n", msg);
+}
+
+/* The ULA as a suspect. The atlas has the ULA at its pins only, but a
+ * ULA failing inside gives the screens of the faults between it and the
+ * lower RAM (the RAM, the resistors on its address lines, its own pins):
+ * those screens name it too, as likely as the ULA fails. */
+#define ULA_SUSPECT_DESC "ULA failed inside: the simulator has the ULA at its pins only and can't show " \
+    "this, but a ULA failing inside gives screens like this one (it drives the lower RAM)"
+#define ULA_WEIGHT 5        /* probe_part_weight()'s, for the Spectrum's ULA */
+
+/* How much a screen's likelihood moves its rank: a screen whose causes
+ * are 10 times likelier gains 0.7 points (of 100), so it only decides
+ * between screens about as alike to the picture (C64HW_MATCH_LIKELY: 0
+ * turns it off). */
+static float likely_k(void) {
+    static float k = -1;
+    if (k < 0) {
+        const char *e = getenv("C64HW_MATCH_LIKELY");
+        k = e ? (float)atof(e) : 0.003f;
+    }
+    return k;
+}
+
+static int ula_part(board_t *b) {
+    for (int i = 0; i < b->sim.nparts; i++) {
+        const char *l = board_part_label(b, i);
+        if (b->sim.parts[i].kind == PART_IC && l && !strcmp(l, "ULA")) return i;
+    }
+    return -1;
+}
+
+/* The weights of the atlas's faults, and which are on the ULA's side. */
+static void ctx_weights(ctx_t *c) {
+    int nf = c->a.nfaults;
+    c->fw = malloc(((size_t)nf + 1) * sizeof(float));
+    c->ula_side = calloc((size_t)nf + 1, 1);
+    for (int i = 0; i < nf; i++) c->fw[i] = 1;
+    for (int m = 0; m < ATLAS_NMACHINES; m++) {
+        bool any = false;
+        for (int i = 0; i < nf && !any; i++) any = c->a.faults[i].h.machine == m;
+        if (!any) continue;
+        board_t *b = board_create(atlas_machine(m));
+        sim_t *s = &b->sim;
+        int ula = atlas_family(m) == ATLAS_ZX48 ? ula_part(b) : -1;
+        /* The nets of the ULA's lower RAM pins: /CAS, /WE, A0-A6, D0-D7, /RAS. */
+        static const int ula_ram_pins[] = { 1, 4, 5, 6, 7, 8, 9, 10, 11, 18, 21, 22, 25, 27, 29, 30, 31, 35 };
+        bool *ram_net = calloc((size_t)s->nnets + 1, sizeof(bool));
+        for (size_t k = 0; ula >= 0 && k < sizeof(ula_ram_pins) / sizeof(ula_ram_pins[0]); k++) {
+            int pin = s->parts[ula].pinmap[ula_ram_pins[k]];
+            if (pin >= 0 && s->pins[pin].net >= 0) ram_net[s->pins[pin].net] = true;
+        }
+        for (int i = 0; i < nf; i++) {
+            const atlas_fault_t *f = &c->a.faults[i];
+            if (f->h.machine != m || !f->spec[0]) continue;
+            c->fw[i] = probe_fault_weight(b, f->spec);
+            for (const char *sp = f->spec; ula >= 0 && *sp && !c->ula_side[i]; ) {
+                size_t len = strcspn(sp, " "), rl = strcspn(sp, ".:");
+                char ref[16];
+                snprintf(ref, sizeof(ref), "%.*s", (int)(rl < len ? rl : len), sp);
+                int part = sim_find_part(s, ref);
+                if (part >= 0) {
+                    const part_t *p = &s->parts[part];
+                    bool side = part == ula || board_part_role(b, part) == ROLE_VRAM;
+                    for (int k = 0; k < p->npins && !side; k++) {
+                        int net = s->pins[p->first_pin + k].net;
+                        side = net >= 0 && ram_net[net];
+                    }
+                    c->ula_side[i] = side;
+                }
+                sp += len + (sp[len] == ' ');
+            }
+        }
+        free(ram_net);
+        board_destroy(b);
+    }
+}
+
+/* A screen's likelihood: its likeliest cause's (not the sum: hundreds of
+ * faults give the healthy screen, which says nothing of a broken one). */
+static float outcome_weight(const ctx_t *c, const atlas_outcome_t *o) {
+    float w = 0;
+    for (int k = 0; k < o->nfaults; k++) w = fmaxf(w, c->fw[o->faults[k]]);
+    return w > 0 ? w : 1;
+}
+
+static bool ula_suspect(const ctx_t *c, const atlas_outcome_t *o) {
+    for (int k = 0; k < o->nfaults; k++) if (c->ula_side[o->faults[k]]) return true;
+    return false;
+}
+
+/* A screen's causes as listed: the healthy board first, then the
+ * likeliest, the ULA among them if it is a suspect (-1 in ORDER). Their
+ * number. */
+static int list_causes(const ctx_t *c, const atlas_outcome_t *o, int *order) {
+    int n = 0;
+    for (int k = 0; k < o->nfaults; k++) order[n++] = o->faults[k];
+    if (ula_suspect(c, o)) order[n++] = -1;
+    for (int i = 1; i < n; i++)
+        for (int k = i; k > 0; k--) {
+            int x = order[k], y = order[k - 1];
+            bool hx = x >= 0 && !c->a.faults[x].spec[0], hy = y >= 0 && !c->a.faults[y].spec[0];
+            float wx = x >= 0 ? c->fw[x] : ULA_WEIGHT, wy = y >= 0 ? c->fw[y] : ULA_WEIGHT;
+            if (!(hx > hy || (hx == hy && wx > wy))) break;
+            order[k] = y;
+            order[k - 1] = x;
+        }
+    return n;
 }
 
 static bool ctx_load(ctx_t *c, const char *path, char *err, int errlen) {
@@ -1738,6 +1851,7 @@ static bool ctx_load(ctx_t *c, const char *path, char *err, int errlen) {
         }
         c->pic[i] = h;
     }
+    ctx_weights(c);
     return true;
 }
 
@@ -1750,6 +1864,8 @@ static void ctx_free(ctx_t *c) {
     free(c->pic);
     free(c->one[0]);
     free(c->one[1]);
+    free(c->fw);
+    free(c->ula_side);
     atlas_free(&c->a);
 }
 
@@ -1757,6 +1873,7 @@ typedef struct {
     int outcome;
     float score, parts[NSC];
     int hyp;                    /* the normalization that gave it */
+    float rank;                 /* the score, moved by the likelihood (likely_k()) */
 } cand_t;
 
 typedef struct {
@@ -1772,11 +1889,11 @@ typedef struct {
 
 static const atlas_t *cand_atlas;
 
-/* Best score first; the same score (to 0.1%): the group with more causes
- * first, the likelier one. */
+/* Best rank first (the score, moved by how likely the causes are); the
+ * same (to 0.1%): the group with more causes first. */
 static int cmp_cand(const void *x, const void *y) {
     const cand_t *a = x, *b = y;
-    int sa = (int)lroundf(a->score * 1000), sb = (int)lroundf(b->score * 1000);
+    int sa = (int)lroundf(a->rank * 1000), sb = (int)lroundf(b->rank * 1000);
     if (sa != sb) return sa < sb ? 1 : -1;
     int na = cand_atlas->outcomes[a->outcome].nfaults, nb = cand_atlas->outcomes[b->outcome].nfaults;
     if (na != nb) return nb - na;
@@ -1854,11 +1971,11 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
     for (int i = 0; i < c->a.noutcomes; i++) {
         const atlas_outcome_t *o = &c->a.outcomes[i];
         if (!outcome_wanted(o, op)) continue;
-        cand_t best = { i, -1, { 0 }, -1 };
+        cand_t best = { i, -1, { 0 }, -1, 0 };
         int om = by_family ? atlas_family(o->h.machine) : o->h.machine;
         for (int k = 0; k < M->nnorms; k++) {
             if (M->norms[k].machine != om) continue;
-            cand_t t = { i, 0, { 0 }, k };
+            cand_t t = { i, 0, { 0 }, k, 0 };
             if (o->h.t.no_signal) {
                 t.score = M->norms[k].snow;
                 for (int p = 0; p < NSC; p++) t.parts[p] = t.score;
@@ -1888,10 +2005,10 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
         const atlas_real_t *rl = &op->reals[i];
         feat_t rf;
         if (rl->snow <= 0.5f) features(rl->machine, rl->thumb, -1, &rf);
-        cand_t best = { i, -1, { 0 }, -1 };
+        cand_t best = { i, -1, { 0 }, -1, 0 };
         for (int k = 0; k < M->nnorms; k++) {
             if (atlas_family(M->norms[k].machine) != atlas_family(rl->machine)) continue;
-            cand_t t = { i, 0, { 0 }, k };
+            cand_t t = { i, 0, { 0 }, k, 0 };
             if (rl->snow > 0.5f) t.score = M->norms[k].snow;
             else {
                 if (!nf[k][rf.bg]) {
@@ -1907,6 +2024,8 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
     for (int k = 0; k < M->nnorms; k++)
         for (int bg = 0; bg < 16; bg++) free(nf[k][bg]);
     free(nf);
+    for (int k = 0; k < M->nc; k++)
+        M->c[k].rank = M->c[k].score + likely_k() * logf(outcome_weight(c, &c->a.outcomes[M->c[k].outcome]));
     cand_atlas = &c->a;
     qsort(M->c, (size_t)M->nc, sizeof(cand_t), cmp_cand);
     qsort(M->rc, (size_t)M->nrc, sizeof(cand_t), cmp_real);
@@ -1999,10 +2118,15 @@ int atlas_match(const atlas_match_opts_t *op) {
         if (o->h.t.nseries) printf("     (a flash code: the number of flashes takes a video, not a screenshot)\n");
         printf("     ");
         for (int p = 0; p < NSC; p++) printf("%s %.2f%s", sc_names[p], cd->parts[p], p + 1 < NSC ? "  " : "\n");
-        printf("     %d cause%s:\n", o->nfaults, o->nfaults == 1 ? "" : "s");
-        int shown = op->causes < 0 ? o->nfaults : op->causes;
-        for (int k = 0; k < o->nfaults && k < shown; k++) {
-            const atlas_fault_t *ft = &c.a.faults[o->faults[k]];
+        int *order = malloc(((size_t)o->nfaults + 1) * sizeof(int)), nc = list_causes(&c, o, order);
+        printf("     %d cause%s, likeliest first (likelihood %.1f):\n", nc, nc == 1 ? "" : "s", outcome_weight(&c, o));
+        int shown = op->causes < 0 ? nc : op->causes;
+        for (int k = 0; k < nc && k < shown; k++) {
+            if (order[k] < 0) {
+                printf("       %-14s %s\n", "ULA (inside)", ULA_SUSPECT_DESC);
+                continue;
+            }
+            const atlas_fault_t *ft = &c.a.faults[order[k]];
             /* The chip notes of a description are several lines. */
             printf("       %-14s ", ft->spec[0] ? ft->spec : "(healthy)");
             for (const char *d = ft->desc; *d; d++) {
@@ -2011,7 +2135,8 @@ int atlas_match(const atlas_match_opts_t *op) {
             }
             putchar('\n');
         }
-        if (o->nfaults > shown) printf("       ... %d more (--causes all lists them)\n", o->nfaults - shown);
+        if (nc > shown) printf("       ... %d more (--causes all lists them)\n", nc - shown);
+        free(order);
         printf("\n");
     }
     match_free(&M);
@@ -2106,10 +2231,17 @@ bool atlas_match_run(const atlas_match_opts_t *op, atlas_result_t *r) {
             g->thumb = malloc((size_t)g->w * g->h * sizeof(uint32_t));
             for (int i = 0; i < g->w * g->h; i++) g->thumb[i] = pal[img[i] & 15];
         }
-        g->ncauses = o->nfaults;
-        g->causes = calloc((size_t)o->nfaults, sizeof(atlas_cause_t));
-        for (int f = 0; f < o->nfaults; f++) {
-            const atlas_fault_t *ft = &c.a.faults[o->faults[f]];
+        int *order = malloc(((size_t)o->nfaults + 1) * sizeof(int));
+        g->ncauses = list_causes(&c, o, order);
+        g->causes = calloc((size_t)g->ncauses, sizeof(atlas_cause_t));
+        for (int f = 0; f < g->ncauses; f++) {
+            if (order[f] < 0) {
+                g->causes[f].suspect = true;
+                snprintf(g->causes[f].spec, sizeof(g->causes[f].spec), "ULA (inside)");
+                snprintf(g->causes[f].desc, sizeof(g->causes[f].desc), "%s", ULA_SUSPECT_DESC);
+                continue;
+            }
+            const atlas_fault_t *ft = &c.a.faults[order[f]];
             snprintf(g->causes[f].spec, sizeof(g->causes[f].spec), "%s", ft->spec);
             /* The chip notes of a description are several lines. */
             char *d = g->causes[f].desc;
@@ -2120,6 +2252,7 @@ bool atlas_match_run(const atlas_match_opts_t *op, atlas_result_t *r) {
             }
             d[n] = 0;
         }
+        free(order);
         r->ngroups++;
     }
     match_free(&M);

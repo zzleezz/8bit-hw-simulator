@@ -245,6 +245,13 @@ void board_sample(board_t *b);
 void board_set_pin_fault(board_t *b, int pin, int fault);
 void board_set_removed(board_t *b, int part, bool removed);
 void board_set_rfault(board_t *b, int part, int rfault);
+/* An RF_* fault: as a fault spec's word ("be_short"), whether PART can
+ * have it (the junctions: transistors; weak: one the machine models as a block,
+ * the Spectrum's DC-DC converter), and in
+ * words ("base-emitter junction shorted"). */
+const char *board_rfault_spec(int rfault);
+bool board_rfault_fits(board_t *b, int part, int rfault);
+const char *board_rfault_name(board_t *b, int part, int rfault);
 void board_clear_faults(board_t *b);
 /* A fault inside a memory chip (MF_*, see sim.h). */
 typedef struct { uint8_t kind, bit, val; uint32_t addr; } mem_fault_t;

@@ -166,7 +166,9 @@ static void strategy_choice(struct nk_context *ctx, float cw) {
 /* What is printed on the chips of the real machine: the maker moves how
  * likely each is to be the fault. */
 static void markings(struct nk_context *ctx, float cw) {
-    if (!nk_tree_push(ctx, NK_TREE_TAB, "Chip markings on the real board", NK_MINIMIZED)) return;
+    bool any = false;       /* none on a Spectrum: its ranking has no makers */
+    for (int i = 0; i < P.b->sim.nparts && !any; i++) any = probe_part_markable(P.b, i) != MARK_UNKNOWN;
+    if (!any || !nk_tree_push(ctx, NK_TREE_TAB, "Chip markings on the real board", NK_MINIMIZED)) return;
     uint8_t *m = P.marks[P.machine];
     sim_t *s = &P.b->sim;
     bool changed = false;
@@ -721,6 +723,7 @@ void probe_window(struct nk_context *ctx, struct nk_rect area, board_t *b, int m
     }
     screen_choice(ctx, cw);
     strategy_choice(ctx, cw);
+    diagnose_caps(ctx, cw);
     markings(ctx, cw);
     /* The records changed, or a screenshot matched others. */
     if (P.boost_serial != diagnose_records_serial()) {

@@ -910,7 +910,9 @@ static void describe_spec(board_t *b, const char *spec, char *out, int len) {
         appendf(out, len, "%s %s %s", ref, label, d);
         if (!strncmp(what, "flip@", 5)) appendf(out, len, ", CPU address $%.4s", what + 5);
     } else {
-        appendf(out, len, "%s %s %s", ref, ic ? label : p->name ? p->name : "", !strcmp(what, "short") ? "shorted" : "open");
+        int rf = RF_OPEN;
+        for (int k = RF_OPEN; k <= RF_WEAK; k++) if (!strcmp(what, board_rfault_spec(k))) rf = k;
+        appendf(out, len, "%s %s %s", ref, ic ? label : p->name ? p->name : "", board_rfault_name(b, part, rf));
         if (p->npins == 2) {
             int n0 = s->pins[p->first_pin].net, n1 = s->pins[p->first_pin + 1].net;
             if (n0 >= 0 && n1 >= 0) appendf(out, len, " (between %s and %s)", s->nets[n0].name, s->nets[n1].name);
@@ -1225,9 +1227,16 @@ static void catalog_mode(catalog_t *c, bool full) {
                 size_t len = strcspn(list, " ");
                 char ref[24], spec[32];
                 snprintf(ref, sizeof(ref), "%.*s", (int)len, list);
-                if (sim_find_part(s, ref) >= 0) {
+                int part = sim_find_part(s, ref);
+                if (part >= 0) {
                     snprintf(spec, sizeof(spec), "%s:open", ref);
                     add_job(c, spec, NULL);
+                    /* A transistor's junctions, and weak (TR4, TR5). */
+                    for (int k = RF_BE_SHORT; k <= RF_WEAK; k++) {
+                        if (!board_rfault_fits(b, part, k)) continue;
+                        snprintf(spec, sizeof(spec), "%s:%s", ref, board_rfault_spec(k));
+                        add_job(c, spec, NULL);
+                    }
                 }
                 list += len + (list[len] == ' ');
             }

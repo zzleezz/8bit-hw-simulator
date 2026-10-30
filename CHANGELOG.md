@@ -8,6 +8,35 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Diagnose by probing: the bench procedure always starts with reset, then
+  the clock, at the CPU (C64 and Spectrum), even after picking the screen.
+  Before, it skipped them when the faults left all showed the same there.
+- Diagnose by probing: a net reachable only at a connector (the Spectrum's
+  keyboard rows, which are A8-A15 behind diodes) is suggested only when it
+  tells clearly more than a chip's leg. Before, it won ties against the
+  chip's leg, so the keyboard connector came up far too often.
+- How likely each part is to fail now follows a repairer's experience on the
+  Spectrum: TR4 (the DC-DC converter's switch) first, then the lower RAM,
+  the upper RAM, the CPU, the ULA and the ROM alike, then the logic.
+  Resistors, capacitors, diodes, links, coils and crystals hardly ever fail
+  (on the C64 too). Before, the ULA ranked above the RAM and TR4 with the
+  resistors.
+- Diagnose from screenshot: pictures that match about as well are now put
+  in order of how likely their causes are (a cause 10 times likelier is
+  worth about 0.7 points), and each picture's causes are listed likeliest
+  first. A real bad ULA no longer comes out as "resistor R17 shorted".
+- Diagnose from screenshot (Spectrum): a picture caused by faults between
+  the ULA and the lower RAM also names "ULA (inside)". The simulator has the
+  ULA at its pins only and can't show a ULA failing inside, but such a ULA
+  gives the same pictures.
+- TR4 and TR5 (Spectrum DC-DC converter) can fail at either junction,
+  shorted or open (no +12V and no -5V, like the transistor taken out), or
+  weak: it tests good but fails under load, so the 4116s' supplies sag and
+  their cells forget. In the part's menu and in the atlas (50 new runs).
+- An "Electrolytic caps: original / replaced" choice in both diagnosis
+  windows. With original capacitors they warn that worn ones make faults
+  the simulator doesn't have, so the results may not be reliable.
+
 ## V1.1 (2026-10-30)
 
 - Diagnose: a "Paste screenshot" button (and Ctrl+V) diagnoses the picture

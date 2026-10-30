@@ -255,6 +255,30 @@ bool diagnose_bounds(struct nk_rect *r) {
 
 static void save_record(void);
 
+static float wrapped_height(struct nk_context *ctx, const char *text, float width);
+static bool original_caps = true;
+
+void diagnose_caps(struct nk_context *ctx, float cw) {
+    static const char *const caps[2] = { "Original (never replaced)", "Replaced (recapped)" };
+    static const char *const warn =
+        "Original electrolytic capacitors: after 40 years many are dried out. Worn capacitors make faults the "
+        "simulator doesn't have (ripple on the supplies, a sagging -5V or +12V, a slow or unsteady reset, "
+        "picture interference), so these results may not be reliable. Check the supplies with a scope, or "
+        "recap the machine, and diagnose again.";
+    nk_layout_row_begin(ctx, NK_STATIC, 28, 2);
+    nk_layout_row_push(ctx, 140);
+    nk_label(ctx, "Electrolytic caps:", NK_TEXT_LEFT);
+    nk_layout_row_push(ctx, cw - 146 < 300 ? cw - 146 : 300);
+    if (nk_widget_is_hovered(ctx))
+        nk_tooltip(ctx, "The electrolytic capacitors on the real machine. The simulator's capacitors are always good");
+    original_caps = nk_combo(ctx, caps, 2, original_caps ? 0 : 1, 22, nk_vec2(300, 80)) == 0;
+    nk_layout_row_end(ctx);
+    if (original_caps) {
+        nk_layout_row_dynamic(ctx, wrapped_height(ctx, warn, cw), 1);
+        nk_label_colored_wrap(ctx, warn, COL_PULSE);
+    }
+}
+
 /* A picture in its own proportions, at the top left of the cell (nk_image()
  * stretches it over the cell: a 16:9 screenshot beside taller text). */
 static void image(struct nk_context *ctx, const thumbtex_t *t) {
@@ -327,7 +351,10 @@ static void group(struct nk_context *ctx, int k, float cw, diagnose_action_t *ac
         const atlas_cause_t *cs = &g->causes[i];
         nk_layout_row_begin(ctx, NK_STATIC, wrapped_height(ctx, one_line(desc, sizeof(desc), cs->desc), dw), 3);
         nk_layout_row_push(ctx, 150);
-        if (cs->spec[0] && !atlas_same_refs(D.matched, D.machine)) {
+        if (cs->suspect) {
+            /* Nothing to put on the board: the simulator can't break it so. */
+            nk_label_colored(ctx, "not simulated", NK_TEXT_CENTERED, COL_DIMTEXT);
+        } else if (cs->spec[0] && !atlas_same_refs(D.matched, D.machine)) {
             /* Another board's parts (the 250407's for the 250469): shown, not applied. */
             nk_label_colored(ctx, atlas_machine(D.matched)->issue, NK_TEXT_CENTERED, COL_DIMTEXT);
         } else {
@@ -1141,6 +1168,7 @@ static void main_window(struct nk_context *ctx, struct nk_rect area, diagnose_ac
         nk_group_end(ctx);
     }
     nk_layout_row_end(ctx);
+    diagnose_caps(ctx, cw);
 
     if (D.ok) {
         real_matches(ctx, cw);

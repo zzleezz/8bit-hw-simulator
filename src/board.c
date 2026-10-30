@@ -1117,6 +1117,33 @@ void board_set_rfault(board_t *b, int part, int rfault) {
     board_rebuild(b);
 }
 
+/* The RF_* faults as fault specs ("TR4:be_short"). */
+static const char *const rf_specs[] = { "ok", "open", "short", "be_short", "bc_short", "be_open", "bc_open", "weak" };
+
+const char *board_rfault_spec(int rfault) {
+    return rfault >= 0 && rfault < (int)(sizeof(rf_specs) / sizeof(rf_specs[0])) ? rf_specs[rfault] : "ok";
+}
+
+bool board_rfault_fits(board_t *b, int part, int rfault) {
+    if (rfault <= RF_SHORT) return true;
+    if (strcmp(board_part_kind_name(b, part), "transistor")) return false;
+    return rfault != RF_WEAK || in_list(b->m->crystals, b->sim.parts[part].ref);     /* the machine models it */
+}
+
+const char *board_rfault_name(board_t *b, int part, int rfault) {
+    bool tr = !strcmp(board_part_kind_name(b, part), "transistor");
+    switch (rfault) {
+    case RF_OK: return "working";
+    case RF_SHORT: return tr ? "shorted collector to emitter" : "shorted";
+    case RF_BE_SHORT: return "base-emitter junction shorted";
+    case RF_BC_SHORT: return "base-collector junction shorted";
+    case RF_BE_OPEN: return "base-emitter junction open";
+    case RF_BC_OPEN: return "base-collector junction open";
+    case RF_WEAK: return "weak: tests good, fails under load";
+    default: return !strcmp(board_part_kind_name(b, part), "switch") ? "switched off" : "open";
+    }
+}
+
 void board_set_mem_fault(board_t *b, int part, const mem_fault_t *mf) {
     part_t *p = &b->sim.parts[part];
     p->mfault = mf->kind;
@@ -1309,7 +1336,10 @@ bool board_apply_fault_spec(board_t *b, const char *spec) {
         if (!board_parse_mem_fault(b, part, what, &mf)) return false;
         board_set_mem_fault(b, part, &mf);
     } else {
-        board_set_rfault(b, part, !strcmp(what, "open") ? RF_OPEN : !strcmp(what, "short") ? RF_SHORT : RF_OK);
+        int rf = RF_OK;
+        for (int k = 0; k < (int)(sizeof(rf_specs) / sizeof(rf_specs[0])); k++) if (!strcmp(what, rf_specs[k])) rf = k;
+        if (!board_rfault_fits(b, part, rf)) return false;
+        board_set_rfault(b, part, rf);
     }
     return true;
 }
