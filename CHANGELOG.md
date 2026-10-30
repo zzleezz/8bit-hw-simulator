@@ -8,6 +8,8 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+## V1.1 (2026-10-30)
+
 - Diagnose: a "Paste screenshot" button (and Ctrl+V) diagnoses the picture
   on the clipboard: a screenshot copied from the capture program, or a
   picture file copied in the file manager. No need to save it first.
