@@ -664,7 +664,12 @@ static float rgb_d(rgb_t x, rgb_t y) {
  * colors with. A black border can't be told from the bars: the signal
  * then ends where the picture starts.
  *
- * The BORDER color: the median of a thin ring inside the signal.
+ * The BORDER color: the median of a thin ring inside the signal. A photo
+ * of a screen is lit unevenly (brighter in the middle, darker at the
+ * corners), so the border is looked for against the border's color NEAR
+ * each pixel: the ring's color along each edge, blended between them (a
+ * Coons patch). A ring point far from the median (content at the edge) is
+ * the median. A capture card's flat border gives the median everywhere.
  *
  * Where the border ENDS: the longest run of rows (then columns) most of
  * whose pixels aren't the border color: the active display, when its
@@ -844,6 +849,59 @@ static float snow_share(const image_t *im, const scene_t *sc) {
     return everywhere * clampf((float)(r - 0.6) / 0.2f, 0, 1);
 }
 
+/* The border's color near each point of the signal (see above). */
+typedef struct {
+    int x0, y0, w, h;
+    rgb_t *top, *bottom, *left, *right;
+} border_ref_t;
+
+static void border_ref_make(const image_t *im, const scene_t *sc, int ring, border_ref_t *br) {
+    br->x0 = sc->x0; br->y0 = sc->y0; br->w = sc->x1 - sc->x0; br->h = sc->y1 - sc->y0;
+    br->top = malloc((size_t)br->w * sizeof(rgb_t));
+    br->bottom = malloc((size_t)br->w * sizeof(rgb_t));
+    br->left = malloc((size_t)br->h * sizeof(rgb_t));
+    br->right = malloc((size_t)br->h * sizeof(rgb_t));
+    /* Each point: the median of a ring-sized block, every few pixels (the
+     * lighting changes slowly), held in between. */
+    int step = ring / 2 > 1 ? ring / 2 : 1;
+    for (int i = 0; i < br->w; i += step) {
+        int a = sc->x0 + i - ring, b = sc->x0 + i + ring;
+        if (a < sc->x0) a = sc->x0;
+        if (b > sc->x1) b = sc->x1;
+        rgb_t t = median_rgb(im, a, sc->y0, b, sc->y0 + ring, 0), u = median_rgb(im, a, sc->y1 - ring, b, sc->y1, 0);
+        if (rgb_d(t, sc->border) > 60) t = sc->border;
+        if (rgb_d(u, sc->border) > 60) u = sc->border;
+        for (int k = i; k < i + step && k < br->w; k++) { br->top[k] = t; br->bottom[k] = u; }
+    }
+    for (int i = 0; i < br->h; i += step) {
+        int a = sc->y0 + i - ring, b = sc->y0 + i + ring;
+        if (a < sc->y0) a = sc->y0;
+        if (b > sc->y1) b = sc->y1;
+        rgb_t l = median_rgb(im, sc->x0, a, sc->x0 + ring, b, 0), r = median_rgb(im, sc->x1 - ring, a, sc->x1, b, 0);
+        if (rgb_d(l, sc->border) > 60) l = sc->border;
+        if (rgb_d(r, sc->border) > 60) r = sc->border;
+        for (int k = i; k < i + step && k < br->h; k++) { br->left[k] = l; br->right[k] = r; }
+    }
+}
+
+static void border_ref_free(border_ref_t *br) {
+    free(br->top); free(br->bottom); free(br->left); free(br->right);
+}
+
+/* The border's color at X, Y of the picture. */
+static rgb_t border_at(const border_ref_t *br, int x, int y) {
+    int i = x - br->x0, j = y - br->y0;
+    float u = br->w > 1 ? (float)i / (float)(br->w - 1) : 0, v = br->h > 1 ? (float)j / (float)(br->h - 1) : 0;
+    const rgb_t *T = br->top, *B = br->bottom, *L = br->left, *R = br->right;
+    rgb_t tl = T[0], tr = T[br->w - 1], bl = B[0], bra = B[br->w - 1];
+    rgb_t c;
+    #define COONS(ch) ((1 - v) * T[i].ch + v * B[i].ch + (1 - u) * L[j].ch + u * R[j].ch - \
+                       ((1 - u) * (1 - v) * tl.ch + u * (1 - v) * tr.ch + (1 - u) * v * bl.ch + u * v * bra.ch))
+    c.r = COONS(r); c.g = COONS(g); c.b = COONS(b);
+    #undef COONS
+    return c;
+}
+
 static void analyze(const image_t *im, scene_t *sc) {
     memset(sc, 0, sizeof(*sc));
     sc->w = im->w;
@@ -897,6 +955,8 @@ static void analyze(const image_t *im, scene_t *sc) {
     int ring = (sw < sh ? sw : sh) * 3 / 100;
     if (ring < 2) ring = 2;
     sc->border = median_rgb(im, sc->x0, sc->y0, sc->x1, sc->y1, ring);
+    border_ref_t br;
+    border_ref_make(im, sc, ring, &br);
 
     /* Where the border ends. */
     float *rows = calloc((size_t)sh, sizeof(float)), *cols = calloc((size_t)sw, sizeof(float));
@@ -904,7 +964,7 @@ static void analyze(const image_t *im, scene_t *sc) {
     int cx0 = sc->x0 + sw / 5, cx1 = sc->x1 - sw / 5;
     for (int y = 0; y < sh; y++) {
         int k = 0;
-        for (int x = cx0; x < cx1; x++) k += rgb_d(im->px[(sc->y0 + y) * W + x], sc->border) > thr;
+        for (int x = cx0; x < cx1; x++) k += rgb_d(im->px[(sc->y0 + y) * W + x], border_at(&br, x, sc->y0 + y)) > thr;
         rows[y] = (float)k / (float)(cx1 - cx0);
     }
     float ey0, ey1, ex0, ex1;
@@ -912,7 +972,7 @@ static void analyze(const image_t *im, scene_t *sc) {
         int ry0 = sc->y0 + (int)ey0 + (int)(ey1 - ey0) / 10, ry1 = sc->y0 + (int)ey1 - (int)(ey1 - ey0) / 10;
         for (int x = 0; x < sw; x++) {
             int k = 0;
-            for (int y = ry0; y < ry1; y++) k += rgb_d(im->px[y * W + sc->x0 + x], sc->border) > thr;
+            for (int y = ry0; y < ry1; y++) k += rgb_d(im->px[y * W + sc->x0 + x], border_at(&br, sc->x0 + x, y)) > thr;
             cols[x] = ry1 > ry0 ? (float)k / (float)(ry1 - ry0) : 0;
         }
         if (longest_run(cols, sw, sw * 2 / 5, &ex0, &ex1)) {
@@ -928,12 +988,14 @@ static void analyze(const image_t *im, scene_t *sc) {
     int bx0 = sw, bx1 = -1, by0 = sh, by1 = -1;
     for (int y = my; y < sh - my; y++) {
         int k = 0;
-        for (int x = mx; x < sw - mx; x++) k += rgb_d(im->px[(sc->y0 + y) * W + sc->x0 + x], sc->border) > cthr;
+        for (int x = mx; x < sw - mx; x++)
+            k += rgb_d(im->px[(sc->y0 + y) * W + sc->x0 + x], border_at(&br, sc->x0 + x, sc->y0 + y)) > cthr;
         if (k > 2 && k * 100 > sw) { if (y < by0) by0 = y; by1 = y; }
     }
     for (int x = mx; x < sw - mx; x++) {
         int k = 0;
-        for (int y = my; y < sh - my; y++) k += rgb_d(im->px[(sc->y0 + y) * W + sc->x0 + x], sc->border) > cthr;
+        for (int y = my; y < sh - my; y++)
+            k += rgb_d(im->px[(sc->y0 + y) * W + sc->x0 + x], border_at(&br, sc->x0 + x, sc->y0 + y)) > cthr;
         if (k > 2 && k * 100 > sh) { if (x < bx0) bx0 = x; bx1 = x; }
     }
     if (bx1 >= bx0 && by1 >= by0) {
@@ -942,6 +1004,7 @@ static void analyze(const image_t *im, scene_t *sc) {
     }
     free(rows);
     free(cols);
+    border_ref_free(&br);
     sc->snow = snow_share(im, sc);
 }
 
@@ -1308,13 +1371,27 @@ static void quantize(int m, const rgb_t *px, const uint8_t *known, uint8_t *idx,
     /* The outermost pixels of the active display in the border's color are
      * the border, a pixel off (the edges are found to a pixel or so), when
      * the screen's background is just inside: the background. (Something
-     * drawn up to the edge goes on inside.) */
-    if (bg != bd)
+     * drawn up to the edge goes on inside.) So is one that is a blend of
+     * the two (a blurred edge, half border): its cell may have snapped it
+     * to another color along the way (bright white for white). */
+    if (bg != bd) {
+        rgb_t pg = P->rgb[bg], pb = P->rgb[bd];
+        float ex = pb.r - pg.r, ey = pb.g - pg.g, ez = pb.b - pg.b, el2 = ex * ex + ey * ey + ez * ez;
         for (int y = ay; y < ay + ah; y++)
             for (int x = ax; x < ax + aw; x++) {
                 int dx = x < ax + 2 ? 3 : x >= ax + aw - 2 ? -3 : 0, dy = y < ay + 2 ? 3 : y >= ay + ah - 2 ? -3 : 0;
-                if ((dx || dy) && idx[y * sw + x] == bd && idx[(y + dy) * sw + x + dx] == bg) idx[y * sw + x] = (uint8_t)bg;
+                int i = y * sw + x;
+                if (!(dx || dy) || idx[i] == bg || idx[(y + dy) * sw + x + dx] != bg) continue;
+                bool blend = false;
+                if (known[i] && el2 >= 1) {
+                    rgb_t c = px[i];
+                    float t = ((c.r - pg.r) * ex + (c.g - pg.g) * ey + (c.b - pg.b) * ez) / el2;
+                    float er = c.r - (pg.r + t * ex), eg = c.g - (pg.g + t * ey), eb = c.b - (pg.b + t * ez);
+                    blend = t > 0 && t < 1.25f && sqrtf(er * er + eg * eg + eb * eb) < 30;
+                }
+                if (idx[i] == bd || blend) idx[i] = (uint8_t)bg;
             }
+    }
     free(near);
 }
 

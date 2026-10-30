@@ -275,10 +275,35 @@ bool probe_db_load(probe_db_t *db, const char *path, int machine, board_t *b, ch
         if (f->h.machine != src || f->h.mode != MODE_BOOT || !f->nets || f->nnets != an) continue;
         memset(v, NET_NONE, (size_t)db->nnets);
         for (int k = 0; k < an; k++) if (map[k] >= 0) v[map[k]] = f->nets[k];
-        uint64_t h = fnv64(v, (size_t)db->nnets) | 1;
+        /* Its open legs, as pins of this board, in order. */
+        int lp[8];
+        uint8_t ls[8];
+        int nl = 0;
+        db->have_legs |= f->has_legs;
+        for (int k = 0; k < f->nlegs && nl < 8; k++) {
+            char ref[16], pad[8];
+            if (sscanf(f->legs[k].pin, "%15[^.].%7s", ref, pad) != 2) continue;
+            int part = sim_find_part(&b->sim, ref), pin = part >= 0 ? board_pad_pin(b, part, pad) : -1;
+            if (pin < 0) continue;
+            int at = nl++;
+            while (at > 0 && lp[at - 1] > pin) { lp[at] = lp[at - 1]; ls[at] = ls[at - 1]; at--; }
+            lp[at] = pin;
+            ls[at] = f->legs[k].state;
+        }
+        uint64_t h = fnv64(v, (size_t)db->nnets);
+        for (int k = 0; k < nl; k++) {
+            uint8_t e[5] = { (uint8_t)lp[k], (uint8_t)(lp[k] >> 8), (uint8_t)(lp[k] >> 16), (uint8_t)(lp[k] >> 24), ls[k] };
+            h = (h ^ fnv64(e, 5)) * 0x100000001B3ull;
+        }
+        h |= 1;
         int at = (int)(h & (uint64_t)(hcap - 1)), g = -1;
         while (hash[at].h) {
-            if (hash[at].h == h && !memcmp(db->groups[hash[at].g].nets, v, (size_t)db->nnets)) { g = hash[at].g; break; }
+            const probe_group_t *o = &db->groups[hash[at].g];
+            if (hash[at].h == h && o->nlegs == nl && !memcmp(o->nets, v, (size_t)db->nnets) &&
+                !memcmp(o->legs, lp, (size_t)nl * sizeof(int)) && !memcmp(o->leg_state, ls, (size_t)nl)) {
+                g = hash[at].g;
+                break;
+            }
             at = (at + 1) & (hcap - 1);
         }
         if (g < 0) {
@@ -288,6 +313,11 @@ bool probe_db_load(probe_db_t *db, const char *path, int machine, board_t *b, ch
             memset(ng, 0, sizeof(*ng));
             ng->nets = malloc((size_t)db->nnets);
             memcpy(ng->nets, v, (size_t)db->nnets);
+            ng->nlegs = nl;
+            ng->legs = malloc(((size_t)nl + 1) * sizeof(int));
+            ng->leg_state = malloc((size_t)nl + 1);
+            memcpy(ng->legs, lp, (size_t)nl * sizeof(int));
+            memcpy(ng->leg_state, ls, (size_t)nl);
             hash[at].h = h;
             hash[at].g = g;
         }
@@ -366,6 +396,7 @@ bool probe_db_load(probe_db_t *db, const char *path, int machine, board_t *b, ch
     sort_names(db, db->colorsets, db->ncolorsets, false);
     db->screen_on = calloc((size_t)db->nscreens + 1, sizeof(bool));
     db->strategy = PROBE_BENCH;
+    db->on_legs = true;
     db->fault_weight = malloc(((size_t)a->nfaults + 1) * sizeof(float));
     probe_db_set_weights(db, b, NULL, NULL);
     probe_db_set_screen(db, -1);
@@ -432,7 +463,12 @@ bool probe_fault_shown(const probe_db_t *db, int fault) {
 }
 
 void probe_db_free(probe_db_t *db) {
-    for (int g = 0; g < db->ngroups; g++) { free(db->groups[g].faults); free(db->groups[g].nets); }
+    for (int g = 0; g < db->ngroups; g++) {
+        free(db->groups[g].faults);
+        free(db->groups[g].nets);
+        free(db->groups[g].legs);
+        free(db->groups[g].leg_state);
+    }
     free(db->screens);
     free(db->kinds);
     free(db->colorsets);
@@ -464,6 +500,18 @@ static int cmp_rank(const void *a, const void *b) {
     return *(const int *)a - *(const int *)b;
 }
 
+/* What G shows on the leg of PIN, or on NET if that leg isn't open. */
+static int state_at(const probe_group_t *g, int net, int pin, bool leg) {
+    if (leg)
+        for (int k = 0; k < g->nlegs; k++)
+            if (g->legs[k] == pin) return g->leg_state[k];
+    return g->nets[net];
+}
+
+int probe_group_state(const probe_group_t *g, const probe_reading_t *r) {
+    return r->net < 0 ? NET_NONE : state_at(g, r->net, r->pin, r->leg);
+}
+
 int probe_rank(probe_db_t *db, const probe_reading_t *readings, int n, int *order) {
     for (int g = 0; g < db->ngroups; g++) {
         probe_group_t *gr = &db->groups[g];
@@ -472,7 +520,7 @@ int probe_rank(probe_db_t *db, const probe_reading_t *readings, int n, int *orde
         for (int i = 0; i < n; i++) {
             int net = readings[i].net;
             if (net < 0 || net >= db->nnets) continue;
-            float c = probe_cost(gr->nets[net], readings[i].reading);
+            float c = probe_cost(probe_group_state(gr, &readings[i]), readings[i].reading);
             gr->cost += c;
             gr->mismatches += c >= 0.5f;
         }
@@ -543,17 +591,18 @@ const char *probe_bench_step(int machine, int k) {
     return NULL;
 }
 
-/* What the groups in the running would show on NET: COUNTS per reading,
- * and the information of a reading there (bits, over the groups' weights
- * unless the strategy is PROBE_FEWEST). */
-static double net_info(const probe_db_t *db, int net, const int *order, int nrunning, int counts[PROBE_NREADINGS]) {
+/* What the groups in the running would show at PIN of NET (on its leg if
+ * LEG): COUNTS per reading, and the information of a reading there (bits,
+ * over the groups' weights unless the strategy is PROBE_FEWEST). */
+static double net_info(const probe_db_t *db, int net, int pin, bool leg, const int *order, int nrunning,
+                       int counts[PROBE_NREADINGS]) {
     double w[PROBE_NREADINGS] = { 0 }, known = 0, total = 0;
     memset(counts, 0, sizeof(int) * PROBE_NREADINGS);
     for (int k = 0; k < nrunning; k++) {
         const probe_group_t *g = &db->groups[order[k]];
         double gw = db->strategy == PROBE_FEWEST ? 1 : fmax(g->weight, 1e-3);
         total += gw;
-        int r = probe_reading_of(g->nets[net]);
+        int r = probe_reading_of(state_at(g, net, pin, leg));
         if (r >= 0) { counts[r]++; w[r] += gw; known += gw; }
     }
     int nknown = 0;
@@ -568,8 +617,9 @@ static double net_info(const probe_db_t *db, int net, const int *order, int nrun
 }
 
 int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readings, int n, const int *order,
-                  int nrunning, int *pin, int counts[PROBE_NREADINGS], int *bench) {
+                  int nrunning, int *pin, bool *leg, int counts[PROBE_NREADINGS], int *bench) {
     *pin = -1;
+    *leg = db->on_legs;
     if (bench) *bench = 0;
     memset(counts, 0, sizeof(int) * PROBE_NREADINGS);
     if (nrunning < 2) return -1;
@@ -586,7 +636,7 @@ int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readi
         if (net < 0 || net >= db->nnets) continue;
         bool done = false;
         for (int k = 0; k < n && !done; k++) done = readings[k].net == net;
-        if (done || net_info(db, net, order, nrunning, counts) < 1e-6) continue;
+        if (done || net_info(db, net, p, db->on_legs, order, nrunning, counts) < 1e-6) continue;
         *pin = p;
         if (bench) *bench = (int)step;
         return net;
@@ -599,10 +649,10 @@ int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readi
         for (int i = 0; i < n && !done; i++) done = readings[i].net == net;
         if (done) continue;
         int c[PROBE_NREADINGS];
-        double info = net_info(db, net, order, nrunning, c);
-        if (info < best_info - 1e-9) continue;
         int p = probe_pin_for_net(b, net);
         if (p < 0) continue;
+        double info = net_info(db, net, p, db->on_legs, order, nrunning, c);
+        if (info < best_info - 1e-9) continue;
         int size = b->sim.parts[b->sim.pins[p].part].npins;
         if (info > best_info + 1e-9 || size < best_size) {
             best_info = info;
@@ -612,7 +662,30 @@ int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readi
             memcpy(counts, c, sizeof(c));
         }
     }
+    /* The open legs of the groups in the running, on the chip's side:
+     * only if they tell more (a net's easiest pin comes first). */
+    bool best_leg = db->on_legs;
+    for (int k = 0; k < nrunning; k++) {
+        const probe_group_t *g = &db->groups[order[k]];
+        for (int l = 0; l < g->nlegs; l++) {
+            int p = g->legs[l], net = b->sim.pins[p].net;
+            if (net < 0 || net >= db->nnets) continue;
+            bool done = false;
+            for (int i = 0; i < n && !done; i++) done = readings[i].pin == p && readings[i].leg;
+            if (done) continue;
+            int c[PROBE_NREADINGS];
+            double info = net_info(db, net, p, true, order, nrunning, c);
+            if (info > best_info + 1e-9) {
+                best_info = info;
+                best_net = net;
+                best_pin = p;
+                best_leg = true;
+                memcpy(counts, c, sizeof(c));
+            }
+        }
+    }
     *pin = best_pin;
+    *leg = best_leg;
     return best_net;
 }
 
@@ -629,6 +702,7 @@ static uint32_t rng_next(uint32_t *s) {
  * 8-9 s, where the atlas has 5-6 s), the way a person might. */
 static board_t *run_broken(int machine, const char *spec) {
     board_t *b = board_create(atlas_machine(machine));
+    b->pin_stats = true;        /* what a chip drives on an open leg */
     for (const char *s = spec; *s; ) {
         size_t len = strcspn(s, " ");
         char one[64];
@@ -655,13 +729,15 @@ static void diagnose_one(probe_db_t *db, board_t *ref, board_t *b, int *order, i
     int n = 0, nrun = probe_rank(db, rd, 0, order);
     while (n < 25) {
         int pin, counts[PROBE_NREADINGS];
-        int net = probe_suggest(db, ref, rd, n, order, nrun, &pin, counts, NULL);
+        bool leg;
+        int net = probe_suggest(db, ref, rd, n, order, nrun, &pin, &leg, counts, NULL);
         if (net < 0) break;
-        int r = probe_reading_of(board_net_state(b, net));
+        bool lifted = leg && b->sim.pins[pin].fault == PF_OPEN;
+        int r = probe_reading_of(lifted ? board_pin_drive_state(b, pin) : board_net_state(b, net));
         if (r < 0) r = PROBE_FLOATING;
         if ((int)(rng_next(&rng) % 100) < noise_pct)
             r = (r + 1 + (int)(rng_next(&rng) % (PROBE_NREADINGS - 1))) % PROBE_NREADINGS;
-        rd[n++] = (probe_reading_t){ pin, net, r };
+        rd[n++] = (probe_reading_t){ pin, net, r, leg };
         nrun = probe_rank(db, rd, n, order);
     }
     int pos = 0;
@@ -707,6 +783,8 @@ int probe_test(const char *atlas_path, int count, unsigned seed, int noise_pct) 
             board_destroy(ref);
             continue;
         }
+        /* Probed on the chips' legs, or with C64HW_PROBE_PADS=1 on the pads. */
+        db.on_legs = !getenv("C64HW_PROBE_PADS");
         if (db.source != machine) {     /* the test is of the atlas's own readings */
             printf("%s: no probe readings of its own in the atlas yet: skipped\n", atlas_machine_id(machine));
             probe_db_free(&db);

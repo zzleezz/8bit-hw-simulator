@@ -528,7 +528,7 @@ static layout_t pinout_layout(struct nk_context *ctx, board_t *b, int part) {
             const char *name = sim_pin_name(&b->sim, p->first_pin + k);
             if (name && text_width(ctx, name) > name_w) name_w = text_width(ctx, name);
         }
-        L.body_w = 2 * (name_w + 8) + 64;
+        L.body_w = 2 * (name_w + 12) + 64;
     }
     L.w = 2 * (L.label_w + 6 + L.sq) + L.body_w;
     L.h = L.rows * L.pitch + L.pitch;
@@ -614,7 +614,7 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
             int pin = part_pin(p, num);
             const char *name = pin >= 0 ? sim_pin_name(s, pin) : NULL;
             if (!name || !pos[num].valid) continue;
-            text_at(cv, ctx, pos[num].x - pos[num].side * 6, pos[num].y, pos[num].side > 0, name, COL_DIMTEXT);
+            text_at(cv, ctx, pos[num].x - pos[num].side * 14, pos[num].y, pos[num].side > 0, name, COL_DIMTEXT);
         }
         const char *label = board_part_label(b, part);
         float cy = body.y + body.h / 2;
@@ -623,6 +623,29 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
         text_centered(cv, ctx, nk_rect(body.x, cy - fh * 0.5f, body.w, fh), p->ref, COL_DIMTEXT);
         text_centered(cv, ctx, nk_rect(body.x, cy + fh * 0.5f, body.w, fh),
                       p->unfitted ? "not fitted" : p->removed ? "pulled out" : p->name, COL_DIMTEXT);
+    }
+    /* Last, over the diagram's wires: just inside the body, which way each
+     * pin goes. An arrow into the chip (input), out of it (output), a
+     * diamond (both ways); none for power, analog and unused pins. */
+    for (int num = 1; num <= p->npins && num < PIN_NUMBERS; num++) {
+        int pin = part_pin(p, num);
+        if (pin < 0 || !pos[num].valid) continue;
+        unsigned fl = s->pins[pin].flags;
+        float in = (float)-pos[num].side;
+        bool rd = (fl & PIN_IN) && !(fl & PIN_POWER), dr = (fl & PIN_OUT) && !(fl & PIN_POWER);
+        if (!rd && !dr) continue;
+        /* Centered on a pixel, 7 px in (the body's outline covers the first
+         * 2): off the pixel grid the smoothing makes one half look smaller. */
+        float cx = floorf(pos[num].x + in * 7) + 0.5f, cy = floorf(pos[num].y) + 0.5f, h = 4.5f;
+        struct nk_color ac = COL_DIMTEXT;
+        if (rd && dr) {
+            float pts[8] = { cx - h, cy, cx, cy - h, cx + h, cy, cx, cy + h };
+            nk_fill_polygon(cv, pts, 4, ac);
+        } else if (rd) {
+            nk_fill_triangle(cv, cx - in * h, cy - h, cx - in * h, cy + h, cx + in * h, cy, ac);
+        } else {
+            nk_fill_triangle(cv, cx + in * h, cy - h, cx + in * h, cy + h, cx - in * h, cy, ac);
+        }
     }
 }
 
@@ -777,6 +800,7 @@ static const char *pin_kind(board_t *b, int pin) {
     if ((p->flags & PIN_IN) && (p->flags & PIN_OUT)) return "bidirectional";
     if (p->flags & PIN_OUT) return part->tech == TECH_TTL_OC ? "open collector output" : "output";
     if (p->flags & PIN_IN) return (p->flags & PIN_TTL) ? "TTL input" : "MOS input";
+    if (p->flags & PIN_ANALOG) return "analog (not simulated as logic)";
     return "pin";
 }
 
@@ -886,7 +910,7 @@ int inspect_window(struct nk_context *ctx, board_t *b, const uint8_t *ns, struct
         struct nk_command_buffer *cv = nk_window_get_canvas(ctx);
         struct nk_input *in = &ctx->input;
         nk_layout_row_dynamic(ctx, 20, 1);
-        nk_label_colored(ctx, "Pins colored like on the board. Click a pin: scope and faults.",
+        nk_label_colored(ctx, "Pins colored like on the board; arrows: in, out. Click a pin: scope and faults.",
                          NK_TEXT_LEFT, COL_DIMTEXT);
         nk_layout_row_static(ctx, ch, (int)cw, 1);
         struct nk_rect r;

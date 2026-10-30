@@ -36,6 +36,11 @@
  *         fault run (NET_LOW... of board.h, a byte each), for "Diagnose by
  *         probing" (probe.h). An atlas built before has none: the build
  *         runs those faults again for their PINS only.
+ *   LEGS  for a fault with a chip's leg open ("U7.3:open"): what the probe
+ *         shows on that leg itself, above the board, over the same frames
+ *         as PINS. The pad shows the net; the leg shows what the chip
+ *         drives (an input: floating). A fault without one in the file
+ *         is run again for its PINS and LEGS.
  *
  * Two runs have the same outcome when they ended on the same pictures in
  * the same way: the set of different pictures of their last 64 frames (so
@@ -150,6 +155,10 @@ typedef struct {
     char *spec, *desc;
     int outcome;                /* in atlas_t.outcomes, -1 if missing */
     uint8_t *nets; int nnets;   /* its PINS: the probe state of each net of NETS, NULL if none */
+    /* Its LEGS: each open chip leg ("U7.3") and the probe state on it;
+     * HAS_LEGS once a LEGS chunk was read for it. */
+    struct atlas_leg { char pin[16]; uint8_t state; } *legs; int nlegs;
+    bool has_legs;
 } atlas_fault_t;
 
 typedef struct {
@@ -293,6 +302,10 @@ void atlas_active_area(int machine, int *x, int *y, int *w, int *h);
 void atlas_screen_size(int machine, int *w, int *h);
 /* Full size palette indices -> the thumbnail's half size. */
 void atlas_half(const uint8_t *idx, int w, int h, uint8_t *out);
+/* The open chip legs of a fault SPEC on board B ("U7.3:open", a chip's
+ * pin): their pin indices in PINS (at most MAX), how many. */
+struct board;
+int atlas_open_legs(struct board *b, const char *spec, int *pins, int max);
 /* Run one fault the way the build does; its last picture (and, for a
  * flash code, the lit one) at full size, malloc'd. */
 bool atlas_run_fault(int machine, int mode, const char *spec, const char *carts, uint64_t *key, uint32_t **frame,

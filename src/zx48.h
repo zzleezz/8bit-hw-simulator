@@ -63,6 +63,9 @@ static inline bool board_is_zx48(const board_t *b) {
     return b->m == &machine_zx48 || b->m == &machine_zx48i2 || b->m == &machine_zx48i1 || b->m == &machine_zx48i4b ||
            b->m == &machine_zx48i6a;
 }
+/* Why a part of the board is not fitted, for people: the option in the
+ * controls that fits it, or that the board has no part there. */
+void zx48_unfitted_note(board_t *b, int part, char *out, int len);
 /* The 48K ROM (its character set is at 0x3D00, characters 32-127). */
 const uint8_t *zx48_rom_image(void);
 

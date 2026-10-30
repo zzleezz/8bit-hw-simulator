@@ -42,6 +42,7 @@ void part_set_type(sim_t *s, int part, const part_type_t *t) {
             case 'X': flags = PIN_SENSE | PIN_IN | PIN_OUT; break;
             case 'P': flags = PIN_POWER; break;
             case 'S': flags = PIN_SENSE | PIN_SWITCH | PIN_IN | PIN_OUT; break;
+            case 'A': flags = PIN_ANALOG; break;
             default: flags = 0; break;
             }
         }
@@ -363,7 +364,7 @@ static void dram_reset(sim_t *s, part_t *p) {
 }
 
 const part_type_t PT_4164 = { "4164",
-    "NC:O D:m /WE:m /RAS:m A0:m A2:m A1:m VCC:P A7:m A5:m A4:m A3:m A6:m Q:O /CAS:m GND:P",
+    "NC D:m /WE:m /RAS:m A0:m A2:m A1:m VCC:P A7:m A5:m A4:m A3:m A6:m Q:O /CAS:m GND:P",
     dram_eval, dram_commit, dram_reset, sizeof(dram_state_t), TECH_NMOS };
 
 /* ------------------------------------------------------------------------ */
@@ -500,7 +501,7 @@ static void t556_reset(sim_t *s, part_t *p) {
     st->last_cycle = UINT64_MAX;
 }
 const part_type_t PT_556 = { "556 TIMER",
-    "DIS1:O THR1:O CV1:O /RES1:m OUT1:O TRIG1:m GND:P TRIG2:m OUT2:O /RES2:m CV2:O THR2:O "
+    "DIS1:O THR1:m CV1:A /RES1:m OUT1:O TRIG1:m GND:P TRIG2:m OUT2:O /RES2:m CV2:A THR2:m "
     "DIS2:O VCC:P", t556_eval, t556_commit, t556_reset, sizeof(timer556_state_t), TECH_TTL };
 
 /* 74LS629: two voltage controlled oscillators (U31). On the C64 one makes
@@ -513,8 +514,8 @@ static void ls629_eval(sim_t *s, part_t *p) {
     pin_out(s, p, 10, st->crystal_ok ? DRV_BIT(s->clock_level) : DRV_LO);
 }
 const part_type_t PT_74LS629 = { "74LS629 VCO",
-    "2FC:O 1FC:O 1RNG:O 1CX:O 1CX:O /1EN:m 1Y:O OSCGND:P GND:P 2Y:O /2EN:m 2CX:O 2CX:O "
-    "2RNG:O OSCVCC:O VCC:P", ls629_eval, 0, 0, sizeof(vco_state_t), TECH_TTL };
+    "2FC:A 1FC:A 1RNG:m 1CX:A 1CX:A /1EN:m 1Y:O OSCGND:P GND:P 2Y:O /2EN:m 2CX:A 2CX:A "
+    "2RNG:m OSCVCC:P VCC:P", ls629_eval, 0, 0, sizeof(vco_state_t), TECH_TTL };
 
 /* The rest of the PLL is not simulated: removing these chips changes nothing. */
 const part_type_t PT_74LS74 = { "74LS74",
@@ -805,8 +806,8 @@ const part_type_t PT_ZX8401 = { "ZX8401",
 
 /* LM1889 video modulator (IC14): analog, its pins are only named. */
 const part_type_t PT_LM1889 = { "LM1889",
-    "CHROMA_LEAD:O R-Y_IN:O CHROMA_BIAS:O B-Y_IN:O GND:P TANK_B1:O TANK_B2:O TANK_A1:O TANK_A2:O "
-    "OUT_B:O OUT_A:O VIDEO_IN:O SUBCARRIER:O VCC:P VCC:P VCC:P OSC_OUT:O CHROMA_LAG:O", 0, 0, 0, 0, TECH_NMOS };
+    "CHROMA_LEAD:A R-Y_IN:A CHROMA_BIAS:A B-Y_IN:A GND:P TANK_B1:A TANK_B2:A TANK_A1:A TANK_A2:A "
+    "OUT_B:A OUT_A:A VIDEO_IN:A SUBCARRIER:A VCC:P VCC:P VCC:P OSC_OUT:A CHROMA_LAG:A", 0, 0, 0, 0, TECH_NMOS };
 
 
 /* ------------------------------------------------------------------------ */
@@ -896,7 +897,7 @@ static void mos8701_eval(sim_t *s, part_t *p) {
     pin_out(s, p, 8, st->crystal_ok ? DRV_BIT(s->clock_level) : DRV_LO);
 }
 const part_type_t PT_8701 = { "8701 CLOCK",
-    "NC:O GND:P NC:O GND:P NC:O DOT:O PAL/NTSC:m COLOR:O GND:P NC:O NC:O VCC:P XTAL1:m XTAL2:m VCC:P NC:O",
+    "NC GND:P NC GND:P NC DOT:O PAL/NTSC:m COLOR:O GND:P NC NC VCC:P XTAL1:A XTAL2:A VCC:P NC",
     mos8701_eval, 0, 0, sizeof(vco_state_t), TECH_NMOS };
 
 /* The 250469's 6510, VIC-II and SID: the 8500, 8565 and 8580, the HMOS
@@ -1007,7 +1008,7 @@ static void superpla_commit(sim_t *s, part_t *p) {
 const part_type_t PT_SUPERPLA = { "251715-01 PLA",
     "A13:T A14:T A15:T R/W:T /LORAM:T /HIRAM:T /CHAREN:T NMI:O RESTORE:T /VA14:T /VA15:T /CIA2:O /CHARROM:O "
     "/BASIC:O /KERNAL:O VSS:P /COLRAM:O /CAS0:O /CAS1:O /CAS2:O /CAS3:O /CASRAM:O RAM_R/W:O MA6:X MA3:X MA0:X "
-    "MA2:X MA4:X MA1:X MA5:X MA7:X NC:O VSS:P /CIA1:O /CAS:T /RAS:T PHI0:m AEC:T BA:T /VIC:O VA6:T VA7:T "
+    "MA2:X MA4:X MA1:X MA5:X MA7:X NC VSS:P /CIA1:O /CAS:T /RAS:T PHI0:m AEC:T BA:T /VIC:O VA6:T VA7:T "
     "/SID:O /ROML:O /I/O2:O /EXROM:T /GAME:T VSS:P /I/O1:O /ROMH:O A0:X A1:X A2:X A3:X A4:X A5:X A6:X A7:X "
     "A8:T A9:T A10:T A11:T A12:T VDD:P",
     superpla_eval, superpla_commit, 0, sizeof(superpla_state_t), TECH_TTL };

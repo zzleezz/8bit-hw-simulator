@@ -15,6 +15,85 @@ Spectrums, roughly in order of value. Tick items off as they're done.
 - [ ] Follow-up: probing a chip's leg as well as its pad. Lifted or open legs
       look the same as a healthy board at the pad (a whole group of 75 such
       faults on the C64), but differ on the chip side.
+      Code done 2026-10-29: LEGS chunks in the atlas (what the probe shows
+      on each open chip leg, over the PINS frames; read with pin_stats on),
+      "Probing on: chips' legs / solder side" in the probing window (legs
+      the default), suggestions can ask for one leg, --probe-test reads
+      legs (C64HW_PROBE_PADS=1: pads). Checked: deterministic (two runs of
+      16 chunks identical); pads mode with no LEGS gives --probe-test 5
+      seed 7 identical to V1.0 (17 min).
+  - [x] Atlas run 2026-10-29/30 (backup: fault_atlas.bin.bak-20261029-
+        before-legs): 2650 runs in 1:45 on 28 threads (not ~70 min), 0
+        failed, 2646 LEGS chunks. --atlas-diff: 10377 outcomes the same,
+        0 changed, 4 new, 21 cut out (C64HW_ATLAS_PRUNE, see 5.).
+  - [ ] STALE SCREENS IN THE ATLAS (found 2026-10-30, also in V1.0's).
+        The 295 faults below, run again whole into a copy
+        (C64HW_ATLAS_REDO_FAULTS=list, new: "zx48 IC23.8:open" per line;
+        12 min): 274 of their stored screens change (zx48 66, zx48i1 77,
+        zx48i2 64, zx48i4b 67). Repeatable (IC23 twice: identical). V1.0's
+        own runner gives the new screens too (IC15 run again with the V1.0
+        exe), so the old ones are from an older build, not from tonight.
+        Swapped in 2026-10-30 at the user's word (backup:
+        fault_atlas.bin.bak-20261030-before-refresh; --atlas-diff: 274
+        changed, nothing else). Faults other than ":open" on
+        these four boards may be stale as well: only the open ones were
+        re-run. A full re-run of the four is ~4500 runs, ~3.5 h.
+        Sample check 2026-10-30: 200 random non-open faults of the four
+        (seed 30), run again into a copy (8:20): 4 changed (2%), all solder
+        bridges (zx48i1 IC3.3-4, IC1.3-4; zx48i4b IC4.12-13, IC4.1-2).
+        Bridges between two outputs oscillate: maybe stale, maybe touchy.
+        Checked: the 4 run again twice more, all three runs identical, so
+        stale, not touchy. All 1716 bridges of the four boards run again
+        into a copy (1:15, scratchpad night/fault_atlas.shorts.bin): 42
+        changed (zx48 10, zx48i1 9, zx48i2 10, zx48i4b 13), nearly all on
+        IC3 and IC4. Swapped in 2026-10-30 at the user's word (backup:
+        fault_atlas.bin.bak-20261030-before-shorts; --atlas-diff: 42
+        changed, nothing else). Not sampled yet: the C64s and the 6A (the
+        6A's PINS all matched in the LEGS run; a 200-fault sample of each,
+        ~8 min, would tell).
+  - [x] "The atlas runner and the simulator disagree" (2026-10-30): no,
+        a misreading. --atlas A --atlas-diff B prints A's outcome, then
+        "-> " B's: the old screens were the wrong ones. zx48 IC15.7:open
+        was stored "Blank black screen, white border"; the refreshed run,
+        V1.0's runner and --headless all say it boots (the ROM's RAM test
+        finds 16K, as on a real Spectrum with dead upper RAM; IC15:removed
+        is the same). So the refresh swapped in fixed wrong screens.
+  - [ ] 295 of the re-run faults got PINS different from the old ones:
+        all ":open", all Spectrum (zx48 71, zx48i2 70, zx48i1 85, zx48i4b
+        69; none on the 6A or the C64s). Spread over many nets, each in
+        only some faults (low/high/pulsing swapped), so not tonight's
+        LM1889 pin change. Likely old PINS from an older Spectrum build
+        (IC23.8 was the first seen). The loader takes the last chunk, so
+        the new ones count. To confirm: re-run a few into a copy and
+        compare.
+  - [ ] Legs vs pads, --probe-test 5 --seed 7 (35 faults), probing only,
+        legs / pads: bench #1 54% / 57%, likeliest first 60% / 68%,
+        fewest probes 62% / 62%; "in the running" 100% / 97%. Screen
+        known: about the same (80-88% both). One fault is ~3%: too few to
+        tell.
+        --probe-test 20 --seed 11 (140 faults, 1:07 legs, 1:16 pads),
+        probing only, legs / pads: bench #1 62% / 60%, likeliest first
+        67% / 67%, fewest probes 65% / 62%; faults fitting best 176 / 193
+        (bench). Screen known: the same within 1%. A small gain: only 24
+        of the 140 are ":open" faults. Of those, legs did better on
+        U9.10 (missed on pads), IC12.15 (#121 -> #1, fewest probes),
+        IC22.3 (#9 -> #1, bench) and a few places on most; worse on
+        IC1.38 (bench #1 -> #3).
+  - [ ] Most open legs still end far down after 25 probes (U19.32 #321,
+        U9.10 #204, R68 #213, IC27.3 #165, IC10.12 #124...). The probe
+        rarely gets to the one leg that tells: suggest the leg of a pin
+        whose pad reads "floating input" or "healthy" sooner, and look
+        at why so few faults are named with 25 probes.
+        Looked at 2026-10-30: probe_suggest() takes the probe that splits
+        the faults in the running best (entropy). An open leg on a net
+        that is otherwise fine shows only on that leg: probing it tells
+        one fault from a few hundred, so it never wins, and 25 probes run
+        out first. Not a tweak; ideas for the user to choose from: "check
+        every leg of chip X" as one step once the readings point at a
+        chip (as a technician does with a magnifier or a continuity
+        test), or a final "legs to check" list of the open-leg faults
+        still in the running.
+  - [ ] The zip/atlas for the release.
 - [x] Follow-up: pre-select the screen from a screenshot diagnosis, when one
       has been done (2026-10-28: "Diagnose by probing..." in the control
       panel takes a screenshot diagnosed since it last took one; "Narrow
@@ -58,6 +137,19 @@ near-healthy screens (a few garbage cells) are close neighbours.
 - [ ] Difficulty levels, from a missing chip up to a single bad RAM bit.
 
 ## 5. Smaller wins
+- [x] Pin directions (2026-10-29): arrows in the chip view; U31's 74LS629,
+      U20's 556 THR/CV, the 8701, the LM1889 and NC pins were marked
+      outputs. The atlas build of 2026-10-29 ran with C64HW_ATLAS_PRUNE=1:
+      21 c64 entries cut out (their out0/out1, U31.15 OSCVCC now a power
+      pin, and gnd/vcc/out faults now named after another driver).
+- [x] Paste a screenshot to diagnose: "Paste screenshot" button and Ctrl+V
+      (2026-10-29).
+- [x] Unfitted parts said "an option in the controls" even when no option
+      fits them (a board's links that are simply open): each now says why
+      (2026-10-29).
+- [x] The pin menu was as wide as its title only: "Output dead inside the
+      chip, stuck low/high" and long bridge choices were cut off. Now as
+      wide as its longest choice (2026-10-29).
 - [ ] Multimeter mode with real voltages on the power section. This would also
       fix the C64's +5V pads showing high while it's switched off.
 - [x] Save states to disk, not just the one in-memory slot (2026-10-28:
@@ -107,6 +199,11 @@ near-healthy screens (a few garbage cells) are close neighbours.
       ../Schematics (CC0; the 4B folder has no LICENSE file: check).
       Order: Issue 2 -> Issue 1 -> 4B -> 6A (4B and 6A share the bare PCB;
       6A adds the ZX8401).
+      Next Spectrum boards, Issues 4A and 4S (2026-10-29): LiveboxAndy will
+      draw KiCad projects for them once HappyLittleDiodes (Jim) can supply
+      PCBs. Per LiveboxAndy, the 4A's layout is not close to the 4B's, nor
+      the 4S's to the 3B's: each needs its own board, not a variant. Wait
+      for his projects.
   - [x] Issue 2 (2026-10-27): same circuit as the 3B (netlists compared
         pin by pin). Board picker and options in the controls (--board,
         --option): RAM 48K/16K (also on the 3B), ULA 5C112/6C001 (labels
@@ -152,6 +249,13 @@ near-healthy screens (a few garbage cells) are close neighbours.
   - [ ] Issue 1 32K RAM board (EXT1/EXT2) as an option: the user has its
         KiCad files. Probably the Issue 2's upper RAM circuit (it needs
         only EXT1/EXT2 signals), drawn as a second board.
+        LiveboxAndy (2026-10-29, from checking its PCB against the
+        schematic): its A0-A14 go to the 74LS157s in another order than
+        the Issue 2's 32K, electrically still good. So model it from its
+        own KiCad netlist, not as a copy of the Issue 2's: which CPU
+        address bit reaches which RAM address pin decides what an
+        address-line or mux fault looks like, and where a bad cell
+        (flip@CPU address, machine_t.ram_cell) sits.
   - [ ] Issue 1: D14 does nothing in the model (R24 is a link); with R24
         open a real board still clocks through D14.
   - [x] Issue 1 atlas run (2026-10-28): 969 faults, 377 outcomes.
@@ -352,6 +456,56 @@ Best done after item 6, which can then show them too.
 - [ ] Phone photos of a CRT: record what the picture is (capture card /
       photo) and trust photos less in matching. (Correcting a photo's angle
       would be a project of its own.)
+      2026-10-29, Test images/c64_garbled_photo.png (a phone photo off the
+      internet, said to be U27; garbled characters, light blue border, blue
+      screen) matched as "Vertical bars" (U5). Three causes found:
+      - [x] Uneven lighting (brighter in the middle): the border wasn't
+            found at the top, so the whole photo was taken as the active
+            display. Fixed: the border is compared with its color NEAR each
+            pixel (a Coons patch of the ring, analyze() in atlas_match.c).
+            Real test pictures: ZXULAbad.jpg same #1, 78% -> 91%; u4_2's
+            IC4 bridge #2 -> #3; the rest unchanged or #3 only.
+            --match-test 60, new atlas, old edge code -> new edge code,
+            the same pictures: seed 31 32 -> 30 #1, top 3 45 -> 45; seed
+            32 35 -> 33 #1, top 3 53 -> 53. Mostly near ties (0.1-0.4%)
+            flipping both ways, but seed 31's #25 (zx48i1, blank black
+            screen, white border, match_test/capture-25-zx48i1-boot.png)
+            drops 98.6% -> 88.0% (#1 -> #2): the same box is found, yet
+            "drawn cells 0 vs 0" becomes "3 vs 3" and the color gain
+            moves a little, so something the box/content code feeds (the
+            content box?) changed.
+            Found 2026-10-30: the edge moved only 0.09 px. A blurred edge
+            leaves the active display's outermost line half border; the
+            old code had the same, on the bottom line (24 px), and was
+            lucky. quantize() already turned outer pixels in the border's
+            color into the background, but these had snapped to bright
+            white (the cell's ink), not white. Fixed: an outer pixel that
+            is a blend of the background and the border counts too.
+            #25 is #1 again (98.8%). Tried and dropped: moving each edge
+            to the middle of its blur (refine_edges): worse.
+            Seeds 31 + 32 together (120 screens, #1 / top 3): old edge
+            code 67 / 98, old + blend 68 / 98, Coons 63 / 98, Coons +
+            blend (kept) 64 / 99, Coons + refine + blend 61 / 93. The
+            same code swings by 4 between the seeds: within the noise.
+            Only the Coons versions get ZXULAbad.jpg (90% vs 78%).
+            (Seed 31 was 34/60 before tonight: the new atlas changed which
+            screens are picked.) Test images, old -> new edge: ZXULAbad.jpg
+            78.4% -> 90.6% (screen edge found); the rest the same or
+            within 1.3%.
+            --match-test reuses the pictures already in its folder, so a
+            new --seed does nothing there: use --match-dir with an empty
+            folder for another seed.
+      - [ ] Colors: the camera clipped the blue channel (border and screen
+            both ~238 blue), so no gain + offset correction can tell light
+            blue from blue: most of the border snaps to blue. Corrected by
+            hand (two anchors per channel), the top matches become garbled
+            characters / repeating patterns. Idea: a "photo" color model,
+            a monotone curve per channel anchored on the border and the
+            background, ignoring a clipped channel.
+      - [ ] Even corrected, U27.9:open ranks #73: its simulated screen has
+            garbage on the top 64% and stays so (4 s and 30 s the same),
+            the photo has it all over. A gap in the simulator, or the
+            photo is of another fault: check against a real U27 failure.
 - [x] Failure statistics: which chips fail most, per machine (the records
       window), and they feed the probing ranking. Still to do: with which
       symptoms.
@@ -406,14 +560,53 @@ zip, fault_atlas.bin, HOW-TO-UPLOAD.md with the steps and texts,
 commit-message.txt).
 - [x] Ask Henry whether the light theme can be published (2026-10-29: Henry
       gives full permission).
-- [ ] Make a GitHub account; Settings → Emails → keep the address private,
-      and commit with the noreply address it gives.
-- [ ] Fork antirez/c64-hw-simulator; commit and push from ../github-upload
-      (the commands are in HOW-TO-UPLOAD.md).
-- [ ] Make a release: attach c64-hw-sim-windows.zip and fault_atlas.bin.
-- [ ] Open an issue on antirez's repository with the drafted message.
+- [x] Published 2026-10-29: github.com/zzleezz/8bit-hw-simulator (fork of
+      antirez/c64-hw-simulator, commits as zzleezz with the noreply
+      address, Claude as co-author, "An AI-generated project" at the top
+      of the README); release V1.0 with the zip and the seven-board atlas;
+      the issue to antirez posted.
 - [ ] Afterwards: work changed here has to be copied to ../github-upload
       again before a new commit (or move the work into that folder).
+
+## 10. Stretch goal: the real machine's bus, read into the simulator
+(the user's idea, 2026-10-29; reworked 2026-10-30)
+The interface: Jim's (HappyLittleDiodes) 48-channel logic analyser for the
+ZX Spectrum, plugged into its expansion port. Jim is a good friend of the
+user. It is two of Agustin Gimenez Bernad's Pico W analyser boards (24
+channels each, up to 100 Msps, wireless: his open-source LogicAnalyzer,
+gusmanb on GitHub) stacked on Jim's Spectrum interface board, reading the
+address and data buses and control signals
+(https://www.hackster.io/news/the-zx-spectrum-spills-its-secrets-a9fed4c6d02c).
+So the hardware (5 V levels, channel count, wiring) is solved; our side is
+software: read its captures.
+- [ ] Ask Jim (through the user):
+      - the capture file format (the LogicAnalyzer's own, CSV, sigrok?) and
+        which channel is which signal on his interface board;
+      - how long a capture can be at a useful rate (the Pico's RAM: a few
+        times the Z80's 3.5 MHz clock, how many ms?);
+      - whether it can trigger on /RESET going high (power-on or reset);
+      - whether his interface board is open, and if he'd make a C64
+        adapter (or let us/the user adapt it).
+      - a sample capture or two from a healthy 48K, to start with.
+- [ ] Step 1, readings: from a capture, each signal low / high / pulsing,
+      imported into "Diagnose by probing" as readings ("Import capture").
+      Floating can't be told by a digital input: low/high/pulsing only.
+- [ ] Step 2, a trace from reset: the capture from /RESET released, cut
+      into bus cycles (on /MREQ, /RD, /WR, /M1 for the Z80), compared with
+      the simulated healthy board from reset: the first cycle that differs
+      ("at cycle 412 the CPU read $FD at $FCE2, the ROM holds $F5"). Works
+      on a dead machine with a black screen. Then against the faults: which
+      ones go wrong at that cycle the same way. Needs the simulation's
+      early timing to match a real board: check on a healthy one first
+      (a sample capture from Jim).
+- [ ] C64 version: the same two analyser boards on an adapter for the
+      C64's 44-pin expansion port (A0-A15, D0-D7, R/W, PHI2, BA, /DMA,
+      /IRQ, /NMI, /RESET, /IO1, /IO2, /ROML, /ROMH, /GAME, /EXROM, dot
+      clock), the cycles cut on PHI2. Listen only: never drive /GAME,
+      /EXROM or /DMA.
+- [ ] Later: a DIP test clip (on the PLA, the CPU...) for nets the port
+      doesn't carry (/CASRAM, /KERNAL, /CHAROM, the VIC's RAM addresses,
+      color RAM): all of a chip's pins at once.
 
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the

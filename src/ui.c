@@ -1371,6 +1371,21 @@ static void fault_menu(struct nk_context *ctx) {
     }
     float mem_h = nmem && U.menu_mem ? fminf((float)nmem, 12) * 24 + 8 : 0;
     float w = fmaxf(nmem ? 340 : U.menu_pin < 0 ? 300 : 260, fmaxf(text_width(ctx, title), text_width(ctx, info)) + 30);
+    /* Wide enough for the longest choice too (its radio button before it). */
+    if (U.menu_pin >= 0 && faultable) {
+        float lw = text_width(ctx, show_out ? "Output dead inside the chip, stuck high" : "Floating (open, lifted leg)");
+        for (int dir = -1; dir <= 1; dir += 2) {
+            int nb = board_dip_neighbor(U.b, U.menu_pin, dir);
+            if (nb < 0) continue;
+            const char *nn = sim_pin_name(s, nb);
+            char lab[64];
+            snprintf(lab, sizeof(lab), "Solder bridge to pin %d%s%s%s", s->pins[nb].number, nn ? " (" : "", nn ? nn : "",
+                     nn ? ")" : "");
+            lw = fmaxf(lw, text_width(ctx, lab));
+        }
+        w = fmaxf(w, lw + 44);
+    }
+    w = fminf(w, sapp_widthf() - 8);
     float h = 46 + rows * 24 + mem_h + (U.menu_pin >= 0 ? 22 : 0);
     float x = fminf(U.menu_x, sapp_widthf() - w - 4), y = fminf(U.menu_y, sapp_heightf() - h - 4);
     struct nk_rect r = nk_rect(x, y, w, h);
@@ -1418,7 +1433,11 @@ static void fault_menu(struct nk_context *ctx) {
             part_t *p = &s->parts[part];
             nk_layout_row_dynamic(ctx, 22, 1);
             if (p->unfitted) {
-                nk_label_colored(ctx, "Not fitted on this board (an option in the controls)", NK_TEXT_LEFT, COL_DIMTEXT);
+                char why[160];
+                if (board_is_zx48(U.b)) zx48_unfitted_note(U.b, part, why, sizeof(why));
+                else snprintf(why, sizeof(why), "Not fitted on this board");
+                nk_layout_row_dynamic(ctx, 40, 1);
+                nk_label_colored_wrap(ctx, why, COL_DIMTEXT);
             } else if (p->kind == PART_IC) {
                 if (option(ctx, "In its socket", !p->removed)) { board_set_removed(U.b, part, false); U.menu_open = false; }
                 if (option(ctx, "Pulled out of the socket", p->removed)) { board_set_removed(U.b, part, true); U.menu_open = false; }

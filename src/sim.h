@@ -82,6 +82,7 @@ enum { MF_OK = 0, MF_DATA, MF_ADDR, MF_FLIP, MF_WEAK };
                                  net changes, even if the level stays the same */
 #define PIN_OUT    (1 << 4)   /* the chip can drive this pin (output or bidirectional) */
 #define PIN_IN     (1 << 5)   /* the chip reads this pin (input or bidirectional) */
+#define PIN_ANALOG (1 << 6)   /* an analog pin (a timing capacitor, a control voltage): not simulated as logic */
 
 /* Chip technology: how inputs behave and what happens without power. */
 enum { TECH_NMOS = 0, TECH_TTL, TECH_TTL_OC, TECH_CMOS };

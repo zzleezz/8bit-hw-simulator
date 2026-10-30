@@ -12,9 +12,11 @@
  * the groups in the running most evenly (the most information), counting
  * every group once: a group of ten faults on one net is still one answer.
  *
- * Readings are of the NET a pin is on: probe the solder side of the board,
- * where the pad and the trace are one (a leg that doesn't reach its pad
- * reads differently on the chip's side).
+ * A reading on the solder side (the pad) is of the NET a pin is on. One
+ * on a chip's leg, above the board, is of the net too, unless that leg is
+ * open (lifted, a bad joint or socket): then it shows what the chip drives
+ * there, or floats for an input (the atlas's LEGS). That tells an open leg
+ * apart from a healthy board, which its pad alone often can't.
  *
  * Not every fault is as likely: on the bench the PLA fails most, then the
  * CIAs, the CPU, the RAM and the ROMs, and the maker printed on a chip
@@ -57,11 +59,15 @@ typedef struct {
     int pin;                    /* the pin probed (a pin index of the board) */
     int net;                    /* its net */
     int reading;                /* PROBE_* */
+    bool leg;                   /* on the chip's leg (else on the pad, the solder side) */
 } probe_reading_t;
 
 typedef struct {
     int *faults, nfaults;       /* in atlas.faults */
     uint8_t *nets;              /* NET_* of every net of the board, NET_NONE if unknown */
+    /* The open chip legs of its faults (pins of the board, in order) and
+     * what the probe shows on each leg (NET_*). */
+    int *legs; uint8_t *leg_state; int nlegs;
     bool healthy;               /* the healthy board is in it */
     float cost;                 /* set by probe_rank() */
     int mismatches;             /* readings it disagrees with (cost >= 0.5) */
@@ -94,6 +100,8 @@ typedef struct {
     int screen;                 /* the one picture picked, -1 if several or any */
     float *fault_weight;        /* each fault's WEIGHT (in atlas.faults) */
     int strategy;               /* PROBE_* */
+    bool on_legs;               /* readings are taken on the chips' legs (else on the pads) */
+    bool have_legs;             /* the atlas has LEGS for this board */
 } probe_db_t;
 
 /* Load the faults of MACHINE with probe readings from the atlas at PATH,
@@ -128,6 +136,9 @@ bool probe_fault_shown(const probe_db_t *db, int fault);
  * "white border, black screen". The atlas browser sorts by them too. */
 void probe_screen_kind(const char *label, char *kind, int klen, char *colors, int clen);
 
+/* What group G shows where reading R was taken (NET_*). */
+int probe_group_state(const probe_group_t *g, const probe_reading_t *r);
+
 /* Rank the groups on READINGS: ORDER gets every group index, the best
  * first; the number in the running is returned. Groups with no fault
  * giving the screen picked come last, out of the running. */
@@ -135,11 +146,13 @@ int probe_rank(probe_db_t *db, const probe_reading_t *readings, int n, int *orde
 
 /* The net to probe next among the first NRUNNING groups of ORDER (none
  * of READINGS'), and on it the PIN that is easiest to find (an IC pin, on
- * the smallest chip); COUNTS[r]: the groups that would show reading r
- * there; *BENCH (if not NULL): a step of the bench procedure, 0 if not.
- * -1 if no net tells them apart. */
+ * the smallest chip), or an open leg some of them have; *LEG: probe the
+ * chip's leg (db->on_legs, or a leg only its chip side tells apart),
+ * else the pad. COUNTS[r]: the groups that would show reading r there;
+ * *BENCH (if not NULL): a step of the bench procedure, 0 if not. -1 if
+ * nothing tells them apart. */
 int probe_suggest(const probe_db_t *db, board_t *b, const probe_reading_t *readings, int n, const int *order,
-                  int nrunning, int *pin, int counts[PROBE_NREADINGS], int *bench);
+                  int nrunning, int *pin, bool *leg, int counts[PROBE_NREADINGS], int *bench);
 /* The bench procedure's step K (1...): what it checks, NULL past the end. */
 const char *probe_bench_step(int machine, int k);
 

@@ -27,6 +27,8 @@ static struct {
     int n;
     int *order, nrun, nbest;    /* the groups ranked; in the running; fitting best */
     int sug_net, sug_pin, counts[PROBE_NREADINGS];
+    bool sug_leg;               /* the suggestion is of the chip's leg (else its pad) */
+    bool on_legs;               /* readings taken on the chips' legs (else the pads), kept when the board changes */
     int sug_bench;              /* the suggestion's bench procedure step, 0 none */
     int strategy;               /* PROBE_*, kept when the board changes */
     /* The screen picked, in steps: its kind and colors (in db.kinds and
@@ -51,7 +53,7 @@ static struct {
     float *boost;
     char boost_note[600];
     unsigned boost_serial;
-} P = { .sug_net = -1, .sug_pin = -1, .cur_pin = -1, .last_scope = -1 };
+} P = { .sug_net = -1, .sug_pin = -1, .cur_pin = -1, .last_scope = -1, .on_legs = true };
 
 void probe_open(void) { P.open = P.reopen = true; }
 void probe_close(void) { P.open = false; P.typing = false; }
@@ -84,7 +86,7 @@ static void update(void) {
     P.nbest = 0;
     float best = P.db.ngroups ? P.db.groups[P.order[0]].cost : 0;
     while (P.nbest < P.nrun && P.db.groups[P.order[P.nbest]].cost <= best + 1e-4f) P.nbest++;
-    P.sug_net = probe_suggest(&P.db, P.b, P.rd, P.n, P.order, P.nrun, &P.sug_pin, P.counts, &P.sug_bench);
+    P.sug_net = probe_suggest(&P.db, P.b, P.rd, P.n, P.order, P.nrun, &P.sug_pin, &P.sug_leg, P.counts, &P.sug_bench);
     P.cur_pin = P.sug_pin;
     P.shown = SHOWN_GROUPS;
     memset(P.expanded, 0, (size_t)P.db.ngroups * sizeof(bool));
@@ -115,6 +117,7 @@ static void attach(board_t *b, int machine) {
     if (!P.loaded) return;
     if (!P.marks[machine]) P.marks[machine] = calloc((size_t)b->sim.nparts, 1);
     P.db.strategy = P.strategy;
+    P.db.on_legs = P.on_legs;
     set_weights();
     P.order = malloc((size_t)P.db.ngroups * sizeof(int));
     P.expanded = calloc((size_t)P.db.ngroups, sizeof(bool));
@@ -140,6 +143,22 @@ static void strategy_choice(struct nk_context *ctx, float cw) {
     nk_layout_row_end(ctx);
     if (s != P.strategy) {
         P.strategy = P.db.strategy = s;
+        update();
+    }
+    static const char *const where[2] = { "The chips' legs (top side)", "The solder side (pads)" };
+    nk_layout_row_begin(ctx, NK_STATIC, 28, 2);
+    nk_layout_row_push(ctx, 140);
+    nk_label(ctx, "Probing on:", NK_TEXT_LEFT);
+    nk_layout_row_push(ctx, cw - 146);
+    if (nk_widget_is_hovered(ctx))
+        nk_tooltip(ctx, P.on_legs ? "On a leg that is lifted or not soldered, the probe shows the chip's side: what "
+                                    "the chip drives there, or floating for an input. That finds open legs"
+                                  : "A pad shows the trace, whatever the chip's leg does: an open leg can look "
+                                    "healthy there. When only a leg tells the faults left apart, it asks for the leg");
+    int on = nk_combo(ctx, where, 2, P.on_legs ? 0 : 1, 22, nk_vec2(cw - 146, 80)) == 0;
+    nk_layout_row_end(ctx);
+    if (on != P.on_legs) {
+        P.on_legs = P.db.on_legs = on;
         update();
     }
 }
@@ -190,17 +209,24 @@ static void markings(struct nk_context *ctx, float cw) {
     }
 }
 
+/* Is the reading at PIN of its leg? The suggestion says; another pin is
+ * probed where the window says. */
+static bool leg_of(int pin) { return pin == P.sug_pin ? P.sug_leg : P.on_legs; }
+
 static void add_reading(int pin, int reading) {
     int net = pin >= 0 ? P.b->sim.pins[pin].net : -1;
     if (net < 0 || P.n >= MAX_READINGS) return;     /* a leg on no net (NC) tells nothing */
-    /* Probing the same net again: the new reading replaces the old one. */
+    bool leg = leg_of(pin);
+    /* Probing the same place again: the new reading replaces the old one.
+     * Two pads of a net are the same place; two legs aren't (one of them
+     * may be lifted). */
     for (int i = 0; i < P.n; i++)
-        if (P.rd[i].net == net) {
+        if ((P.rd[i].pin == pin && P.rd[i].leg == leg) || (P.rd[i].net == net && !leg && !P.rd[i].leg)) {
             memmove(&P.rd[i], &P.rd[i + 1], (size_t)(P.n - i - 1) * sizeof(probe_reading_t));
             P.n--;
             break;
         }
-    P.rd[P.n++] = (probe_reading_t){ pin, net, reading };
+    P.rd[P.n++] = (probe_reading_t){ pin, net, reading, leg };
     update();
 }
 
@@ -426,8 +452,14 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
     } else {
         int net = P.b->sim.pins[pin].net;
         pin_desc(P.b, pin, desc, sizeof(desc));
-        snprintf(line, sizeof(line), "%s %s", pin == P.sug_pin ? "Probe next:" : "Probing:", desc);
+        bool leg = leg_of(pin);
+        snprintf(line, sizeof(line), "%s %s, %s", pin == P.sug_pin ? "Probe next:" : "Probing:", desc,
+                 leg ? "on the chip's leg" : "on its pad (solder side)");
         wrapped(ctx, line, cw, COL_HOVER);
+        if (pin == P.sug_pin && leg && !P.on_legs)
+            wrapped(ctx, "Only the chip's side of this leg tells the faults left apart: probe the leg itself, "
+                         "above the board (a lifted or unsoldered leg shows what the chip does, not the trace).",
+                    cw, COL_TRACE);
         if (pin == P.sug_pin && P.sug_bench) {
             snprintf(line, sizeof(line), "Bench procedure, step %d: %s", P.sug_bench,
                      probe_bench_step(P.machine, P.sug_bench));
@@ -509,6 +541,10 @@ static void readings(struct nk_context *ctx, float cw) {
     for (int i = 0; i < P.n; i++) {
         const probe_reading_t *r = &P.rd[i];
         pin_desc(P.b, r->pin, desc, sizeof(desc));
+        if (r->leg != P.on_legs) {
+            size_t dl = strlen(desc);
+            snprintf(desc + dl, sizeof(desc) - dl, r->leg ? " (leg)" : " (pad)");
+        }
         nk_layout_row_begin(ctx, NK_STATIC, 22, 4);
         nk_layout_row_push(ctx, cw - 34 - 80 - 170);
         nk_label(ctx, desc, NK_TEXT_LEFT);
@@ -516,8 +552,8 @@ static void readings(struct nk_context *ctx, float cw) {
         nk_label_colored(ctx, probe_reading_name(r->reading), NK_TEXT_LEFT, reading_color(r->reading));
         nk_layout_row_push(ctx, 170);
         /* Where the best fit disagrees, say what it expects. */
-        int want = best ? probe_reading_of(best->nets[r->net]) : -1;
-        if (want >= 0 && probe_cost(best->nets[r->net], r->reading) >= 0.5f)
+        int want = best ? probe_reading_of(probe_group_state(best, r)) : -1;
+        if (want >= 0 && probe_cost(probe_group_state(best, r), r->reading) >= 0.5f)
             snprintf(line, sizeof(line), "best fit: %s", probe_reading_name(want));
         else snprintf(line, sizeof(line), "healthy: %s", healthy_on(r->net));
         nk_label_colored(ctx, line, NK_TEXT_LEFT,
@@ -563,11 +599,11 @@ static void group(struct nk_context *ctx, int k, float cw, probe_action_t *act) 
         int shown = 0;
         for (int i = 0; i < P.n && shown < 4; i++) {
             const probe_reading_t *r = &P.rd[i];
-            if (probe_cost(gr->nets[r->net], r->reading) < 0.5f) continue;
+            if (probe_cost(probe_group_state(gr, r), r->reading) < 0.5f) continue;
             const part_t *pt = &P.b->sim.parts[P.b->sim.pins[r->pin].part];
             size_t len = strlen(what);
             snprintf(what + len, sizeof(what) - len, "%s%s.%s would be %s", shown ? ", " : "", pt->ref,
-                     P.b->sim.bd->pads[r->pin].name, probe_reading_name(probe_reading_of(gr->nets[r->net])));
+                     P.b->sim.bd->pads[r->pin].name, probe_reading_name(probe_reading_of(probe_group_state(gr, r))));
             shown++;
         }
         wrapped(ctx, what, cw, COL_DIMTEXT);
@@ -664,9 +700,13 @@ void probe_window(struct nk_context *ctx, struct nk_rect area, board_t *b, int m
     if (fresh) nk_window_set_scroll(ctx, 0, 0);
     P.bounds = nk_window_get_bounds(ctx);
     float cw = nk_window_get_content_region(ctx).w - 20;
-    wrapped(ctx, "Switch the real machine on and wait a few seconds. Probe each pin on the solder side, where pad and "
-                 "trace are one, and click what the logic probe shows. The faults that fit stay at the top.",
+    wrapped(ctx, "Switch the real machine on and wait a few seconds. Probe each pin it asks for, on the chip's leg or "
+                 "the solder side (\"Probing on\" below), and click what the logic probe shows. The faults that fit "
+                 "stay at the top.",
             cw, COL_DIMTEXT);
+    if (P.loaded && !P.db.have_legs)
+        wrapped(ctx, "This atlas has no readings of the chips' own side of open legs yet (build it again: "
+                     "--build-atlas=full): a lifted leg is judged by its pad only.", cw, COL_PULSE);
     if (!P.loaded) {
         wrapped(ctx, P.err, cw, COL_HIGH);
         nk_end(ctx);

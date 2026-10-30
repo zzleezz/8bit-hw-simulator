@@ -35,6 +35,8 @@ _Static_assert(sizeof(atlas_fault_hdr_t) == 24, "atlas_fault_hdr_t layout change
 #define TAG_FAULT     0x544C4146u   /* "FALT" */
 #define TAG_NETS      0x5354454Eu   /* "NETS" */
 #define TAG_PINS      0x534E4950u   /* "PINS" */
+#define TAG_LEGS      0x5347454Cu   /* "LEGS" */
+#define MAX_LEGS      8
 
 static const machine_t *const atlas_machines[ATLAS_NMACHINES] = {
     &machine_c64, &machine_zx48, &machine_zx48i2, &machine_zx48i1, &machine_zx48i4b, &machine_zx48i6a, &machine_c64c };
@@ -439,6 +441,9 @@ typedef struct {
     bool keep;                  /* hand over the last pictures (full size) */
     uint32_t *frame, *lit;      /* lit: NULL but for a flash code */
     uint8_t *nets; int nnets;   /* the logic probe at the end (PINS) */
+    int legs[MAX_LEGS], nlegs;  /* the open chip legs (LEGS) */
+    uint8_t leg_state[MAX_LEGS];
+    char leg_name[MAX_LEGS][16];
 } result_t;
 
 /* A JAM opcode keeps the 6502 fetching forever (only a reset gets it out);
@@ -508,6 +513,10 @@ static void run_job(const job_t *j, const char *carts, result_t *r) {
         }
         s += len + (s[len] == ' ');
     }
+    /* Open chip legs: what the chip drives on them is counted too. */
+    r->nlegs = atlas_open_legs(b, j->spec, r->legs, MAX_LEGS);
+    if (r->nlegs) b->pin_stats = true;
+    uint32_t lwin[MAX_LEGS][3] = { { 0 } };
 
     int w = m->screen_w, h = m->screen_h, n = w * h;
     uint32_t *px = malloc((size_t)n * sizeof(uint32_t)), *lit_px = malloc((size_t)n * sizeof(uint32_t));
@@ -536,6 +545,11 @@ static void run_job(const job_t *j, const char *carts, result_t *r) {
             memcpy(win + nnets, b->st_lo, sz);
             memcpy(win + 2 * nnets, b->st_float, sz);
             memcpy(win + 3 * nnets, b->st_fight, sz);
+            for (int k = 0; k < r->nlegs; k++) {
+                lwin[k][0] = b->pst_hi[r->legs[k]];
+                lwin[k][1] = b->pst_lo[r->legs[k]];
+                lwin[k][2] = b->pst_off[r->legs[k]];
+            }
             board_stats_reset(b);
         }
         if (type && f >= ready + 10 && f >= next_type && f % 4 == 0 && type[typed]) {
@@ -686,7 +700,19 @@ static void run_job(const job_t *j, const char *carts, result_t *r) {
             b->st_float[i] += win[2 * nnets + i];
             b->st_fight[i] += win[3 * nnets + i];
         }
+    if (!(stop == STOP_END && mode == MODE_BOOT && !r->keep))
+        for (int k = 0; k < r->nlegs; k++) {
+            b->pst_hi[r->legs[k]] += lwin[k][0];
+            b->pst_lo[r->legs[k]] += lwin[k][1];
+            b->pst_off[r->legs[k]] += lwin[k][2];
+        }
     for (int i = 0; i < nnets; i++) r->nets[i] = (uint8_t)board_net_state(b, i);
+    for (int k = 0; k < r->nlegs; k++) {
+        const sim_t *s = &b->sim;
+        r->leg_state[k] = (uint8_t)board_pin_drive_state(b, r->legs[k]);
+        snprintf(r->leg_name[k], sizeof(r->leg_name[k]), "%s.%s", s->parts[s->pins[r->legs[k]].part].ref,
+                 s->bd->pads[r->legs[k]].name);
+    }
     free(win);
     board_destroy(b);
 }
@@ -1308,6 +1334,37 @@ static void write_pins(FILE *f, const job_t *j, const result_t *r) {
     free(p.p);
 }
 
+/* LEGS: the key of the fault, the number of legs, the PINS version they
+ * were taken by, then for each its state, the length of its name and the
+ * name ("U7.3"). */
+static void write_legs(FILE *f, const job_t *j, const result_t *r) {
+    pins_hdr_t h = { fault_key(j->machine, j->mode, j->spec), (uint16_t)r->nlegs, ATLAS_PINS_VERSION, { 0 } };
+    buf_t p = { 0 };
+    buf_put(&p, &h, sizeof(h));
+    for (int k = 0; k < r->nlegs; k++) {
+        uint8_t hd[2] = { r->leg_state[k], (uint8_t)strlen(r->leg_name[k]) };
+        buf_put(&p, hd, 2);
+        buf_put(&p, r->leg_name[k], hd[1]);
+    }
+    write_chunk(f, TAG_LEGS, &p);
+    free(p.p);
+}
+
+int atlas_open_legs(board_t *b, const char *spec, int *pins, int max) {
+    int n = 0;
+    for (const char *s = spec; *s && n < max; ) {
+        size_t len = strcspn(s, " ");
+        char ref[16] = { 0 }, pad[8] = { 0 }, what[16] = { 0 }, one[64];
+        snprintf(one, sizeof(one), "%.*s", (int)len, s);
+        if (sscanf(one, "%15[^.:].%7[^:]:%15s", ref, pad, what) == 3 && !strcmp(what, "open")) {
+            int part = sim_find_part(&b->sim, ref), pin = part >= 0 ? board_pad_pin(b, part, pad) : -1;
+            if (pin >= 0 && b->sim.parts[part].kind == PART_IC) pins[n++] = pin;
+        }
+        s += len + (s[len] == ' ');
+    }
+    return n;
+}
+
 /* NETS: the machine, a zero, the number of nets, their names (each ended
  * by a zero). */
 static void write_net_names(FILE *f, int machine) {
@@ -1339,7 +1396,7 @@ static int cmp_outcome_key(const void *a, const void *b) {
 }
 
 /* The PINS chunks while loading: by fault key, then in the order written. */
-typedef struct { uint64_t key; int order, n; uint8_t *v; } pins_rec_t;
+typedef struct { uint64_t key; int order, n, len; uint8_t *v; } pins_rec_t;
 
 static int cmp_pins(const void *a, const void *b) {
     const pins_rec_t *x = a, *y = b;
@@ -1369,8 +1426,8 @@ bool atlas_load(atlas_t *a, const char *path, bool *exists) {
     size_t n = fread(d, 1, (size_t)size, f);
     fclose(f);
     if (n < 8 || memcmp(d, ATLAS_MAGIC, 7) || d[7] != ATLAS_VERSION) { free(d); return false; }
-    int cap_o = 0, cap_f = 0, cap_p = 0, npins = 0;
-    pins_rec_t *pins = NULL;
+    int cap_o = 0, cap_f = 0, cap_p = 0, npins = 0, cap_l = 0, nlegs = 0;
+    pins_rec_t *pins = NULL, *legs = NULL;      /* LEGS: n legs, v the payload after the header */
     size_t off = 8;
     while (off + 12 <= n) {
         uint32_t tag, len, sum;
@@ -1408,6 +1465,16 @@ bool atlas_load(atlas_t *a, const char *path, bool *exists) {
             pins[npins].n = ph.nnets;
             pins[npins].order = npins;
             pins[npins++].v = (uint8_t *)dup_n(p + sizeof(ph), ph.nnets);
+        } else if (tag == TAG_LEGS && len >= sizeof(pins_hdr_t)) {
+            pins_hdr_t lh;
+            memcpy(&lh, p, sizeof(lh));
+            if (lh.version != ATLAS_PINS_VERSION) { off += 12 + len; continue; }
+            if (nlegs == cap_l) legs = realloc(legs, (size_t)(cap_l = cap_l * 2 + 256) * sizeof(*legs));
+            legs[nlegs].key = lh.fault;
+            legs[nlegs].n = lh.nnets;
+            legs[nlegs].order = nlegs;
+            legs[nlegs].len = (int)(len - sizeof(lh));
+            legs[nlegs++].v = (uint8_t *)dup_n(p + sizeof(lh), len - sizeof(lh));
         } else if (tag == TAG_NETS && len >= 4 && p[0] < ATLAS_NMACHINES) {
             int m = p[0];
             uint16_t nn;
@@ -1491,6 +1558,35 @@ bool atlas_load(atlas_t *a, const char *path, bool *exists) {
         for (int i = 0; i < npins; i++) free(pins[i].v);
     }
     free(pins);
+    /* And to its LEGS (the last one written counts). */
+    if (nlegs) {
+        qsort(legs, (size_t)nlegs, sizeof(*legs), cmp_pins);
+        for (int i = 0; i < a->nfaults; i++) {
+            atlas_fault_t *ft = &a->faults[i];
+            uint64_t k = fault_key(ft->h.machine, ft->h.mode, ft->spec);
+            int lo = 0, hi = nlegs - 1, at = -1;
+            while (lo <= hi) {
+                int mid = (lo + hi) / 2;
+                if (legs[mid].key <= k) { if (legs[mid].key == k) at = mid; lo = mid + 1; }
+                else hi = mid - 1;
+            }
+            if (at < 0) continue;
+            ft->has_legs = true;
+            ft->legs = calloc((size_t)legs[at].n + 1, sizeof(*ft->legs));
+            const uint8_t *v = legs[at].v;
+            int pos = 0;
+            for (int l = 0; l < legs[at].n && pos + 2 <= legs[at].len; l++) {
+                int nl = v[pos + 1];
+                if (pos + 2 + nl > legs[at].len) break;
+                ft->legs[ft->nlegs].state = v[pos];
+                snprintf(ft->legs[ft->nlegs].pin, sizeof(ft->legs[0].pin), "%.*s", nl, (const char *)v + pos + 2);
+                ft->nlegs++;
+                pos += 2 + nl;
+            }
+        }
+        for (int i = 0; i < nlegs; i++) free(legs[i].v);
+    }
+    free(legs);
     return true;
 }
 
@@ -1500,7 +1596,12 @@ void atlas_free(atlas_t *a) {
         free(a->outcomes[i].alt);
         free(a->outcomes[i].faults);
     }
-    for (int i = 0; i < a->nfaults; i++) { free(a->faults[i].spec); free(a->faults[i].desc); free(a->faults[i].nets); }
+    for (int i = 0; i < a->nfaults; i++) {
+        free(a->faults[i].spec);
+        free(a->faults[i].desc);
+        free(a->faults[i].nets);
+        free(a->faults[i].legs);
+    }
     for (int m = 0; m < ATLAS_NMACHINES; m++) {
         for (int i = 0; i < a->nnet_names[m]; i++) free(a->net_names[m][i]);
         free(a->net_names[m]);
@@ -1712,6 +1813,7 @@ static void *worker(void *arg) {
             }
             if (!j->pins_only) write_fault(P.f, j, &r);
             write_pins(P.f, j, &r);
+            if (r.nlegs) write_legs(P.f, j, &r);
             fflush(P.f);
         }
         P.done++;
@@ -1813,6 +1915,61 @@ static bool redo_touches(board_t *b, const char *spec, const hset_t *parts, cons
     return false;
 }
 
+/* C64HW_ATLAS_PRUNE=1: the normal boot faults no longer in the catalog
+ * (a pin found not to be an output: its "out0"/"out1" faults go) are cut
+ * out of the file, their FALT, PINS and LEGS chunks; the rest is copied as
+ * it is. The old file is kept as PATH.prune-bak. How many were cut, -1 if
+ * the file couldn't be rewritten. */
+static int prune_file(const char *path, const hset_t *catalog) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *d = malloc(size > 0 ? (size_t)size : 1);
+    size_t n = fread(d, 1, (size_t)size, f);
+    fclose(f);
+    char tmp[1100], bak[1100];
+    snprintf(tmp, sizeof(tmp), "%s.prune-tmp", path);
+    snprintf(bak, sizeof(bak), "%s.prune-bak", path);
+    FILE *o = fopen(tmp, "wb");
+    if (!o || n < 8) { free(d); if (o) fclose(o); return -1; }
+    fwrite(d, 1, 8, o);
+    hset_t gone = { 0 };
+    int cut = 0;
+    for (size_t off = 8; off + 12 <= n; ) {
+        uint32_t tag, len;
+        memcpy(&tag, d + off, 4);
+        memcpy(&len, d + off + 4, 4);
+        if (len > n - off - 12) break;
+        const uint8_t *p = d + off + 8;
+        bool drop = false;
+        if (tag == TAG_FAULT && len >= sizeof(atlas_fault_hdr_t)) {
+            atlas_fault_hdr_t h;
+            memcpy(&h, p, sizeof(h));
+            char *spec = dup_n(p + sizeof(h), h.spec_len);
+            uint64_t k = fault_key(h.machine, h.mode, spec);
+            if (h.mode == MODE_BOOT && !hset_has(catalog, k)) {
+                drop = true;
+                if (hset_add(&gone, k)) { printf("  cut out: %s %s\n", atlas_machine_id(h.machine), spec); cut++; }
+            }
+            free(spec);
+        } else if ((tag == TAG_PINS || tag == TAG_LEGS) && len >= sizeof(pins_hdr_t)) {
+            pins_hdr_t h;
+            memcpy(&h, p, sizeof(h));
+            drop = hset_has(&gone, h.fault);
+        }
+        if (!drop) fwrite(d + off, 1, 12 + len, o);
+        off += 12 + len;
+    }
+    free(d);
+    free(gone.v);
+    if (fclose(o)) return -1;
+    remove(bak);
+    if (rename(path, bak) || rename(tmp, path)) return -1;
+    return cut;
+}
+
 int atlas_build(const atlas_build_t *o) {
     setvbuf(stdout, NULL, _IONBF, 0);       /* progress shows as it goes, even into a file */
     bool full = !strcmp(o->tier, "full");
@@ -1834,14 +1991,17 @@ int atlas_build(const atlas_build_t *o) {
     }
     /* DONE: in the file with their PINS. RAN: in it without (an atlas
      * built before PINS), or with PINS of other nets than the board has
-     * now (a board data change: probe_db_load drops them): run again for
+     * now (a board data change: probe_db_load drops them), or with an open
+     * chip leg and no LEGS (an atlas built before LEGS): run again for
      * those only. */
-    hset_t done = { 0 }, ran = { 0 };
+    hset_t done = { 0 }, ran = { 0 }, legged = { 0 };
     memset(&P, 0, sizeof(P));
     P.carts = o->carts;
     for (int i = 0; i < old.nfaults; i++)
         hset_add(old.faults[i].nets ? &done : &ran,
                  fault_key(old.faults[i].h.machine, old.faults[i].h.mode, old.faults[i].spec));
+    for (int i = 0; i < old.nfaults; i++)
+        if (old.faults[i].has_legs) hset_add(&legged, fault_key(old.faults[i].h.machine, old.faults[i].h.mode, old.faults[i].spec));
     for (int i = 0; i < old.noutcomes; i++) hset_add(&P.outcomes, old.outcomes[i].h.key);
     if (exists) {
         FILE *f = fopen(o->path, "r+b");
@@ -1869,6 +2029,22 @@ int atlas_build(const atlas_build_t *o) {
     hset_t redo = { 0 };
     printf("Fault atlas, %s tier -> %s\n", o->tier, o->path);
     if (redo_list) printf("  running again the faults on: %s\n", redo_list);
+    /* C64HW_ATLAS_REDO_FAULTS=FILE: these faults run again, a line each:
+     * the board's id and the fault ("zx48 IC23.8:open"). */
+    hset_t redo_faults = { 0 };
+    const char *redo_file = getenv("C64HW_ATLAS_REDO_FAULTS");
+    if (redo_file) {
+        FILE *rf = fopen(redo_file, "r");
+        if (!rf) { fprintf(stderr, "can't read %s\n", redo_file); return 1; }
+        char line[256], mid[32], spec[200];
+        int nr = 0;
+        while (fgets(line, sizeof(line), rf))
+            if (sscanf(line, "%31s %199[^\r\n]", mid, spec) == 2)
+                for (int m = 0; m < ATLAS_NMACHINES; m++)
+                    if (!strcmp(mid, atlas_machine_id(m))) { hset_add(&redo_faults, fault_key(m, MODE_BOOT, spec)); nr++; }
+        fclose(rf);
+        printf("  running again %d faults listed in %s\n", nr, redo_file);
+    }
     for (int m = 0; m < ATLAS_NMACHINES; m++) {
         board_t *b = board_create(atlas_machines[m]);
         hset_t rparts = { 0 }, rroots = { 0 };
@@ -1889,7 +2065,11 @@ int atlas_build(const atlas_build_t *o) {
             int todo = 0;
             for (int i = before; i < all.n; i++) {
                 uint64_t k = fault_key(m, mode, all.v[i].spec);
+                int lp[MAX_LEGS];
+                if (hset_has(&done, k) && !hset_has(&legged, k) && atlas_open_legs(b, all.v[i].spec, lp, MAX_LEGS))
+                    hset_add(&ran, k);
                 if (redo_list && redo_touches(b, all.v[i].spec, &rparts, &rroots)) hset_add(&redo, k);
+                if (hset_has(&redo_faults, k)) hset_add(&redo, k);
                 todo += !hset_has(&done, k) || hset_has(&ran, k) || hset_has(&redo, k);
             }
             printf("  %-5s %-20s %5d faults, %5d to run\n", atlas_machine_id(m), atlas_mode_name(mode), all.n - before, todo);
@@ -1898,6 +2078,19 @@ int atlas_build(const atlas_build_t *o) {
         free(rparts.v);
         free(rroots.v);
         board_destroy(b);
+    }
+    if (getenv("C64HW_ATLAS_PRUNE")) {
+        /* Against the full catalog only: the quick one would cut the rest. */
+        if (!full) { fprintf(stderr, "C64HW_ATLAS_PRUNE needs --build-atlas=full\n"); return 1; }
+        hset_t cat = { 0 };
+        for (int i = 0; i < all.n; i++) hset_add(&cat, fault_key(all.v[i].machine, all.v[i].mode, all.v[i].spec));
+        fclose(P.f);
+        int cut = prune_file(o->path, &cat);
+        free(cat.v);
+        if (cut < 0) { fprintf(stderr, "can't rewrite %s\n", o->path); return 1; }
+        printf("%d faults no longer in the catalog cut out of %s (the old file: %s.prune-bak)\n", cut, o->path, o->path);
+        P.f = fopen(o->path, "ab");
+        if (!P.f) { fprintf(stderr, "can't write %s\n", o->path); return 1; }
     }
     P.jobs = malloc(((size_t)all.n + 1) * sizeof(job_t));
     double total_cost = 0;
@@ -1912,7 +2105,9 @@ int atlas_build(const atlas_build_t *o) {
     free(all.v);
     free(done.v);
     free(ran.v);
+    free(legged.v);
     free(redo.v);
+    free(redo_faults.v);
     atlas_free(&old);
     /* C64HW_ATLAS_TODO=1: only list the faults still to run. */
     if (getenv("C64HW_ATLAS_TODO")) {

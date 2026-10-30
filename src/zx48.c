@@ -1509,6 +1509,40 @@ static void zx_uram_fitted(board_t *b) {
     zx_forget_cells(z);
 }
 
+void zx48_unfitted_note(board_t *b, int part, char *out, int len) {
+    zx48_t *z = ZX(b);
+    const char *ref = b->sim.parts[part].ref;
+    snprintf(out, (size_t)len, "Not fitted on this board");
+    for (const char *l = V(b)->links_open; l && *l; ) {
+        size_t n = strcspn(l, " ");
+        if (strlen(ref) == n && !strncmp(l, ref, n)) {
+            snprintf(out, (size_t)len, "Not fitted on this board: the pads are there, but no link was fitted");
+            return;
+        }
+        l += n + (l[n] == ' ');
+    }
+    if (V(b)->with_6c001 && !strcmp(ref, V(b)->with_6c001)) {
+        snprintf(out, (size_t)len, "Fitted only with a 6C001 ULA (ULA, in the controls)");
+        return;
+    }
+    if (z->ram16k)
+        for (size_t i = 0; i < sizeof(upper_ram_parts) / sizeof(upper_ram_parts[0]); i++)
+            if (!strcmp(ref, upper_ram_parts[i])) {
+                snprintf(out, (size_t)len, "Not fitted on a 16K machine (RAM, in the controls)");
+                return;
+            }
+    if (V(b)->uram_links == ULINKS_TI_OKI) {
+        static const char *const refs[] = { "TI1", "OKI1", "TI-3", "TI-4", "OKI-L1", "OKI-H1" };
+        static const char *const fits[] = { "TI-3 or TI-4", "OKI-L or OKI-H", "TI-3", "TI-4", "OKI-L", "OKI-H" };
+        for (int i = 0; i < 6; i++)
+            if (!strcmp(ref, refs[i])) {
+                snprintf(out, (size_t)len, "Not fitted with Links set to %s (in the controls): it is fitted with %s",
+                         ulinks_values[z->uram_links], fits[i]);
+                return;
+            }
+    }
+}
+
 static void zx_set_option(board_t *b, int option, int value) {
     zx48_t *z = ZX(b);
     const char *id = b->m->options[option].id;
