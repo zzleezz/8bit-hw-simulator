@@ -114,7 +114,11 @@ Spectrums, roughly in order of value. Tick items off as they're done.
       the atlas's PINS, rising edges and share high over the last 10
       frames (board_edges_start(): every net at every bus step, one board
       at a time, outside board_t so save files keep their layout). 15-23 s
-      a board; the simulator ~1% slower for the extra compare per step.
+      a board. The check sits behind the statistics countdown (every 97th
+      step; the board measured has it held at 1), so a normal run pays
+      nothing per step: Issue 3B 3 s runs 10.36-10.46 s before, 10.51-
+      10.53 s after, a copy without the edge code 10.45-10.46 s (code
+      layout, about run-to-run noise).
       Analog pins (the ULA's OSC floats, U/V/Y read LOW) show the model,
       not a probe: said on the page.
 - [x] Browse it in the app, next to the pin under the mouse (the

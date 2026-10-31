@@ -48,12 +48,15 @@ static uint8_t scope_sample(const sim_t *s, int pi) {
 }
 
 /* Edge counting (board_edges_start()): one board at a time, looked at in
- * every bus step while on (other boards, in other threads, only compare
- * their address). Kept out of board_t, so save files keep their layout. */
+ * every bus step while on. It costs the other boards nothing: the board
+ * measured has its statistics countdown held at 1, so it reaches the
+ * slow end of board_sample() at every step, and keeps the real countdown
+ * here. Kept out of board_t, so save files keep their layout. */
 static struct {
     const board_t *b;
     uint8_t *last;
     uint32_t *rises, *highs, steps;
+    int countdown;              /* the board's statistics countdown, meanwhile */
 } edges;
 
 static void count_edges(const sim_t *s) {
@@ -78,6 +81,8 @@ void board_edges_start(board_t *b) {
     memset(edges.rises, 0, (size_t)n * sizeof(uint32_t));
     memset(edges.highs, 0, (size_t)n * sizeof(uint32_t));
     edges.steps = 0;
+    edges.countdown = b->st_countdown;
+    b->st_countdown = 1;
     edges.b = b;
 }
 
@@ -86,6 +91,7 @@ uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs) {
     if (b && edges.b == b) {
         memcpy(rises, edges.rises, (size_t)b->sim.nnets * sizeof(uint32_t));
         memcpy(highs, edges.highs, (size_t)b->sim.nnets * sizeof(uint32_t));
+        b->st_countdown = edges.countdown;
     }
     free(edges.last); free(edges.rises); free(edges.highs);
     memset(&edges, 0, sizeof(edges));
@@ -94,7 +100,6 @@ uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs) {
 
 void board_sample(board_t *b) {
     sim_t *s = &b->sim;
-    if (edges.b == b) count_edges(s);
     if (b->scope_pin >= 0) {
         uint32_t at = b->scope_pos++ & (SCOPE_SAMPLES - 1);
         b->scope[at] = scope_sample(s, b->scope_pin);
@@ -102,7 +107,12 @@ void board_sample(board_t *b) {
     }
     /* Logic probe statistics: sample every net once in a while. */
     if (--b->st_countdown > 0) return;
-    b->st_countdown = 97;
+    if (edges.b == b) {         /* measured: here at every step (see edges) */
+        count_edges(s);
+        b->st_countdown = 1;
+        if (--edges.countdown > 0) return;
+        edges.countdown = 97;
+    } else b->st_countdown = 97;
     /* Inputs reading an erratic level (a floating net near the threshold, a
      * lifted MOS leg) can change without any event: look at them again. */
     sim_wake_erratic(s);
