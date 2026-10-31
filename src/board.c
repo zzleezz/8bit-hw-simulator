@@ -98,6 +98,29 @@ uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs) {
     return steps;
 }
 
+/* A step hook (board_step_hook()): a function called at every bus step of
+ * one board, the way edge counting is (the board's statistics countdown
+ * held at 1, the real one kept here), so it costs the others nothing. */
+static struct {
+    const board_t *b;
+    board_step_fn fn;
+    void *ctx;
+    int countdown;
+} hook;
+
+bool board_step_hook(board_t *b, board_step_fn fn, void *ctx) {
+    if (hook.b) {               /* stop the one on */
+        if (hook.b == b) b->st_countdown = hook.countdown;
+        memset(&hook, 0, sizeof(hook));
+    }
+    if (!fn) return true;
+    if (edges.b == b) return false;
+    hook.b = b; hook.fn = fn; hook.ctx = ctx;
+    hook.countdown = b->st_countdown;
+    b->st_countdown = 1;
+    return true;
+}
+
 void board_sample(board_t *b) {
     sim_t *s = &b->sim;
     if (b->scope_pin >= 0) {
@@ -112,6 +135,11 @@ void board_sample(board_t *b) {
         b->st_countdown = 1;
         if (--edges.countdown > 0) return;
         edges.countdown = 97;
+    } else if (hook.b == b) {   /* hooked: here at every step too */
+        hook.fn(b, hook.ctx);
+        b->st_countdown = 1;
+        if (--hook.countdown > 0) return;
+        hook.countdown = 97;
     } else b->st_countdown = 97;
     /* Inputs reading an erratic level (a floating net near the threshold, a
      * lifted MOS leg) can change without any event: look at them again. */

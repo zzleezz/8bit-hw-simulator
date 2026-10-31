@@ -91,7 +91,26 @@
  *   --probe-test [N] [--seed S] [--probe-noise PCT] [--atlas FILE]
  *       "Diagnose by probing" tested: N (20) faults of the atlas at random
  *       on each machine, put on a board and probed where the tool says,
- *       PCT% of the readings taken wrong on purpose (see probe_db.h). */
+ *       PCT% of the readings taken wrong on purpose (see probe_db.h).
+ *
+ *   Logic analyser captures of the Spectrum's edge connector (lacap.h:
+ *   Jim's interface with two LogicAnalyzer boards, .lac or .csv files):
+ *   --la-info FILE [--la-count N]
+ *       Its channels, each signal low/high/pulsing from /RESET going high,
+ *       the bus cycles, ROM reads that aren't what the ROM holds, the
+ *       first N (20) cycles.
+ *   --la-cycles FILE [--la-count N]
+ *       Every bus cycle: T state, sample, kind, address, data.
+ *   --la-record FILE [--board B] [--fault SPEC]... [--la-pre N] [--la-post N]
+ *       Record the simulated board as the analyser would (28 MHz, triggered
+ *       on /RESET going high, N 512 before and 32000 after).
+ *   --la-compare FILE [--la-against FILE2 | --board B --fault SPEC...]
+ *           [--la-count N] [--la-refresh]
+ *       Cycle by cycle from the first fetch at 0000: the first difference
+ *       from FILE2, or from the simulated board (Issue 3B unless --board).
+ *   --la-map FILE
+ *       The channel map: lines "CHANNEL NAME" (1-48), used for channels
+ *       without a signal's name. The default is Jim's interface, rev 3.2. */
 #include "sokol_headers.h"
 #include "atlas.h"
 #include "probe_db.h"
@@ -102,6 +121,7 @@
 #include "diagnose.h"
 #include "healthy.h"
 #include "probe.h"
+#include "lacap.h"
 #include "ui.h"
 #include "win_perf.h"
 #include "icon_data.h"
@@ -164,6 +184,7 @@ static struct {
     int probe_test, probe_noise;      /* probe_db.h */
     bool probe;
     unsigned seed;
+    la_cli_t la;                /* --la-...: lacap.h */
 } args = { .frames = 60, .atlas_path = "fault_atlas.bin", .carts = "carts", .causes = 8, .match_machine = -1,
             .match_cart = 0, .match_dir = "match_test", .seed = 1, .socket = -1, .certainty = 1 };
 
@@ -635,6 +656,16 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--text")) args.text = true;
         else if (!strcmp(argv[i], "--nets")) args.nets = true;
         else if (!strcmp(argv[i], "--fault") && i + 1 < argc && args.nfaults < 64) args.faults[args.nfaults++] = argv[++i];
+        else if (!strcmp(argv[i], "--la-info") && i + 1 < argc) args.la.info = argv[++i];
+        else if (!strcmp(argv[i], "--la-cycles") && i + 1 < argc) args.la.cycles = argv[++i];
+        else if (!strcmp(argv[i], "--la-record") && i + 1 < argc) args.la.record = argv[++i];
+        else if (!strcmp(argv[i], "--la-compare") && i + 1 < argc) args.la.compare = argv[++i];
+        else if (!strcmp(argv[i], "--la-against") && i + 1 < argc) args.la.against = argv[++i];
+        else if (!strcmp(argv[i], "--la-map") && i + 1 < argc) args.la.map = argv[++i];
+        else if (!strcmp(argv[i], "--la-count") && i + 1 < argc) args.la.count = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--la-pre") && i + 1 < argc) args.la.pre = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--la-post") && i + 1 < argc) args.la.post = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--la-refresh")) args.la.refresh = true;
         else if (argv[i][0] == '-') { fprintf(stderr, "unknown option %s\n", argv[i]); return 1; }
         else {
             /* Cartridges go in before power on, the rest is loaded once the
@@ -667,6 +698,12 @@ int main(int argc, char **argv) {
     }
     if (args.atlas_report || args.atlas_png) return atlas_report(args.atlas_path, args.atlas_png);
     if (args.healthy_sheet) return healthy_cli(args.healthy_sheet);
+    if (args.la.info || args.la.cycles || args.la.record || args.la.compare) {
+        args.la.machine = args.machine;
+        args.la.faults = args.faults;
+        args.la.nfaults = args.nfaults;
+        return la_cli(&args.la);
+    }
     if (args.merge_repairs || args.export_repairs || args.list_repairs || args.reread_repairs || args.repair_gaps) {
         atlas_init_shared();
         diagnose_init(args.atlas_path, args.carts);

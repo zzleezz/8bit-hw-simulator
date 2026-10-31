@@ -8,6 +8,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Logic analyser captures of the Spectrum's edge connector (work in
+  progress, before the real analyser was built): read a `.lac` or CSV file
+  from the LogicAnalyzer program (`--la-info`), record the simulated board
+  as the analyser would (`--la-record`), and compare a capture with the
+  simulated board bus cycle by bus cycle from reset (`--la-compare`). See
+  README, "Logic analyser captures".
 - Diagnose by probing: the bench procedure always starts with reset, then
   the clock, at the CPU (C64 and Spectrum), even after picking the screen.
   Before, it skipped them when the faults left all showed the same there.

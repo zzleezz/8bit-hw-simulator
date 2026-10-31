@@ -360,5 +360,10 @@ int board_pin_drive_state(board_t *b, int pin);
  * nnets each), and returns the steps counted. */
 void board_edges_start(board_t *b);
 uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs);
+/* Call FN(B, CTX) at every bus step of B from now on (a logic analyser
+ * recording the board, see lacap.h), one board at a time; FN NULL stops it.
+ * False if B is having its edges counted. */
+typedef void (*board_step_fn)(board_t *b, void *ctx);
+bool board_step_hook(board_t *b, board_step_fn fn, void *ctx);
 
 #endif

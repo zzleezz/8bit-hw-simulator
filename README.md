@@ -407,6 +407,37 @@ Issue 3B's, the same circuit, and its faults go on the board on the
 bench. `--browse-atlas[=N]` opens the
 window at start, its Nth picture picked.
 
+### Logic analyser captures (Spectrum)
+
+Work in progress, made before the real analyser was built. The analyser
+is HappyLittleDiodes' (Jim's) ZX Spectrum interface, with two of Agustin
+Gimenez Bernad's LogicAnalyzer boards (github.com/gusmanb/logicanalyzer)
+chained as one 48 channel device on the edge connector. Its program saves
+captures as `.lac` or CSV. The simulator reads both, and from the command
+line only for now:
+
+- `--la-info FILE` lists the channels, what each signal does from /RESET
+  going high (low, high or pulsing, as a logic probe), the Z80 bus cycles
+  (fetch, read, write, in, out, interrupt acknowledge, refresh) and every
+  read from 0000-3FFF that isn't what the ROM holds.
+- `--la-record FILE --board issue3b [--fault SPEC]...` records the simulated
+  board the way the analyser would: 28 MHz, triggered on /RESET going high,
+  512 samples before and 32000 after (what the analyser holds with 24
+  channels a board). The `.lac` it writes opens in the LogicAnalyzer
+  program.
+- `--la-compare FILE` compares a capture with the simulated board (or with
+  `--la-against FILE2`) bus cycle by bus cycle from the first fetch at
+  0000, and shows the first cycle that differs:
+  "fetch 0001 A7 / fetch 0001 AF", "the ROM holds AF".
+
+Channels are told apart by their names in the file (`/MREQ`, `MREQ`,
+`nMREQ`, `DIN33-/MREQ`...), else by the channel map: Jim's interface,
+rev 3.2, as read from its schematic and not yet checked on a real one
+(`--la-map FILE` gives another). A capture from reset holds about 1.2 ms:
+the ROM's first 500 or so instructions. That shows the CPU, the ROM, the
+buses and the clock, but not the RAM: the ROM's RAM test only writes the
+top of the upper RAM in that time and reads it back about 0.36 s later.
+
 ## Commodore 64
 
 Chips are boxes named by role:

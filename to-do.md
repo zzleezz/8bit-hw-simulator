@@ -644,26 +644,48 @@ address and data buses and control signals
 (https://www.hackster.io/news/the-zx-spectrum-spills-its-secrets-a9fed4c6d02c).
 So the hardware (5 V levels, channel count, wiring) is solved; our side is
 software: read its captures.
-- [ ] Ask Jim (through the user):
-      - the capture file format (the LogicAnalyzer's own, CSV, sigrok?) and
-        which channel is which signal on his interface board;
-      - how long a capture can be at a useful rate (the Pico's RAM: a few
-        times the Z80's 3.5 MHz clock, how many ms?);
-      - whether it can trigger on /RESET going high (power-on or reset);
-      - whether his interface board is open, and if he'd make a C64
-        adapter (or let us/the user adapt it).
-      - a sample capture or two from a healthy 48K, to start with.
-- [ ] Step 1, readings: from a capture, each signal low / high / pulsing,
-      imported into "Diagnose by probing" as readings ("Import capture").
-      Floating can't be told by a digital input: low/high/pulsing only.
-- [ ] Step 2, a trace from reset: the capture from /RESET released, cut
-      into bus cycles (on /MREQ, /RD, /WR, /M1 for the Z80), compared with
-      the simulated healthy board from reset: the first cycle that differs
-      ("at cycle 412 the CPU read $FD at $FCE2, the ROM holds $F5"). Works
-      on a dead machine with a black screen. Then against the faults: which
-      ones go wrong at that cycle the same way. Needs the simulation's
-      early timing to match a real board: check on a healthy one first
-      (a sample capture from Jim).
+Found 2026-10-31 (sources: liveboxandy/ZX-Spectrum-Logic-Analyser-Interface
+rev 3.2, gusmanb/logicanalyzer v6.0.0.1 source): the interface board is
+passive (pass-through edge connector, J1/J2 for the two analysers, J3 for
+the spare channels 6, 7, 26, a reset button); the gusmanb boards do the 5 V
+level shifting and chain with their own 3-pin cable. Chained, the program
+sees ONE 48 channel device (the first board channels 1-24, the master) and
+saves one .lac. Each board holds about 32K samples at 24 channels. Chained
+boards trigger on a pattern only (no edge trigger), on the master's
+channels 1-16 only: /RESET (ch 8) works; of the address only A0-A3 and
+A12-A15 are in reach. The user is building the kit the week of 2026-11-02
+and will take the captures; Pico model to be agreed with Jim.
+- [x] Groundwork (2026-10-31, branch logic-analyser, rollback tag
+      pre-logic-analyser): src/lacap.c. --la-info, --la-cycles, --la-record,
+      --la-compare, --la-map. Reads .lac (JSON, base64 0/1 bytes per channel)
+      and CSV; writes the same; channels by name, else Jim's map (from the
+      schematic's coordinates, NOT checked). The simulated board recorded at
+      every bus step (28 MHz) through board_step_hook() (as edge counting:
+      no cost to other runs). Z80 bus cycles from /MREQ /IORQ /RD /WR /M1
+      /RFSH, T states from CLK rises. Tested on simulated boards only: CSV
+      and .lac read back the same; healthy 3B = Issue 2 for all 880 cycles;
+      ROM D3 stuck (IC5.15:gnd) and CPU A0 stuck (IC2.30:gnd) found at
+      cycle 1; RAM data faults (IC15, IC6) invisible in the 1.2 ms.
+- [ ] With the real kit: a healthy capture, triggered on /RESET going high
+      (pattern trigger, 1 channel), at 28 MHz or the nearest rate it takes.
+      Check: the channel map (--la-info prints which channel is which),
+      that the bus cycles read as the ROM's (0 wrong ROM reads), and the
+      T states against the simulation (--la-compare prints where timing
+      starts to differ). The .lac the program saves: check the field names
+      read_lac() expects (Settings, Frequency, PreTriggerSamples,
+      CaptureChannels: ChannelNumber, ChannelName, Samples).
+- [ ] Open the simulated .lac in the LogicAnalyzer program (does it load?).
+- [ ] Step 1, readings: each signal low / high / pulsing (--la-info has
+      them) imported into "Diagnose by probing" ("Import capture").
+      Floating can't be told by a digital input.
+- [ ] Step 2b, against the faults: which faults go wrong at the first
+      differing cycle the same way. Simulate the likely ones for the
+      capture's few ms on demand (a fault run is well under a second)
+      rather than adding bus traces to the atlas (a rebuild: hours).
+- [ ] RAM: a capture from reset can't see it (the ROM reads the RAM back
+      about 0.36 s on). Wire /M1 (or /MREQ) to a spare channel (6 or 7,
+      J3) for a qualified pattern trigger on A0-A3, A12-A15 later in the
+      boot, and have --la-record trigger the same way.
 - [ ] C64 version: the same two analyser boards on an adapter for the
       C64's 44-pin expansion port (A0-A15, D0-D7, R/W, PHI2, BA, /DMA,
       /IRQ, /NMI, /RESET, /IO1, /IO2, /ROML, /ROMH, /GAME, /EXROM, dot
