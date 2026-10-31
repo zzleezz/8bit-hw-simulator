@@ -100,6 +100,7 @@
 #include "zx48.h"
 #include "png.h"
 #include "diagnose.h"
+#include "healthy.h"
 #include "probe.h"
 #include "ui.h"
 #include "win_perf.h"
@@ -154,7 +155,8 @@ static struct {
     const char *match, *match_debug, *match_dir, *diagnose;
     const char *diagnose_text, *add_repair, *chips, *notes, *owner, *repairs;
     const char *merge_repairs, *export_repairs;
-    bool list_repairs, export_all, reread_repairs;
+    bool list_repairs, export_all, reread_repairs, repair_gaps;
+    const char *healthy_sheet;  /* --healthy-sheet DIR */
     int certainty;
     bool browse_atlas;
     int browse_pick;
@@ -585,6 +587,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--all")) args.export_all = true;
         else if (!strcmp(argv[i], "--list-repairs")) args.list_repairs = true;
         else if (!strcmp(argv[i], "--reread-repairs")) args.reread_repairs = true;
+        else if (!strcmp(argv[i], "--repair-gaps")) args.repair_gaps = true;
+        else if (!strcmp(argv[i], "--healthy-sheet") && i + 1 < argc) args.healthy_sheet = argv[++i];
         else if (!strcmp(argv[i], "--certainty") && i + 1 < argc) args.certainty = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ui-stats")) ui_print_stats(true);
         else if (!strcmp(argv[i], "--theme") && i + 1 < argc) {
@@ -662,12 +666,13 @@ int main(int argc, char **argv) {
         return args.match_test ? atlas_match_test(&mo, args.match_test, args.match_dir, args.seed) : atlas_match(&mo);
     }
     if (args.atlas_report || args.atlas_png) return atlas_report(args.atlas_path, args.atlas_png);
-    if (args.merge_repairs || args.export_repairs || args.list_repairs || args.reread_repairs) {
+    if (args.healthy_sheet) return healthy_cli(args.healthy_sheet);
+    if (args.merge_repairs || args.export_repairs || args.list_repairs || args.reread_repairs || args.repair_gaps) {
         atlas_init_shared();
         diagnose_init(args.atlas_path, args.carts);
         diagnose_repairs_file(args.repairs);
         return diagnose_cli_records(args.list_repairs ? "" : NULL, args.merge_repairs, args.export_repairs,
-                                    args.export_all, args.reread_repairs);
+                                    args.export_all, args.reread_repairs, args.repair_gaps);
     }
     if (args.diagnose_text || args.add_repair) {
         if (args.add_repair && !args.chips) { fprintf(stderr, "--add-repair needs --chips REF,REF...\n"); return 1; }
@@ -687,6 +692,9 @@ int main(int argc, char **argv) {
         }
     if (args.load_state && args.headless_frames > 0) {
         char err[256];
+        if (!board_state_file_signed(args.load_state))
+            fprintf(stderr, "warning: %s wasn't saved on this PC (or was changed since): loaded as asked, "
+                    "but only load files you trust\n", args.load_state);
         board_t *loaded = board_load_file(args.load_state, NULL, 0, err, sizeof(err));
         if (!loaded) {
             fprintf(stderr, "%s: %s\n", args.load_state, err);

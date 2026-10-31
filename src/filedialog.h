@@ -25,6 +25,9 @@ int filedialog_state(bool save, char *path, int len);
 /* Ask for a repair records file (repairs.h): one to export to (.hwrepairs
  * added if there is no extension) or to merge from. */
 int filedialog_repairs(bool save, char *path, int len);
+/* Open a file with the program the system has for it (a page in the
+ * browser). False if it couldn't. */
+bool filedialog_open_file(const char *path);
 /* The folder of the program, '/' separated, no slash at the end. */
 bool filedialog_exe_dir(char *dir, int len);
 

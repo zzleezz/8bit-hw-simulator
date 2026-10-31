@@ -18,6 +18,7 @@
 #include "thumbtex.h"
 #include "probe.h"
 #include "filedialog.h"
+#include "healthy.h"
 #include "inspect.h"
 #include "browser.h"
 #include "zx48.h"
@@ -109,6 +110,12 @@ static struct {
     bool want_dump;             /* F12: the interface state into ui-debug.log */
     bool want_esc;              /* Esc: close the window on top, in the next frame */
     struct nk_rect help_bounds;
+    /* A save file not saved on this PC (board_state_file_signed()): the
+     * question whether to load it, the one the user said yes to, and that
+     * yes to act on after the windows are drawn. */
+    char trust_ask[4096], trusted[4096];
+    bool trust_open, trust_load;
+    struct nk_rect trust_bounds;
     /* The font turned a quarter turn, for vertical labels: its glyphs, its
      * picture and the size of the unturned one. */
     struct nk_font *vfont;
@@ -1207,6 +1214,7 @@ static void board_input(struct nk_context *ctx, struct nk_rect area) {
     if (probe_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
     if (atlas_browse_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
     if (U.help_open && nk_input_is_mouse_hovering_rect(in, U.help_bounds)) inside = false;
+    if (U.trust_open && nk_input_is_mouse_hovering_rect(in, U.trust_bounds)) inside = false;
     U.hover_pin = U.hover_part = -1;
     if (U.menu_open) return;
     if (inside) {
@@ -1499,19 +1507,54 @@ static void fault_menu(struct nk_context *ctx) {
         U.menu_open = false;
 }
 
+/* What the healthy board shows on PIN's net (healthy.h), for the pin's
+ * tooltip: "" for a net that isn't simulated. */
+static void healthy_note(int pin, char *out, int len) {
+    int net = S()->pins[pin].net;
+    out[0] = 0;
+    if (net < 0 || !board_net_simulated(U.b, net) || board_net_supply(U.b, net) != RAIL_NONE) return;
+    const healthy_t *h = healthy_get(U.b);
+    if (!h) { snprintf(out, (size_t)len, "   healthy board: being measured..."); return; }
+    char t[160];
+    healthy_text(h, U.b, net, t, sizeof(t));
+    snprintf(out, (size_t)len, "   healthy board: %s", t);
+}
+
+/* The healthy board's sheet of the board on the bench, written to the
+ * temporary folder and opened in the browser (to read, or print). */
+static void healthy_sheet(void) {
+    const healthy_t *h = healthy_get(U.b);
+    if (!h) {
+        snprintf(U.diag_status, sizeof(U.diag_status), "Measuring the healthy board (about 20 s): click again then");
+        return;
+    }
+    const char *dir = getenv("TEMP");
+    if (!dir) dir = getenv("TMPDIR");
+    if (!dir) dir = "/tmp";
+    char path[1200], err[1300];
+    snprintf(path, sizeof(path), "%s/%s-healthy.html", dir, M()->id);
+    if (!healthy_write_html(U.b, h, path, err, sizeof(err)))
+        snprintf(U.diag_status, sizeof(U.diag_status), "%.250s", err);
+    else if (!filedialog_open_file(path))
+        snprintf(U.diag_status, sizeof(U.diag_status), "Sheet written to %.240s", path);
+    else snprintf(U.diag_status, sizeof(U.diag_status), "The healthy board's sheet is open in the browser");
+}
+
 /* The tooltip next to the mouse on the board: what the pin or part is. */
 static void board_tooltip(struct nk_context *ctx) {
     if (U.menu_open || U.dragging) return;
-    char tip[512];
+    char tip[700];
     if (U.hover_pin >= 0) {
         char pd[128];
         pin_desc(U.b, U.hover_pin, pd, sizeof(pd));
         int net = S()->pins[U.hover_pin].net;
         bool sim = board_net_simulated(U.b, net);
         int f = g_hide_faults ? PF_OK : S()->pins[U.hover_pin].fault;
-        snprintf(tip, sizeof(tip), "%s   net %s: %s%s%s", pd, pin_net_name(U.b, U.hover_pin),
+        char healthy[200];
+        healthy_note(U.hover_pin, healthy, sizeof(healthy));
+        snprintf(tip, sizeof(tip), "%s   net %s: %s%s%s%s", pd, pin_net_name(U.b, U.hover_pin),
                  !sim ? "not simulated" : net >= 0 ? state_name(U.net_state[net]) : "-",
-                 f != PF_OK ? "   leg " : "", f != PF_OK ? pin_fault_name(f) : "");
+                 f != PF_OK ? "   leg " : "", f != PF_OK ? pin_fault_name(f) : "", healthy);
     } else if (U.hover_part >= 0) {
         const part_t *hp = &S()->parts[U.hover_part];
         bool shown = !g_hide_faults;
@@ -1839,6 +1882,13 @@ static const char *base_name(const char *path) { return board_basename(path); }
  * locked), its notes the notes. */
 static bool load_state_file(const char *path) {
     char err[256], notes[sizeof(U.notes)];
+    if (strcmp(path, U.trusted) && !board_state_file_signed(path)) {
+        snprintf(U.trust_ask, sizeof(U.trust_ask), "%s", path);
+        U.trust_open = true;
+        snprintf(U.status, sizeof(U.status), "%s: not saved on this PC, load it only if you trust it",
+                 base_name(path));
+        return false;
+    }
     board_t *nb = board_load_file(path, notes, sizeof(notes), err, sizeof(err));
     if (!nb) {
         snprintf(U.status, sizeof(U.status), "%s: %s", base_name(path), err);
@@ -2151,6 +2201,56 @@ static void help_color(struct nk_context *ctx, struct nk_color c, const char *tx
     nk_layout_row_end(ctx);
 }
 
+/* A row tall enough for TEXT wrapped in WIDTH. */
+static float wrapped_height(struct nk_context *ctx, const char *text, float width) {
+    float fh = ctx->style.font->height;
+    int lines = (int)(text_width(ctx, text) / fmaxf(width - 12, 40)) + 1;
+    return fmaxf(26, lines * (fh + 3) + 6);
+}
+
+/* The question for a save file not saved on this PC. */
+static void trust_window(struct nk_context *ctx, float bw, float h) {
+    static bool shown;
+    if (!U.trust_open) { shown = false; return; }
+    float ww = 560, wh = 190;
+    struct nk_rect r = nk_rect(fmaxf((bw - ww) / 2, 0), fmaxf((h - wh) / 3, 0), ww, wh);
+    if (!shown) {
+        nk_window_show(ctx, "LoadUnsigned", NK_SHOWN);
+        nk_window_set_bounds(ctx, "LoadUnsigned", r);
+        shown = true;
+    }
+    nk_window_set_focus(ctx, "LoadUnsigned");     /* above the file browser */
+    if (!nk_begin_titled(ctx, "LoadUnsigned", "Load this save file?", r,
+                         NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_TITLE | NK_WINDOW_CLOSABLE)) {
+        U.trust_open = false;
+        nk_end(ctx);
+        return;
+    }
+    U.trust_bounds = nk_window_get_bounds(ctx);
+    float cw = nk_window_get_content_region(ctx).w - 10;
+    char line[600];
+    snprintf(line, sizeof(line), "%.300s wasn't saved on this PC, or was changed since. It may be someone "
+             "else's, or saved by an earlier version of the simulator.", base_name(U.trust_ask));
+    nk_layout_row_dynamic(ctx, wrapped_height(ctx, line, cw), 1);
+    nk_label_wrap(ctx, line);
+    const char *warn = "A save file is the machine's memory as it was. One altered on purpose could make the "
+                       "simulator read or write where it shouldn't. Load it only if you trust where it came "
+                       "from. Saving it again here makes it one of yours.";
+    nk_layout_row_dynamic(ctx, wrapped_height(ctx, warn, cw), 1);
+    nk_label_colored_wrap(ctx, warn, COL_DIMTEXT);
+    nk_layout_row_static(ctx, 28, 160, 2);
+    if (nk_button_label(ctx, "Load it anyway")) {
+        snprintf(U.trusted, sizeof(U.trusted), "%s", U.trust_ask);
+        U.trust_open = false;
+        U.trust_load = true;
+    }
+    if (nk_button_label(ctx, "Don't load it")) {
+        U.trust_open = false;
+        snprintf(U.status, sizeof(U.status), "%s not loaded", base_name(U.trust_ask));
+    }
+    nk_end(ctx);
+}
+
 static void help_window(struct nk_context *ctx, float bw, float h) {
     static bool shown;
     if (!U.help_open) { shown = false; return; }
@@ -2174,7 +2274,8 @@ static void help_window(struct nk_context *ctx, float bw, float h) {
         help_line(ctx, "Mouse wheel: zoom around the pointer.  Drag: move the board.");
         help_line(ctx, "Double-click the bare board: fit the whole board in the view again.");
         help_line(ctx, "Zoom in on a chip for its pin numbers, then its gates or pin names.");
-        help_line(ctx, "Point at a pad or a part: what it is, its net and level (under the controls).");
+        help_line(ctx, "Point at a pad or a part: what it is, its net and level (under the controls),");
+        help_line(ctx, "  and what a healthy board shows on that pin. \"Healthy board sheet\" prints them all.");
         help_head(ctx, "Breaking things");
         help_line(ctx, "Click a pad: it goes on the oscilloscope, and a menu lets you make it");
         help_line(ctx, "  float (a lifted leg), short it to GND or +5V, or bridge it to a neighbor.");
@@ -2461,11 +2562,15 @@ static void controls_window(struct nk_context *ctx, float x, float y, float h) {
                 nk_layout_row_dynamic(ctx, 26, 1);
                 if (nk_button_label(ctx, "Show the last diagnosis")) diagnose_show();
             }
-            nk_layout_row_dynamic(ctx, 26, 1);
+            nk_layout_row_dynamic(ctx, 26, 2);
             if (nk_widget_is_hovered(ctx))
                 nk_tooltip(ctx, "Repairs of real machines you (or others) recorded: the screenshot and the chips "
                                 "that were faulty. Look, leave out, edit, delete, merge, export");
             if (nk_button_label(ctx, "Repair records...")) diagnose_records_open(bench_machine());
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "What a logic probe shows on every chip pin of this board working normally, and how "
+                                "fast: a page to read or print, opened in the browser");
+            if (nk_button_label(ctx, "Healthy board sheet")) healthy_sheet();
             nk_layout_row_dynamic(ctx, 20, 1);
             nk_label_colored(ctx, U.diag_status[0] ? U.diag_status : "or drop a .png, .jpg or .bmp screenshot on the window, or Ctrl+V",
                              NK_TEXT_LEFT, U.diag_status[0] ? COL_FAULT : COL_DIMTEXT);
@@ -2824,6 +2929,7 @@ void ui_frame(void) {
         probe_open();
     }
     help_window(ctx, bw, H);
+    trust_window(ctx, bw, H);
     probe_action_t pa;
     probe_window(ctx, nk_rect(0, 0, bw, H), U.b, bench_machine(), &pa);
     if (pa.show_pin >= 0) show_pin(pa.show_pin);
@@ -2840,6 +2946,10 @@ void ui_frame(void) {
             load_prg(path, U.pending_run);
         }
     }
+    if (U.trust_load) {         /* "Load it anyway" */
+        U.trust_load = false;
+        if (load_state_file(U.trusted)) browser_close();
+    }
     if (da.apply) apply_diagnosis(da.machine, da.spec);     /* may switch machines too */
     if (ab.apply) {
         apply_diagnosis(ab.machine, ab.spec);
@@ -2851,7 +2961,7 @@ void ui_frame(void) {
         const char *top = NULL;
         for (struct nk_window *w = ctx->begin; w; w = w->next) {
             static const char *const closable[] = { "Menu", "Help", "Inspector", "Diagnose", "AtlasBrowse", "Probe",
-                                                    "RecordRepair", "RepairRecords" };
+                                                    "RecordRepair", "RepairRecords", "LoadUnsigned" };
             if (w->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED)) continue;
             for (size_t i = 0; i < sizeof(closable) / sizeof(closable[0]); i++)
                 if (!strcmp(w->name_string, closable[i])) top = closable[i];
@@ -2864,6 +2974,7 @@ void ui_frame(void) {
         else if (!strcmp(top, "AtlasBrowse")) atlas_browse_close();
         else if (!strcmp(top, "RecordRepair")) diagnose_record_cancel();
         else if (!strcmp(top, "RepairRecords")) diagnose_records_close();
+        else if (!strcmp(top, "LoadUnsigned")) U.trust_open = false;
         else probe_close();
     }
     if (U.want_dump) {

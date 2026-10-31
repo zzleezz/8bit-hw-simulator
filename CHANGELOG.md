@@ -64,6 +64,21 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   real dead Z80 used to come out as ULA faults, and now comes first.
   Pictures of a bad ULA, whose bars run down the screen unbroken, are not
   affected.
+- A healthy board sheet: pointing at a pin also says what a working board
+  shows there ("healthy board: PULSING, 705 kHz, high 83%"), and "Healthy
+  board sheet" (Diagnose section) opens every pin of every chip and
+  connector of the board on the bench as a page to read or print: its
+  net, what a logic probe shows, and for a pulsing pin how fast and how
+  much of the time high. `--healthy-sheet DIR` writes the page of every
+  board.
+- Save files are signed with a key made on this PC. A file without this
+  PC's signature (someone else's, one saved by an earlier version, or one
+  changed since) loads only after a question, since one altered on
+  purpose could make the simulator read or write where it shouldn't.
+- Repair records: "Gaps in the simulator" diagnoses every record's
+  screenshot again and lists the repairs whose faulty chips none of the
+  best matches names: faults the simulator is missing. `--repair-gaps`
+  prints the same.
 
 ## V1.1 (2026-10-30)
 

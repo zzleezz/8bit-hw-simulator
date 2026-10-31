@@ -69,7 +69,16 @@ static struct {
     bool rec_noshot;            /* ... recorded without a screenshot */
     char chip[16];              /* the records window shows only the records of this chip... */
     int chip_family;            /* ... on boards of this family */
+    /* Gaps in the simulator (find_gaps()): per record, how the atlas does
+     * on its screenshot; checked when asked, forgotten when the records
+     * change. */
+    struct gap { uint8_t state; int rank; float score, best; char best_label[256]; } *gaps;
+    int ngaps;
 } D;
+
+/* struct gap.state: its chips are causes of the best match (or one as
+ * good), of a lower one, of none of the matches; no screenshot; not read. */
+enum { GAP_FOUND, GAP_LOWER, GAP_MISSING, GAP_NOSHOT, GAP_FAILED };
 
 void diagnose_init(const char *atlas_path, const char *carts) {
     snprintf(D.atlas, sizeof(D.atlas), "%s", atlas_path ? atlas_path : "fault_atlas.bin");
@@ -555,6 +564,9 @@ static void make_list_textures(void) {
 
 /* The records changed: the list's pictures, and the diagnosis matched again. */
 static void records_changed(void) {
+    free(D.gaps);
+    D.gaps = NULL;
+    D.ngaps = 0;
     D.list_dirty = true;
     D.rec_serial++;
     if (D.ok && D.path[0]) run();
@@ -711,6 +723,121 @@ static void datasets_part(struct nk_context *ctx, float cw) {
     nk_tree_pop(ctx);
 }
 
+/* Does a cause of the atlas name a chip of the record? A spec names its
+ * parts before the '.' or ':' ("U13.11-12:short", "IC2:removed"), several
+ * space separated; the ULA as a suspect (inside, not at its pins) names
+ * the chip that is the ULA. */
+static bool cause_names_record(const atlas_cause_t *c, const repair_t *rp) {
+    for (int i = 0; i < rp->nchips; i++) {
+        if (c->suspect) {
+            if (!strncmp(rp->chips[i].what, "ULA", 3)) return true;
+            continue;
+        }
+        size_t n = strlen(rp->chips[i].ref);
+        for (const char *s = c->spec; *s; ) {
+            size_t len = strcspn(s, " ");
+            if (strcspn(s, ".: ") == n && !strncmp(s, rp->chips[i].ref, n)) return true;
+            s += len + (s[len] == ' ');
+        }
+    }
+    return false;
+}
+
+/* Gaps in the simulator: each record's screenshot matched against the
+ * atlas as a diagnosis would, and where the chips it found faulty come
+ * among the matches' causes. A confirmed repair whose chips no match
+ * names is a fault the simulator doesn't have (or doesn't show as the
+ * real board did). */
+static void find_gaps(void) {
+    char atlas[2100], carts[2100];
+    beside_exe(D.atlas, atlas, sizeof(atlas));
+    beside_exe(D.carts, carts, sizeof(carts));
+    free(D.gaps);
+    D.ngaps = D.rep.n;
+    D.gaps = calloc((size_t)D.rep.n + 1, sizeof(*D.gaps));
+    for (int i = 0; i < D.rep.n; i++) {
+        const repair_t *rp = &D.rep.r[i];
+        struct gap *g = &D.gaps[i];
+        int mi = machine_index(rp->machine);
+        g->rank = -1;
+        if (!rp->shot) { g->state = GAP_NOSHOT; continue; }
+        g->state = GAP_FAILED;
+        if (!repair_live(rp) || mi < 0) continue;
+        atlas_match_opts_t o = { .path = atlas, .image = rp->shot_name, .image_data = rp->shot,
+                                 .image_len = (int)rp->shot_len, .top = ATLAS_MAX_GROUPS, .causes = -1,
+                                 .machine = mi, .cart = 0, .carts = carts };
+        atlas_result_t r;
+        bool ok = atlas_match_run(&o, &r);
+        if ((!ok || !r.ngroups) && atlas_family(mi) != mi) {     /* as run() does */
+            atlas_result_free(&r);
+            o.machine = atlas_family(mi);
+            ok = atlas_match_run(&o, &r);
+        }
+        if (ok && r.ngroups) {
+            g->best = r.groups[0].score;
+            snprintf(g->best_label, sizeof(g->best_label), "%s", r.groups[0].label);
+            for (int k = 0; k < r.ngroups && g->rank < 0; k++)
+                for (int c = 0; c < r.groups[k].ncauses; c++)
+                    if (cause_names_record(&r.groups[k].causes[c], rp)) {
+                        g->rank = k;
+                        g->score = r.groups[k].score;
+                        break;
+                    }
+            g->state = g->rank < 0 ? GAP_MISSING : g->score >= g->best - BEST_MARGIN ? GAP_FOUND : GAP_LOWER;
+        }
+        atlas_result_free(&r);
+    }
+}
+
+/* A record's gap in words. */
+static void gap_text(int i, char *out, int len) {
+    const repair_t *rp = &D.rep.r[i];
+    const struct gap *g = &D.gaps[i];
+    int mi = machine_index(rp->machine);
+    char chips[500];
+    chips_text(rp, chips, sizeof(chips));
+    int n = snprintf(out, (size_t)len, "%s: %s: ", mi >= 0 ? atlas_machine(mi)->board_name : rp->machine, chips);
+    if (n >= len) return;
+    if (g->state == GAP_MISSING)
+        snprintf(out + n, (size_t)(len - n), "none of the %d best matches has these chips among its causes. The "
+                 "best is %.0f%% \"%.250s\".", ATLAS_MAX_GROUPS, 100 * g->best, g->best_label);
+    else if (g->state == GAP_LOWER)
+        snprintf(out + n, (size_t)(len - n), "match #%d (%.0f%%) has them; the best (%.0f%%) is \"%.250s\".",
+                 g->rank + 1, 100 * g->score, 100 * g->best, g->best_label);
+    else if (g->state == GAP_FOUND)
+        snprintf(out + n, (size_t)(len - n), "the best match (%.0f%%) has them.", 100 * g->score);
+    else if (g->state == GAP_NOSHOT) snprintf(out + n, (size_t)(len - n), "no screenshot, nothing to match.");
+    else snprintf(out + n, (size_t)(len - n), "its screenshot couldn't be matched.");
+}
+
+/* The gaps, in the records window. */
+static void gaps_part(struct nk_context *ctx, float cw) {
+    if (!nk_tree_push(ctx, NK_TREE_TAB, "Gaps in the simulator: repairs the atlas can't explain", NK_MINIMIZED)) return;
+    wrapped_label(ctx, "Each record's screenshot is diagnosed as a new one would be. A repair whose faulty chips "
+                       "none of the best matches names is a fault the simulator is missing, or shows otherwise "
+                       "than the real board did.", cw - 30, COL_DIMTEXT);
+    nk_layout_row_static(ctx, 28, 300, 1);
+    if (nk_button_label(ctx, D.gaps ? "Check them again" : "Check the records (takes a moment)")) find_gaps();
+    if (D.gaps) {
+        int count[GAP_FAILED + 1] = { 0 };
+        for (int i = 0; i < D.ngaps; i++)
+            if (repair_live(&D.rep.r[i])) count[D.gaps[i].state]++;
+        char line[900];
+        snprintf(line, sizeof(line), "%d not explained, %d by a lower match, %d by the best; %d without a "
+                 "screenshot%s.", count[GAP_MISSING], count[GAP_LOWER], count[GAP_FOUND], count[GAP_NOSHOT],
+                 count[GAP_FAILED] ? ", some couldn't be read" : "");
+        wrapped_label(ctx, line, cw - 30, COL_TEXT);
+        /* The gaps first, then the ones found lower down. */
+        for (int pass = 0; pass < 2; pass++)
+            for (int i = 0; i < D.ngaps; i++) {
+                if (!repair_live(&D.rep.r[i]) || D.gaps[i].state != (pass ? GAP_LOWER : GAP_MISSING)) continue;
+                gap_text(i, line, sizeof(line));
+                wrapped_label(ctx, line, cw - 30, pass ? COL_PULSE : COL_FAULT);
+            }
+    }
+    nk_tree_pop(ctx);
+}
+
 /* Which chips the records found faulty most, per kind of machine. */
 static void statistics_part(struct nk_context *ctx, float cw) {
     if (!nk_tree_push(ctx, NK_TREE_TAB, "Statistics: the chips found faulty most", NK_MINIMIZED)) return;
@@ -832,6 +959,7 @@ static void records_window(struct nk_context *ctx, struct nk_rect area, diagnose
     if (live) {
         datasets_part(ctx, cw);
         statistics_part(ctx, cw);
+        gaps_part(ctx, cw);
     }
     if (!live) {
         nk_layout_row_dynamic(ctx, 40, 1);
@@ -1257,7 +1385,8 @@ int diagnose_cli(const char *picture, int machine, const char *chips, int certai
 }
 
 /* Without a window: the records listed, merged into, exported from. */
-int diagnose_cli_records(const char *list, const char *merge, const char *export_to, bool all, bool reread) {
+int diagnose_cli_records(const char *list, const char *merge, const char *export_to, bool all, bool reread,
+                         bool gaps) {
     D.headless = true;
     load_repairs();
     if (reread) printf("%d records read again from their screenshots\n", reread_records(true));
@@ -1293,10 +1422,24 @@ int diagnose_cli_records(const char *list, const char *merge, const char *export
                    repairs_certainty_name(rp->certainty), who[0] ? who : "(no name)", rp->notes);
         }
     }
+    if (gaps) {
+        static const char *const state[] = { "explained", "lower", "GAP", "no shot", "unread" };
+        find_gaps();
+        printf("Gaps in the simulator (each record's screenshot against the atlas):\n");
+        for (int i = 0; i < D.ngaps; i++) {
+            if (!repair_live(&D.rep.r[i])) continue;
+            char line[900];
+            gap_text(i, line, sizeof(line));
+            printf("  %-9s %016llx/%u %s\n", state[D.gaps[i].state], (unsigned long long)D.rep.r[i].dataset,
+                   D.rep.r[i].number, line);
+        }
+    }
     return 0;
 }
 
 void diagnose_shutdown(void) {
+    free(D.gaps);
+    D.gaps = NULL;
     free_list_textures();
     free_textures();
     atlas_result_free(&D.r);

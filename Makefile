@@ -8,7 +8,7 @@ OPT     ?= -O3 -flto
 CFLAGS  := $(OPT) -g -Wall -Wextra -Wno-unused-parameter -Isrc -Ichips -Ithird_party -DSOKOL_GLCORE
 
 SIM_SRC = src/sim.c src/parts.c src/board.c src/c64.c src/cart.c src/harness.c src/c64_board_data.c src/c64c_board_data.c src/zx48.c src/ula.c src/zx48_board_data.c src/zx48i2_board_data.c src/zx48i1_board_data.c src/zx48i4b_board_data.c src/zx48i6a_board_data.c src/png.c src/chips_impl.c
-APP_SRC = src/main.c src/ui.c src/inspect.c src/browser.c src/diagnose.c src/repairs.c src/icon_data.c src/atlas_browse.c src/thumbtex.c src/probe.c src/probe_db.c src/filedialog.c src/atlas.c src/atlas_match.c src/stb_image_impl.c
+APP_SRC = src/main.c src/ui.c src/inspect.c src/browser.c src/diagnose.c src/repairs.c src/icon_data.c src/atlas_browse.c src/thumbtex.c src/probe.c src/probe_db.c src/filedialog.c src/atlas.c src/atlas_match.c src/stb_image_impl.c src/healthy.c
 
 EXE =
 ifeq ($(OS),Windows_NT)

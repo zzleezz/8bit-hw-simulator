@@ -229,6 +229,11 @@ void board_free_state(board_state_t *st);
 bool board_save_file(board_t *b, const char *path, const char *notes, char *err, int errlen);
 board_t *board_load_file(const char *path, char *notes, int noteslen, char *err, int errlen);
 bool board_is_state_file(const char *path);
+/* Was the save file at PATH saved on this PC, unchanged since? Every
+ * file saved is signed with a key of this PC; a file that isn't (someone
+ * else's, an earlier version's) could be doctored to make the program
+ * read or write where it shouldn't: load it only if the user says so. */
+bool board_state_file_signed(const char *path);
 /* The file's name without its folders (either slash). */
 const char *board_basename(const char *path);
 /* For machine_t.file_kind: what a save file is (NULL if the path isn't
@@ -349,5 +354,11 @@ int board_net_state(board_t *b, int net);
 void board_stats_reset(board_t *b);
 /* What a pin itself drove (NET_HIGH/LOW/PULSING, or NET_FLOATING if off). */
 int board_pin_drive_state(board_t *b, int pin);
+/* How fast: every net of B looked at in every bus step from now on (slow:
+ * for measuring, see healthy.h), one board at a time. Stopping gives each
+ * net's rising edges and the steps it was driven high (RISES, HIGHS: B's
+ * nnets each), and returns the steps counted. */
+void board_edges_start(board_t *b);
+uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs);
 
 #endif

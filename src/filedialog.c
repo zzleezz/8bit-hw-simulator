@@ -317,3 +317,26 @@ bool filedialog_exe_dir(char *dir, int len) {
     if (s) *s = 0;
     return true;
 }
+
+bool filedialog_open_file(const char *path) {
+#ifdef _WIN32
+    wchar_t w[MAX_PATH * 4];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, sizeof(w) / sizeof(w[0]))) return false;
+    return (INT_PTR)ShellExecuteW(NULL, L"open", w, NULL, NULL, SW_SHOWNORMAL) > 32;
+#else
+#ifdef __APPLE__
+    const char *opener = "open";
+#else
+    const char *opener = "xdg-open";
+#endif
+    /* The path in single quotes, a quote in it as '\'' */
+    char cmd[8192];
+    int n = snprintf(cmd, sizeof(cmd), "%s '", opener);
+    for (const char *c = path; *c && n < (int)sizeof(cmd) - 32; c++) {
+        if (*c == '\'') n += snprintf(cmd + n, sizeof(cmd) - (size_t)n, "'\\''");
+        else cmd[n++] = *c;
+    }
+    snprintf(cmd + n, sizeof(cmd) - (size_t)n, "' >/dev/null 2>&1 &");
+    return system(cmd) == 0;
+#endif
+}

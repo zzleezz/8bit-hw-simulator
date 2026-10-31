@@ -96,7 +96,7 @@ rem  c64_board_data.c / zx48_board_data.c are generated netlist tables (see
 rem  their own "do not edit" header) with no hot functions: left out of
 rem  sim_unity.c, compiled separately as before.
 set "DATA_SRC=c64_board_data c64c_board_data zx48_board_data zx48i2_board_data zx48i1_board_data zx48i4b_board_data zx48i6a_board_data"
-set "APP_SRC=main ui inspect browser diagnose repairs icon_data atlas_browse thumbtex probe probe_db filedialog atlas atlas_match stb_image_impl"
+set "APP_SRC=main ui inspect browser diagnose repairs icon_data atlas_browse thumbtex probe probe_db filedialog atlas atlas_match stb_image_impl healthy"
 
 if not exist "%SRCDIR%\build" mkdir "%SRCDIR%\build"
 

@@ -107,11 +107,21 @@ Spectrums, roughly in order of value. Tick items off as they're done.
       down by probing..." and an open probing window already did).
 
 ## 2. A reference sheet for a known-good board
-- [ ] Record every IC pin's healthy state (high, low or pulsing, plus roughly
+- [x] Record every IC pin's healthy state (high, low or pulsing, plus roughly
       how fast) for both machines. (The atlas now has the healthy board's
       readings: the probing window already shows them per pin.)
-- [ ] Browse it in the app, next to the pin under the mouse.
-- [ ] Export it as a sheet you can print.
+      Done 2026-10-31 (healthy.c): measured on demand, frames 250-300 as
+      the atlas's PINS, rising edges and share high over the last 10
+      frames (board_edges_start(): every net at every bus step, one board
+      at a time, outside board_t so save files keep their layout). 15-23 s
+      a board; the simulator ~1% slower for the extra compare per step.
+      Analog pins (the ULA's OSC floats, U/V/Y read LOW) show the model,
+      not a probe: said on the page.
+- [x] Browse it in the app, next to the pin under the mouse (the
+      tooltip: "healthy board: ...", measured in the background the
+      first time).
+- [x] Export it as a sheet you can print ("Healthy board sheet": an HTML
+      page opened in the browser; --healthy-sheet DIR for every board).
 
 ## 3. The faults that actually kill these machines (done, except timing)
 Built and tested 2026-10-26: the 31 old fault pictures are identical;
@@ -182,12 +192,17 @@ near-healthy screens (a few garbage cells) are close neighbours.
       earlier builds, and doctored files (a function pointer moved, an
       empty word aimed into the program: refused; a state word changed:
       loads).
-- [ ] Left of it: a file's state words are trusted as values, and some are
+- [x] Left of it: a file's state words are trusted as values, and some are
       indices (a pin, a part, a cell) used without a bounds check: a
       doctored one could read or write outside an array. Harder to use
       than a function pointer (no address to aim at), but not ruled out.
       Fix: check the indices a loaded machine uses, or sign files saved
       on this PC and warn before loading one that isn't.
+      Done 2026-10-31, signing: HMAC-SHA-256 (checked against Python's)
+      appended to every file saved, key in %APPDATA%/c64-hw-sim/save.key
+      (made on the first save). A file without it asks "Load it anyway"
+      (the window LoadUnsigned); --load-state warns and loads. The index
+      checks themselves aren't done: a trusted file is still trusted.
 - [ ] More board revisions: other C64 boards (250407, 250425, 250466, C64C)
       and Spectrum issues 2–6. This is a lot of work per board.
       C64 KiCad sources found on GitHub (2026-10-29):
@@ -548,8 +563,13 @@ Best done after item 6, which can then show them too.
 - [x] Failure statistics: which chips fail most, per machine (the records
       window), and they feed the probing ranking. Still to do: with which
       symptoms.
-- [ ] Gaps in the simulator: confirmed repairs that match nothing in the
+- [x] Gaps in the simulator: confirmed repairs that match nothing in the
       atlas, listed as faults the catalog is missing.
+      Done 2026-10-31: "Gaps in the simulator" in the records window,
+      --repair-gaps: each record's screenshot matched (8 groups, all
+      causes); a record whose chips no group's causes name is a gap, one
+      named only below the best is listed next. The one real record
+      (Issue 2, IC1 ULA): explained by the best match.
 - [x] File format: screenshots inside, in the atlas's chunk format (one
       file holds several datasets; export writes one's own) (the code exists, and survives a damaged file).
 - [ ] Later: a shared place for datasets (a GitHub repo or forum thread);

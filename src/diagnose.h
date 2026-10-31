@@ -60,9 +60,11 @@ bool diagnose_records_bounds(struct nk_rect *r);
  * from (1), or exported to (2 one's own, 3 all). */
 void diagnose_records_file(int what, const char *path);
 /* Without a window (--list-repairs, --merge-repairs, --export-repairs,
- * --reread-repairs: every stored screenshot read again):
+ * --reread-repairs: every stored screenshot read again, --repair-gaps:
+ * the records the atlas can't explain, see "Gaps in the simulator"):
  * 0, or 1 if it failed. */
-int diagnose_cli_records(const char *list, const char *merge, const char *export_to, bool all, bool reread);
+int diagnose_cli_records(const char *list, const char *merge, const char *export_to, bool all, bool reread,
+                         bool gaps);
 /* What the repair records say of each part of B (a MACHINE board): a
  * factor in BOOST (B's nparts), 1 for none. A chip found faulty on real
  * boards of the family counts a little, more for each record; one in a

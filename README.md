@@ -147,7 +147,23 @@ pulsing, gray floating, magenta when two outputs fight. Zoom in and the
 chips show references, address ranges and pin numbers; zoom in more and
 the logic chips show their gates, the others their pin names. Hovering a
 pin tells what it is: connector pins have their function ("CN4.3 ATN
-(SERIAL)").
+(SERIAL)"). It also says what a healthy board shows there ("healthy
+board: PULSING, 705 kHz, high 83%"), to compare with the live reading:
+the first time on a board, the healthy one is measured in the background
+(15 to 25 seconds) and the tooltip says "being measured".
+
+"Healthy board sheet" (in the control panel's Diagnose section) opens the
+same as a page in the browser, to read or print: every pin of every chip
+and connector of the board on the bench, with its net and what a logic
+probe shows there on a working board, 5 to 6 seconds after power on (as
+the probing window's healthy readings), and for a pulsing pin how fast
+(its rising edges a second) and how much of the time it is high. The
+simulator looks at the pins once per bus step, so it shows nothing faster
+than half that rate (about 3 MHz on the C64, 14 MHz on the Spectrum), and
+pins that are analog on the real board (video outputs, the ULA's
+oscillator) show what the simulator makes of them, not what a probe sees.
+`--healthy-sheet DIR` writes the page of every board to DIR (about 2.5
+minutes).
 
 Click a pin to put it on the oscilloscope and to break it: floating,
 shorted to GND, shorted to +5V, or, on an output, dead inside the chip
@@ -201,9 +217,14 @@ it was, whichever board is on the bench: the same picture, the same pins,
 the notes. A file saved by an older version of the simulator loads too,
 unless that version laid the machine out differently in memory (it then
 says so). A file is 2.5 to 3.5 MB. A file that has been altered so
-that it would point the simulator at its own code is refused; still,
-a save file is the simulator's memory, so open those from people you
-trust.
+that it would point the simulator at its own code is refused. Still, a
+save file is the simulator's memory, and one altered on purpose could
+make it read or write where it shouldn't. So every file is signed when
+saved, with a key made on this PC (kept in `%APPDATA%\c64-hw-sim`, or
+`~/.config/c64-hw-sim`), and a file without this PC's signature
+(someone else's, one saved by an earlier version, or one changed since)
+loads only after a question ("Load it anyway"). Saving it again here
+makes it one of yours. `--load-state` loads one anyway, with a warning.
 
 ### Diagnosing a screenshot
 
@@ -268,6 +289,11 @@ them all, newest first, with their pictures:
 - "Record a repair without a screenshot..." for one you know the chips
   of but have no picture of.
 - "Statistics" counts the chips found faulty, per kind of machine.
+- "Gaps in the simulator" diagnoses every record's screenshot as a new
+  one would be, and lists the repairs whose faulty chips none of the 8
+  best matches names: faults the simulator is missing, or shows
+  otherwise than the real board did. Those explained only by a lower
+  match come next. `--repair-gaps` prints the same for every record.
 - Searching by hand: click a chip on the board (or open the Inspector
   on it) and "Repair records with U7 faulty (3)..." shows only the
   records that found that chip faulty, on any board of that kind.
@@ -286,8 +312,8 @@ Without the window: `--add-repair shot.jpg --machine zx48 --chips
 IC1,IC13 [--certainty 0|1|2] [--notes TEXT] [--owner NAME]` records one,
 and `--diagnose-text shot.jpg --machine zx48` prints the diagnosis,
 records and their scores included. `--list-repairs`, `--merge-repairs
-FILE`, `--export-repairs FILE [--all]` and `--reread-repairs` do the
-rest. The file is a chunk log like the atlas: a damaged end loses only
+FILE`, `--export-repairs FILE [--all]`, `--reread-repairs` and
+`--repair-gaps` do the rest. The file is a chunk log like the atlas: a damaged end loses only
 the damaged record, and a file that isn't a records file is never
 written to or merged.
 
@@ -770,6 +796,8 @@ Other options:
   `--at 150:load:FILE` loads a program, snapshot or cartridge then.
 - `--load-state FILE.hwstate` starts with the board of a save file, as it
   was saved (with or without a window).
+- `--healthy-sheet DIR` writes the healthy board sheet of every board
+  to DIR (`c64-healthy.html`, `zx48-healthy.html`...).
 - `--board 250469` (or `--machine c64c`) runs the C64's 250469 board
   instead of the 250407; fault specs use its references (`U8:removed` is
   the Super PLA, `U10.2:gnd` a RAM data pin).

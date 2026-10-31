@@ -47,8 +47,54 @@ static uint8_t scope_sample(const sim_t *s, int pi) {
     return v;
 }
 
+/* Edge counting (board_edges_start()): one board at a time, looked at in
+ * every bus step while on (other boards, in other threads, only compare
+ * their address). Kept out of board_t, so save files keep their layout. */
+static struct {
+    const board_t *b;
+    uint8_t *last;
+    uint32_t *rises, *highs, steps;
+} edges;
+
+static void count_edges(const sim_t *s) {
+    for (int i = 0; i < s->nnets; i++) {
+        const net_t *n = &s->nets[s->nets[i].root];
+        uint8_t hi = n->strength != S_Z && n->level;
+        edges.rises[i] += hi && !edges.last[i];
+        edges.highs[i] += hi;
+        edges.last[i] = hi;
+    }
+    edges.steps++;
+}
+
+void board_edges_start(board_t *b) {
+    board_edges_stop(NULL, NULL, NULL);
+    int n = b->sim.nnets;
+    edges.last = calloc((size_t)n + 1, 1);
+    edges.rises = calloc((size_t)n + 1, sizeof(uint32_t));
+    edges.highs = calloc((size_t)n + 1, sizeof(uint32_t));
+    edges.steps = 0;
+    count_edges(&b->sim);           /* the levels to start from */
+    memset(edges.rises, 0, (size_t)n * sizeof(uint32_t));
+    memset(edges.highs, 0, (size_t)n * sizeof(uint32_t));
+    edges.steps = 0;
+    edges.b = b;
+}
+
+uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs) {
+    uint32_t steps = edges.steps;
+    if (b && edges.b == b) {
+        memcpy(rises, edges.rises, (size_t)b->sim.nnets * sizeof(uint32_t));
+        memcpy(highs, edges.highs, (size_t)b->sim.nnets * sizeof(uint32_t));
+    }
+    free(edges.last); free(edges.rises); free(edges.highs);
+    memset(&edges, 0, sizeof(edges));
+    return steps;
+}
+
 void board_sample(board_t *b) {
     sim_t *s = &b->sim;
+    if (edges.b == b) count_edges(s);
     if (b->scope_pin >= 0) {
         uint32_t at = b->scope_pos++ & (SCOPE_SAMPLES - 1);
         b->scope[at] = scope_sample(s, b->scope_pin);
@@ -654,7 +700,8 @@ void board_free_state(board_state_t *st) {
  * The file: text lines ("KEY VALUE"), the notes (their length on the
  * "notes" line, then the text), a line "data", then binary blocks, each
  * its length (8 bytes, little endian) and its bytes: what is plugged in
- * (if anything), the fresh board, the saved one. */
+ * (if anything), the fresh board, the saved one; last the signature (see
+ * "Signing" below), which a loader not checking it never reads. */
 
 #define SF_MAGIC "c64-hw-sim save state 1"
 #define SF_EXT ".hwstate"
@@ -846,6 +893,179 @@ static void *sf_slurp(const char *path, size_t *n) {
     return p;
 }
 
+/* Signing. A file whose words are taken as the machine's state can hold
+ * indices (a pin, a part, a cell) the program uses without a check, so a
+ * doctored one could make it read or write outside an array. Every file
+ * saved here ends with a signature, HMAC-SHA-256 with a key made on this
+ * PC and kept in the user's settings: a file that hasn't one of this PC
+ * (someone else's, an earlier version's, or one changed since) is loaded
+ * only once the user says so (board_state_file_signed()). */
+
+static void sf_mkdir(const char *dir);
+
+#define SF_SIGN_MAGIC "HWSIGN01"
+#define SF_SIGN_LEN (8 + 32)
+
+typedef struct { uint32_t h[8]; uint64_t n; uint8_t buf[64]; } sha256_t;
+
+static const uint32_t sha256_k[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+#define ROR32(x, r) (((x) >> (r)) | ((x) << (32 - (r))))
+
+static void sha256_block(sha256_t *c, const uint8_t *p) {
+    uint32_t w[64], v[8];
+    for (int i = 0; i < 16; i++)
+        w[i] = (uint32_t)p[4 * i] << 24 | (uint32_t)p[4 * i + 1] << 16 | (uint32_t)p[4 * i + 2] << 8 | p[4 * i + 3];
+    for (int i = 16; i < 64; i++) {
+        uint32_t s0 = ROR32(w[i - 15], 7) ^ ROR32(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        uint32_t s1 = ROR32(w[i - 2], 17) ^ ROR32(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    memcpy(v, c->h, sizeof(v));
+    for (int i = 0; i < 64; i++) {
+        uint32_t s1 = ROR32(v[4], 6) ^ ROR32(v[4], 11) ^ ROR32(v[4], 25);
+        uint32_t t1 = v[7] + s1 + ((v[4] & v[5]) ^ (~v[4] & v[6])) + sha256_k[i] + w[i];
+        uint32_t s0 = ROR32(v[0], 2) ^ ROR32(v[0], 13) ^ ROR32(v[0], 22);
+        uint32_t t2 = s0 + ((v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]));
+        memmove(v + 1, v, 7 * sizeof(uint32_t));
+        v[4] += t1;
+        v[0] = t1 + t2;
+    }
+    for (int i = 0; i < 8; i++) c->h[i] += v[i];
+}
+
+static void sha256_init(sha256_t *c) {
+    static const uint32_t h0[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
+    memcpy(c->h, h0, sizeof(h0));
+    c->n = 0;
+}
+
+static void sha256_add(sha256_t *c, const void *data, size_t n) {
+    const uint8_t *p = data;
+    while (n) {
+        size_t at = c->n & 63, take = 64 - at < n ? 64 - at : n;
+        memcpy(c->buf + at, p, take);
+        c->n += take; p += take; n -= take;
+        if ((c->n & 63) == 0) sha256_block(c, c->buf);
+    }
+}
+
+static void sha256_end(sha256_t *c, uint8_t out[32]) {
+    uint64_t bits = c->n * 8;
+    uint8_t pad = 0x80, zero = 0, len[8];
+    sha256_add(c, &pad, 1);
+    while ((c->n & 63) != 56) sha256_add(c, &zero, 1);
+    for (int i = 0; i < 8; i++) len[i] = (uint8_t)(bits >> (56 - 8 * i));
+    sha256_add(c, len, 8);
+    for (int i = 0; i < 8; i++) {
+        out[4 * i] = (uint8_t)(c->h[i] >> 24); out[4 * i + 1] = (uint8_t)(c->h[i] >> 16);
+        out[4 * i + 2] = (uint8_t)(c->h[i] >> 8); out[4 * i + 3] = (uint8_t)c->h[i];
+    }
+}
+
+static void hmac_sha256(const uint8_t key[32], const uint8_t *data, size_t n, uint8_t out[32]) {
+    uint8_t pad[64], inner[32];
+    sha256_t c;
+    memset(pad, 0x36, sizeof(pad));
+    for (int i = 0; i < 32; i++) pad[i] ^= key[i];
+    sha256_init(&c);
+    sha256_add(&c, pad, 64);
+    sha256_add(&c, data, n);
+    sha256_end(&c, inner);
+    memset(pad, 0x5c, sizeof(pad));
+    for (int i = 0; i < 32; i++) pad[i] ^= key[i];
+    sha256_init(&c);
+    sha256_add(&c, pad, 64);
+    sha256_add(&c, inner, 32);
+    sha256_end(&c, out);
+}
+
+#ifdef _WIN32
+/* RtlGenRandom, in advapi32. */
+__declspec(dllimport) unsigned char __stdcall SystemFunction036(void *buf, unsigned long len);
+#endif
+
+static bool sf_random(uint8_t *out, size_t n) {
+#ifdef _WIN32
+    return SystemFunction036(out, (unsigned long)n) != 0;
+#else
+    FILE *f = fopen("/dev/urandom", "rb");
+    bool ok = f && fread(out, 1, n, f) == n;
+    if (f) fclose(f);
+    return ok;
+#endif
+}
+
+/* This PC's signing key: read, or made the first time (MAKE). False if
+ * there is none and it can't be made. */
+static bool sf_key(uint8_t key[32], bool make) {
+    char path[1100];
+#ifdef _WIN32
+    const char *home = getenv("APPDATA");
+    if (!home) return false;
+    snprintf(path, sizeof(path), "%s/c64-hw-sim", home);
+#else
+    const char *home = getenv("HOME");
+    if (!home) return false;
+    snprintf(path, sizeof(path), "%s/.config", home);
+    sf_mkdir(path);
+    snprintf(path, sizeof(path), "%s/.config/c64-hw-sim", home);
+#endif
+    sf_mkdir(path);
+    snprintf(path + strlen(path), sizeof(path) - strlen(path), "/save.key");
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        bool ok = fread(key, 1, 32, f) == 32;
+        fclose(f);
+        if (ok || !make) return ok;
+    }
+    if (!make || !sf_random(key, 32) || !(f = fopen(path, "wb"))) return false;
+    bool ok = fwrite(key, 1, 32, f) == 32;
+    if (fclose(f) != 0) ok = false;
+    return ok;
+}
+
+/* Sign the save file at PATH (its signature appended). */
+static void sf_sign(const char *path) {
+    uint8_t key[32], mac[32];
+    size_t n;
+    uint8_t *data;
+    if (!sf_key(key, true) || !(data = sf_slurp(path, &n))) return;
+    hmac_sha256(key, data, n, mac);
+    free(data);
+    FILE *f = fopen(path, "ab");
+    if (!f) return;
+    fwrite(SF_SIGN_MAGIC, 1, 8, f);
+    fwrite(mac, 1, 32, f);
+    fclose(f);
+}
+
+bool board_state_file_signed(const char *path) {
+    uint8_t key[32], mac[32];
+    size_t n;
+    uint8_t *data;
+    if (!sf_key(key, false) || !(data = sf_slurp(path, &n))) return false;
+    bool ok = n > SF_SIGN_LEN && !memcmp(data + n - SF_SIGN_LEN, SF_SIGN_MAGIC, 8);
+    if (ok) {
+        hmac_sha256(key, data, n - SF_SIGN_LEN, mac);
+        uint8_t diff = 0;
+        for (int i = 0; i < 32; i++) diff |= mac[i] ^ data[n - 32 + i];
+        ok = diff == 0;
+    }
+    free(data);
+    return ok;
+}
+
 bool board_save_file(board_t *b, const char *path, const char *notes, char *err, int errlen) {
     sf_config_t c;
     memset(&c, 0, sizeof(c));
@@ -893,6 +1113,7 @@ bool board_save_file(board_t *b, const char *path, const char *notes, char *err,
         snprintf(err, errlen, "can't write %s", path);
         return false;
     }
+    sf_sign(path);
     return true;
 }
 
