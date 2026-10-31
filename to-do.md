@@ -53,8 +53,10 @@ Spectrums, roughly in order of value. Tick items off as they're done.
         changed, nothing else). Not sampled yet: the C64s and the 6A (the
         6A's PINS all matched in the LEGS run; a 200-fault sample of each,
         ~8 min, would tell).
-  - [ ] Stale check left: a 200-fault sample of the 250407, the 250469
+  - [x] Stale check left: a 200-fault sample of the 250407, the 250469
         and the Issue 6A (~8 min each, all cores), as above.
+        Done 2026-10-31: 200 random faults of each (seed 30, any kind),
+        run again into a copy (23 min): 0 of 600 changed. Not stale.
   - [x] "The atlas runner and the simulator disagree" (2026-10-30): no,
         a misreading. --atlas A --atlas-diff B prints A's outcome, then
         "-> " B's: the old screens were the wrong ones. zx48 IC15.7:open
@@ -665,11 +667,25 @@ flashing: FLASH bits in the garbage attributes). The bad1 record matched
 it at only 65% (under 75%: not shown): the border colour and the
 attribute colours count too much. So B should match on the stripes of
 the bitmap and leave out the border colour and the attribute colours.
-- [ ] B (recommended): a picture class in the matcher, "screen and border
+- [x] B (recommended): a picture class in the matcher, "screen and border
       never written" (power-on RAM garbage, nothing ran), causes the
       CPU, the ROM, the clock, reset. Matches by kind, not by the exact
       pattern, so any board's RAM chips. Then rebuild the Spectrum
       pictures (estimate first).
+      Done 2026-10-31 (atlas_match.c, no atlas rebuild needed).
+      unwritten_likeness() on the
+      capture's cell colours: the three thirds alike (>= 0.7), busy across
+      (>= 0.2), changing row to row (>= 0.15: tells it from the bars a ULA
+      fault draws, which run down unbroken; real bad ULAs 0-0.06, dead
+      Z80s 0.18-0.71), 40% of cells drawn. Such a capture scores 70-82%
+      against the board's never written screen (the outcomes with the
+      picture of IC2:removed), labelled "Screen never written...".
+      Results, all five Spectrums: ZX-CPU-bad1/2/3 #1 at 82/79/81% (were
+      not in the top 5); ZXULAbad 1-3 and bad-ula.png unchanged.
+      --match-test 60, seeds 31 and 32: identical per capture (36/51 and
+      42/54). --match-debug prints the measures per reading.
+      Open: IC2:removed is cause 26 of 128 in that group (the user's
+      weights put upper RAM and ROM faults first); the user to decide.
 - [ ] A: a power-on closer to the real one: a random border colour, the
       4116s' fine stripes instead of whole 00/FF rows. Only ever like one
       board's chips, so a weak match on its own; maybe with B.

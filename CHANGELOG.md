@@ -55,6 +55,15 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 - The README's probing figures measured again on today's atlas (140
   faults over the seven boards). "Bad levels" changes them by no more
   than chance: the probing code from before it gives the same.
+- Diagnose from screenshot (Spectrum): a screen nothing ever wrote, as when
+  the CPU never runs, is recognised by its kind: the three thirds of the
+  screen alike, busy across and changing from one character row to the
+  next. It is matched to the board's "CPU never ran" pictures, labelled
+  "Screen never written". The real RAM's power-on pattern and the border
+  are random, so the simulated picture never matched pixel for pixel: a
+  real dead Z80 used to come out as ULA faults, and now comes first.
+  Pictures of a bad ULA, whose bars run down the screen unbroken, are not
+  affected.
 
 ## V1.1 (2026-10-30)
 

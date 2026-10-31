@@ -1674,6 +1674,50 @@ static float score(const feat_t *a, const feat_t *b, float *parts) {
     return total;
 }
 
+/* A Spectrum screen nothing ever wrote: the RAM's power-on contents, as
+ * when the CPU never ran. The pattern depends on the RAM chips (fine
+ * stripes on a real 4116, blocks in the simulator) and the border and the
+ * colours are random, so it is told by its kind: the three thirds of the
+ * screen show the same (the display file's address repeats every 2K, the
+ * power-on contents go by the low address bits), it is busy across, and it
+ * changes from a character row to the next (bars a ULA fault draws run
+ * down the screen unbroken). How much a picture is like that, 0..1, its
+ * parts in REP, BUSY and VARY. */
+static float unwritten_likeness(const feat_t *f, float *rep, float *busy, float *vary) {
+    layout_t L = layout(f->machine);
+    int same = 0, pairs = 0, edges = 0, steps = 0, changes = 0, rows = 0;
+    for (int cy = 0; cy < L.ch; cy++)
+        for (int cx = 0; cx < L.cw; cx++) {
+            if (cy + 8 < L.ch) {
+                same += lab_d(f->mean[cy][cx], f->mean[cy + 8][cx]) < 12;
+                pairs++;
+            }
+            if (cx + 1 < L.cw) {
+                edges += lab_d(f->mean[cy][cx], f->mean[cy][cx + 1]) > 25;
+                steps++;
+            }
+            if (cy + 1 < L.ch) {
+                changes += lab_d(f->mean[cy][cx], f->mean[cy + 1][cx]) > 12;
+                rows++;
+            }
+        }
+    *rep = pairs ? (float)same / pairs : 0;
+    *busy = steps ? (float)edges / steps : 0;
+    *vary = rows ? (float)changes / rows : 0;
+    if (atlas_family(f->machine) != ATLAS_ZX48 || f->drawn < 0.4f * L.cw * L.ch || *busy < 0.2f || *vary < 0.15f)
+        return 0;
+    return clampf((*rep - 0.7f) / 0.2f, 0, 1);
+}
+
+/* The score of the never written screen against a picture that is one by
+ * its kind (unwritten_likeness() 1): above what the dead CPU's pictures
+ * scored pixel by pixel (67-75%), below a close match of another screen
+ * (85% and up), which keeps its place. */
+#define UNWRITTEN_SCORE 0.70f
+#define UNWRITTEN_SPAN 0.12f
+#define UNWRITTEN_LABEL "Screen never written, the CPU never ran (matched by its kind: the RAM's power-on " \
+    "pattern depends on the chips, the border is random). Simulated: "
+
 /* ------------------------------------------------------------------------ */
 /* Matching                                                                  */
 /* ------------------------------------------------------------------------ */
@@ -1690,6 +1734,9 @@ typedef struct {
      * on the ULA's side of the lower RAM (a Spectrum's: see ula_suspect). */
     float *fw;
     uint8_t *ula_side;
+    /* Per outcome: a Spectrum's never written screen (the picture of its
+     * CPU taken out), matched by kind too (unwritten_likeness()). */
+    uint8_t *unwritten;
 } ctx_t;
 
 static uint64_t fnv(uint64_t h, const void *p, size_t n) {
@@ -1733,10 +1780,11 @@ static float likely_k(void) {
     return k;
 }
 
-static int ula_part(board_t *b) {
+/* The chip labelled LABEL ("ULA", "CPU"), -1 if none. */
+static int chip_labelled(board_t *b, const char *label) {
     for (int i = 0; i < b->sim.nparts; i++) {
         const char *l = board_part_label(b, i);
-        if (b->sim.parts[i].kind == PART_IC && l && !strcmp(l, "ULA")) return i;
+        if (b->sim.parts[i].kind == PART_IC && l && !strcmp(l, label)) return i;
     }
     return -1;
 }
@@ -1746,6 +1794,7 @@ static void ctx_weights(ctx_t *c) {
     int nf = c->a.nfaults;
     c->fw = malloc(((size_t)nf + 1) * sizeof(float));
     c->ula_side = calloc((size_t)nf + 1, 1);
+    c->unwritten = calloc((size_t)c->a.noutcomes + 1, 1);
     for (int i = 0; i < nf; i++) c->fw[i] = 1;
     for (int m = 0; m < ATLAS_NMACHINES; m++) {
         bool any = false;
@@ -1753,7 +1802,7 @@ static void ctx_weights(ctx_t *c) {
         if (!any) continue;
         board_t *b = board_create(atlas_machine(m));
         sim_t *s = &b->sim;
-        int ula = atlas_family(m) == ATLAS_ZX48 ? ula_part(b) : -1;
+        int ula = atlas_family(m) == ATLAS_ZX48 ? chip_labelled(b, "ULA") : -1;
         /* The nets of the ULA's lower RAM pins: /CAS, /WE, A0-A6, D0-D7, /RAS. */
         static const int ula_ram_pins[] = { 1, 4, 5, 6, 7, 8, 9, 10, 11, 18, 21, 22, 25, 27, 29, 30, 31, 35 };
         bool *ram_net = calloc((size_t)s->nnets + 1, sizeof(bool));
@@ -1781,6 +1830,17 @@ static void ctx_weights(ctx_t *c) {
                 }
                 sp += len + (sp[len] == ' ');
             }
+        }
+        /* The never written screen: the picture of the CPU taken out, and
+         * every outcome of the board with the same. */
+        int cpu = atlas_family(m) == ATLAS_ZX48 ? chip_labelled(b, "CPU") : -1;
+        char removed[32] = "";
+        if (cpu >= 0) snprintf(removed, sizeof(removed), "%s:removed", s->parts[cpu].ref);
+        for (int i = 0; i < nf && removed[0]; i++) {
+            const atlas_fault_t *f = &c->a.faults[i];
+            if (f->h.machine != m || f->outcome < 0 || strcmp(f->spec, removed) || !c->pic[f->outcome]) continue;
+            for (int o = 0; o < c->a.noutcomes; o++)
+                if (c->a.outcomes[o].h.machine == m && c->pic[o] == c->pic[f->outcome]) c->unwritten[o] = 1;
         }
         free(ram_net);
         board_destroy(b);
@@ -1866,6 +1926,7 @@ static void ctx_free(ctx_t *c) {
     free(c->one[1]);
     free(c->fw);
     free(c->ula_side);
+    free(c->unwritten);
     atlas_free(&c->a);
 }
 
@@ -1874,6 +1935,7 @@ typedef struct {
     float score, parts[NSC];
     int hyp;                    /* the normalization that gave it */
     float rank;                 /* the score, moved by the likelihood (likely_k()) */
+    bool by_kind;               /* the never written screen, matched by kind */
 } cand_t;
 
 typedef struct {
@@ -1967,15 +2029,24 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
     /* The features of each normalization against each background asked
      * for, made when first asked. */
     feat_t *(*nf)[16] = calloc((size_t)M->nnorms, sizeof(*nf));
+    /* How much each normalization is a never written screen. */
+    float *unw = calloc((size_t)M->nnorms + 1, sizeof(float));
+    feat_t *uf = malloc(sizeof(feat_t));
+    for (int k = 0; k < M->nnorms; k++) {
+        float rep, busy, vary;
+        norm_features(&M->norms[k], -1, uf);
+        unw[k] = unwritten_likeness(uf, &rep, &busy, &vary);
+    }
+    free(uf);
     M->c = calloc((size_t)c->a.noutcomes, sizeof(cand_t));
     for (int i = 0; i < c->a.noutcomes; i++) {
         const atlas_outcome_t *o = &c->a.outcomes[i];
         if (!outcome_wanted(o, op)) continue;
-        cand_t best = { i, -1, { 0 }, -1, 0 };
+        cand_t best = { i, -1, { 0 }, -1, 0, false };
         int om = by_family ? atlas_family(o->h.machine) : o->h.machine;
         for (int k = 0; k < M->nnorms; k++) {
             if (M->norms[k].machine != om) continue;
-            cand_t t = { i, 0, { 0 }, k, 0 };
+            cand_t t = { i, 0, { 0 }, k, 0, false };
             if (o->h.t.no_signal) {
                 t.score = M->norms[k].snow;
                 for (int p = 0; p < NSC; p++) t.parts[p] = t.score;
@@ -1993,6 +2064,11 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
                     s *= 1 - M->norms[k].snow;
                     if (s > t.score) { t.score = s; memcpy(t.parts, parts, sizeof(parts)); }
                 }
+                float u = (UNWRITTEN_SCORE + UNWRITTEN_SPAN * unw[k]) * (1 - M->norms[k].snow);
+                if (c->unwritten[i] && unw[k] > 0 && u > t.score) {
+                    t.score = u;
+                    t.by_kind = true;
+                }
             }
             if (t.score > best.score) best = t;
         }
@@ -2005,10 +2081,10 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
         const atlas_real_t *rl = &op->reals[i];
         feat_t rf;
         if (rl->snow <= 0.5f) features(rl->machine, rl->thumb, -1, &rf);
-        cand_t best = { i, -1, { 0 }, -1, 0 };
+        cand_t best = { i, -1, { 0 }, -1, 0, false };
         for (int k = 0; k < M->nnorms; k++) {
             if (atlas_family(M->norms[k].machine) != atlas_family(rl->machine)) continue;
-            cand_t t = { i, 0, { 0 }, k, 0 };
+            cand_t t = { i, 0, { 0 }, k, 0, false };
             if (rl->snow > 0.5f) t.score = M->norms[k].snow;
             else {
                 if (!nf[k][rf.bg]) {
@@ -2024,12 +2100,20 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
     for (int k = 0; k < M->nnorms; k++)
         for (int bg = 0; bg < 16; bg++) free(nf[k][bg]);
     free(nf);
+    free(unw);
     for (int k = 0; k < M->nc; k++)
         M->c[k].rank = M->c[k].score + likely_k() * logf(outcome_weight(c, &c->a.outcomes[M->c[k].outcome]));
     cand_atlas = &c->a;
     qsort(M->c, (size_t)M->nc, sizeof(cand_t), cmp_cand);
     qsort(M->rc, (size_t)M->nrc, sizeof(cand_t), cmp_real);
     return true;
+}
+
+/* A match's label: the screen's, said to be the never written one when it
+ * was matched by its kind. */
+static void outcome_label(const cand_t *cd, const atlas_outcome_t *o, char *buf, int len) {
+    int n = cd->by_kind ? snprintf(buf, (size_t)len, "%s", UNWRITTEN_LABEL) : 0;
+    if (n >= 0 && n < len - 1) atlas_outcome_label(o, buf + n, len - n);
 }
 
 static void match_free(match_t *M) {
@@ -2084,6 +2168,14 @@ int atlas_match(const atlas_match_opts_t *op) {
             write_indexed_png(M.norms[k].machine, M.norms[k].full, sw, sh, p);
             printf("  %s: %s, %.0fx%.0f at %.0f,%.0f, snow %.2f\n", p, M.norms[k].how, M.norms[k].active.w,
                    M.norms[k].active.h, M.norms[k].active.x, M.norms[k].active.y, M.norms[k].snow);
+            if (atlas_family(M.norms[k].machine) == ATLAS_ZX48) {
+                feat_t f;
+                float rep, busy, vary;
+                norm_features(&M.norms[k], -1, &f);
+                float u = unwritten_likeness(&f, &rep, &busy, &vary);
+                printf("      never written: %.2f (thirds alike %.2f, busy across %.2f, row to row %.2f, drawn cells %d)\n",
+                       u, rep, busy, vary, f.drawn);
+            }
             /* Against #1, or the match C64HW_MATCH_VS names (why one loses). */
             const char *vs_env = getenv("C64HW_MATCH_VS");
             int vs = vs_env ? atoi(vs_env) : 1;
@@ -2107,7 +2199,7 @@ int atlas_match(const atlas_match_opts_t *op) {
         const cand_t *cd = &M.c[r];
         const atlas_outcome_t *o = &c.a.outcomes[cd->outcome];
         char label[256];
-        atlas_outcome_label(o, label, sizeof(label));
+        outcome_label(cd, o, label, sizeof(label));
         printf("#%d  %5.1f%%  %s, %s: %s%s\n", r + 1, 100 * cd->score, atlas_machine_id(o->h.machine),
                atlas_mode_name(o->h.mode), label, has_healthy(&c.a, o) ? "   <== the healthy board" : "");
         for (int q = 0; q < r; q++)
@@ -2215,7 +2307,7 @@ bool atlas_match_run(const atlas_match_opts_t *op, atlas_result_t *r) {
         g->machine = o->h.machine;
         g->mode = o->h.mode;
         g->score = M.c[k].score;
-        atlas_outcome_label(o, g->label, sizeof(g->label));
+        outcome_label(&M.c[k], o, g->label, sizeof(g->label));
         g->healthy = has_healthy(&c.a, o);
         g->flash = o->h.t.nseries > 0;
         g->same_as = -1;
