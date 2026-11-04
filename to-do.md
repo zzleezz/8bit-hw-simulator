@@ -666,8 +666,19 @@ and will take the captures; Pico model to be agreed with Jim.
       and .lac read back the same; healthy 3B = Issue 2 for all 880 cycles;
       ROM D3 stuck (IC5.15:gnd) and CPU A0 stuck (IC2.30:gnd) found at
       cycle 1; RAM data faults (IC15, IC6) invisible in the 1.2 ms.
+- [x] 2026-11-04: the user uses two Pico 2 (non-WiFi), each on its own USB
+      lead (two COM ports; the first one opened is the master), chained
+      with the 3-pin cable as before. Firmware: release v6.0.0.0,
+      logic-analyzer-firmware_v6.0.0_BOARD_PICO_2.zip (source on the
+      version/v6_0 branch, Firmware/LogicAnalyzer_V2; master has no Pico 2
+      build). Pico 2 buffer 384 KB (Pico 128 KB): about 98,000 samples at 24
+      channels: 3.5 ms at 28 MHz, 7 ms at 14 MHz. Same pin map as the Pico.
+      Max 100 MHz (200 MHz with the Turbo build). A simulated capture cut to
+      14 and 7 MHz still decodes all 1386 cycles; 14 MHz is the rate to use
+      on the real board (7 MHz is one sample per half T: no margin).
 - [ ] With the real kit: a healthy capture, triggered on /RESET going high
-      (pattern trigger, 1 channel), at 28 MHz or the nearest rate it takes.
+      (pattern trigger, 1 channel), at 14 MHz (or 28 MHz). Simulated to
+      match: --la-record FILE --la-post 98000 (and cut to 14 MHz).
       Check: the channel map (--la-info prints which channel is which),
       that the bus cycles read as the ROM's (0 wrong ROM reads), and the
       T states against the simulation (--la-compare prints where timing
