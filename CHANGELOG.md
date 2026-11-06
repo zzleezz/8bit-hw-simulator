@@ -27,6 +27,17 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser, `--la-diagnose`, from real faulty CPUs, logic and RAM:
+  an address line the ROM sees otherwise than the edge connector (its
+  wrong reads are its own bytes from the address with that bit the other
+  way: a weak or floating CPU output, found on a real faulty Z80's A11);
+  a RAM bank's address line that doesn't get through (the RAM test finds
+  the byte 2^k above the bank's start the same cell as the start), with
+  its multiplexer; a RAM bit the CPU reads otherwise than the analyser
+  (the RAM test's DEC writes back one less than what the CPU got: a slow
+  chip); /RESET held low with the button let go (a CPU can short it). A
+  capture that can't be taken after a stage was wrong now ends the
+  captures, not the diagnosis.
 - Logic analyser: a bus cycle's address is now the one held longest in
   the cycle, not the one at /MREQ's fall, which with some ULAs (their
   clock shaped differently) was still changing: a faulty-looking ROM and

@@ -1647,6 +1647,17 @@ typedef struct {
     int nbad[AR_N], first[AR_N];                    /* reads with a bit wrong, the first one's address */
     int stuck[LA_NSIG];                             /* 1 low, 2 high all through, where a working one's changes */
     int pramt, pramt_ref;                           /* the RAM test's result (P-RAMT), -1 not seen */
+    /* Wrong ROM reads that are the ROM's byte with address bit k the
+     * other way: the ROM sees A<k> otherwise than the edge connector. */
+    int rom_abit[14];
+    /* The RAM test's first read of a byte, seen in the capture, that
+     * wasn't 02 (the fill): where and what. */
+    int rt_addr, rt_got;
+    /* The RAM test's DEC (HL): the byte written isn't one less than the one
+     * the analyser saw read, so the CPU read something else: those bits
+     * changed late in the read (per bank: the bits, how often, the first). */
+    unsigned late_bits[3];
+    int late_n[3], late_addr[3], late_seen[3], late_wrote[3];
     int test_addr, test_got;                        /* the byte it stopped on and its first read (02 was written) */
     char test_seq[64];                              /* what the test did there: "read 02, wrote 01, read 11" */
     /* The lower RAM's wrong bytes against the ULA's screen fetch (from
@@ -1666,6 +1677,7 @@ static void ev_init(ev_t *e) {
     memset(e, 0, sizeof(*e));
     e->pramt = e->pramt_ref = e->test_addr = -1;
     e->clk_pct = -1;
+    e->rt_addr = -1;
 }
 
 /* Another stage's evidence added to E (--la-all). */
@@ -1685,6 +1697,13 @@ static void ev_merge(ev_t *e, const ev_t *f) {
     if (e->test_addr < 0 && f->test_addr >= 0) { e->test_addr = f->test_addr; e->test_got = f->test_got; memcpy(e->test_seq, f->test_seq, sizeof(e->test_seq)); }
     e->c_have += f->c_have; e->c_bad += f->c_bad; e->c_bad_win += f->c_bad_win; e->c_good += f->c_good; e->c_good_win += f->c_good_win;
     e->in_reset |= f->in_reset;
+    for (int k = 0; k < 14; k++) e->rom_abit[k] += f->rom_abit[k];
+    for (int ar = 0; ar < AR_N; ar++) {
+        if (!e->late_n[ar] && f->late_n[ar]) { e->late_addr[ar] = f->late_addr[ar]; e->late_seen[ar] = f->late_seen[ar]; e->late_wrote[ar] = f->late_wrote[ar]; }
+        e->late_n[ar] += f->late_n[ar];
+        e->late_bits[ar] |= f->late_bits[ar];
+    }
+    if (e->rt_addr < 0) { e->rt_addr = f->rt_addr; e->rt_got = f->rt_got; }
     if (f->clk_pct >= 0 && (e->clk_pct < 0 || f->clk_pct < e->clk_pct)) e->clk_pct = f->clk_pct;
     if (!e->clk_stopped) e->clk_stopped = f->clk_stopped;
 }
@@ -1761,6 +1780,7 @@ static bool ev_any(const ev_t *e) {
     for (int s = 0; s < LA_NSIG; s++) if (e->stuck[s]) return true;
     for (int k = 0; k < 5; k++) if (e->kb_low[k]) return true;
     if (e->kb_all) return true;
+    for (int ar = 0; ar < AR_N; ar++) if (e->late_n[ar]) return true;
     return e->nbad[0] || e->nbad[1] || e->nbad[2] || ev_pramt_bad(e);
 }
 
@@ -1789,6 +1809,8 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
     la_cycle_t *cy;
     int n = la_cycles(d, &cy);
     static short last[65536];
+    unsigned last_fetch = 0;
+    int pend_a = -1, pend_v = 0;
     for (int k = 0; k < 65536; k++) last[k] = -1;
     for (int k = 0; k < n; k++) {
         const la_cycle_t *x = &cy[k];
@@ -1799,7 +1821,24 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
             if (!(x->data & 0x1F)) e->kb_all++;        /* not keys: the read itself */
             else for (int b = 0; b < 5; b++) if (!(x->data >> b & 1)) { e->kb_low[b]++; e->kb_rows_low[b] |= rows; }
         }
-        if (rom_wrong(d, x)) ev_bits(e, x->addr, x->data, zx48_rom_image()[x->addr]);
+        if (rom_wrong(d, x)) {
+            ev_bits(e, x->addr, x->data, zx48_rom_image()[x->addr]);
+            for (int b = 0; b < 14; b++) e->rom_abit[b] += zx48_rom_image()[x->addr ^ (1u << b)] == x->data;
+        }
+        if (x->kind == LA_FETCH) last_fetch = x->addr;
+        if (x->kind == LA_READ && (last_fetch == 0x11E9 || last_fetch == 0x11EC) && x->addr >= 0x4000) { pend_a = x->addr; pend_v = x->data; }
+        else if (x->kind == LA_WRITE && (int)x->addr == pend_a) {
+            unsigned cpu_got = (x->data + 1u) & 0xFF, diff = cpu_got ^ (unsigned)pend_v;
+            if (diff) {
+                int ar = area_of(x->addr);
+                if (!e->late_n[ar]++) { e->late_addr[ar] = pend_a; e->late_seen[ar] = pend_v; e->late_wrote[ar] = x->data; }
+                e->late_bits[ar] |= diff;
+            }
+            pend_a = -1;
+        }
+        /* The RAM test's read-back (11E2-11EE): a byte's first read, not 02. */
+        if (x->kind == LA_READ && x->addr >= 0x4000 && last_fetch >= 0x11E2 && last_fetch <= 0x11EE && last[x->addr] < 0 &&
+            x->data != 0x02 && e->rt_addr < 0) { e->rt_addr = x->addr; e->rt_got = x->data; }
         if (x->addr < 0x4000) continue;
         if (x->kind == LA_WRITE) last[x->addr] = (short)x->data;
         else if ((x->kind == LA_READ || x->kind == LA_FETCH) && last[x->addr] >= 0 && last[x->addr] != x->data) {
@@ -2006,6 +2045,36 @@ static void bits_text(unsigned m, char *out, int len) {
 
 static int popcount8(unsigned m) { int c = 0; for (; m; m &= m - 1) c++; return c; }
 
+/* The bank's multiplexers that carry CPU address line A<k> (on its net, or
+ * through a resistor from it). */
+static void mux_for_addr(const char *bank, const char *chips, int k, char *out, int len) {
+    sim_t *s = &vboard->sim;
+    char nm[8];
+    snprintf(nm, sizeof(nm), "A%d", k);
+    int an = sim_find_net(s, nm);
+    int n = 0;
+    out[0] = 0;
+    if (an < 0) return;
+    int roots[8], nr = 0;
+    roots[nr++] = s->nets[an].root;
+    for (int i = 0; i < s->nparts && nr < 8; i++) {        /* through a resistor */
+        const part_t *r = &s->parts[i];
+        if (r->npins != 2 || strcmp(board_part_kind_name(vboard, i), "resistor")) continue;
+        int r0 = s->pins[r->first_pin].root, r1 = s->pins[r->first_pin + 1].root;
+        if (r0 == roots[0] && board_net_supply(vboard, r1) == RAIL_NONE) roots[nr++] = r1;
+        else if (r1 == roots[0] && board_net_supply(vboard, r0) == RAIL_NONE) roots[nr++] = r0;
+    }
+    for (int i = 0; i < s->nparts && n < len; i++) {
+        const char *d = board_part_detail(vboard, i), *l = board_part_label(vboard, i);
+        if (!d || !strstr(d, bank) || !l || strcmp(l, "MUX")) continue;
+        bool on = false;
+        for (int j = 0; j < s->parts[i].npins && !on; j++)
+            for (int q = 0; q < nr && !on; q++) on = s->pins[s->parts[i].first_pin + j].root == roots[q];
+        if (on) n += snprintf(out + n, len - n, "%s%s", n ? " or " : "", s->parts[i].ref);
+    }
+    (void)chips;
+}
+
 /* What it points at, most likely first. */
 static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, const cmp_out_t *co, const char *where) {
     vboard = board_create(m);
@@ -2022,6 +2091,13 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
     int nstuck = 0, nctl = 0;
     for (int s = 0; s < LA_NSIG; s++)
         if (e->stuck[s]) { nstuck++; nctl += s == LA_MREQ || s == LA_RD || s == LA_WR || s == LA_M1 || s == LA_RFSH; }
+    if (e->in_reset && !e->stuck[LA_CLK]) {
+        printf("  %d. /RESET is low all through, so the CPU never starts. If the reset button wasn't held then (it asks\n"
+               "     once more when it sees this), something holds /RESET low: the CPU (%s pin 26: a faulty Z80 can\n"
+               "     short its input), the reset circuit (its capacitor and resistor) or the button. Pull the CPU and\n"
+               "     measure pin 26's socket hole: it should rise to 5 V.\n", ++n, cpu);
+        goto done;
+    }
     if (e->stuck[LA_CLK])
         printf("  %d. No clock: CLK (%s's pin 6) is stuck %s. It comes from %s (the ULA, from the 14 MHz crystal): the ULA, the\n"
                "     crystal, or a short on the line. Nothing runs without it.\n", ++n, cpu, e->stuck[LA_CLK] == 1 ? "low" : "high",
@@ -2091,6 +2167,44 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
     }
     unsigned mr = ev_mask(e, AR_ROM), ml = ev_mask(e, AR_LRAM), mu = ev_mask(e, AR_URAM);
     unsigned shared = (mr & ml) | (mr & mu) | (ml & mu);
+    /* The ROM's wrong reads are its own bytes from the address with one
+     * bit the other way: that address line, not the data. */
+    int abit = -1;
+    for (int k = 0; k < 14; k++)
+        if (e->rom_abit[k] >= 8 && 2 * e->rom_abit[k] >= e->nbad[AR_ROM] && (abit < 0 || e->rom_abit[k] > e->rom_abit[abit])) abit = k;
+    if (abit >= 0) {
+        printf("  %d. Address line A%d: %d of the %d wrong ROM reads are the ROM's own byte from the address with A%d the\n"
+               "     other way. So the ROM sees A%d otherwise than the edge connector does: the line is weak or floating\n"
+               "     (in between 0 and 5 V), not stuck. Its driver is the CPU (%s pin %d): a faulty CPU's output does this;\n"
+               "     else a break in the track to the ROM (%s) or a chip loading the line.\n", ++n, abit, e->rom_abit[abit],
+               e->nbad[AR_ROM], abit, abit, cpu, z80_pin(LA_A0 + abit), rom);
+        printf("     The wrong data that follows (bits %s from the ROM and the RAM) all comes from it.\n",
+               (bits_text(mr | ml | mu, bits, sizeof(bits)), bits));
+        goto done;
+    }
+    /* The RAM test's first bad byte reads 00 and lies 2^k above the bank's
+     * start: the same cell as the start (tested and left at 00), so the
+     * bank's address line A<k> doesn't get through. */
+    int alias_ar = -1, alias_k = -1;
+    if (e->rt_addr >= 0x4000 && e->rt_got == 0x00) {
+        unsigned base = e->rt_addr < 0x8000 ? 0x4000 : 0x8000, off = (unsigned)e->rt_addr - base;
+        if (off && !(off & (off - 1)))
+            for (int k = 0; k < 15; k++) if (off == 1u << k) { alias_k = k; alias_ar = base == 0x4000 ? AR_LRAM : AR_URAM; }
+    }
+    if (alias_k >= 0) {
+        const char *bank = alias_ar == AR_LRAM ? "lower RAM" : "upper RAM", *chips = alias_ar == AR_LRAM ? "LRAM" : "URAM";
+        unsigned base = alias_ar == AR_LRAM ? 0x4000 : 0x8000;
+        char mx[64];
+        mux_for_addr(bank, chips, alias_k, mx, sizeof(mx));
+        printf("  %d. The %s's address line A%d: the RAM test found %04X reading 00, which is what it had just left\n"
+               "     at %04X: those two are the same cell, so A%d doesn't get through to the %s's chips. Its\n"
+               "     multiplexer%s%s%s, or the line from it to all the chips (a break, a short to the line next to it).\n",
+               ++n, bank, alias_k, e->rt_addr, base, alias_k, bank, mx[0] ? " (" : "", mx, mx[0] ? ")" : "");
+        printf("     The wrong bytes later on (the system variables there) come from it.\n");
+        if (alias_ar == AR_LRAM) ml = 0; else mu = 0;
+        shared &= ~0u;
+        shared = (mr & ml) | (mr & mu) | (ml & mu);
+    }
     for (int i = 0; i < 8; i++) {
         if (!(shared >> i & 1) || e->stuck[LA_D0 + i]) continue;
         printf("  %d. Data line D%d is wrong from %s%s%s: not one chip, the line itself (%s's pin %d) or a chip that\n"
@@ -2128,6 +2242,22 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
                e->c_good, e->c_good - e->c_good_win, e->c_good - e->c_good_win == 1 ? "was" : "were", bits);
     }
 
+    for (int ar = AR_LRAM; ar <= AR_URAM; ar++) {
+        if (!e->late_n[ar]) continue;
+        const char *bank = ar == AR_LRAM ? "lower RAM" : "upper RAM", *chips = ar == AR_LRAM ? "LRAM" : "URAM";
+        for (int i = 0; i < 8; i++) {
+            if (!(e->late_bits[ar] >> i & 1)) continue;
+            char lab[8];
+            snprintf(lab, sizeof(lab), "%s%d", chips, i);
+            const char *ic = ref_of(lab);
+            printf("  %d. %s, the %s's bit D%d: the CPU read it otherwise than the analyser saw. The RAM test read %02X\n"
+                   "     at %04X (as the analyser saw it) but wrote back %02X, one less than %02X: what the CPU got. So D%d\n"
+                   "     changes late in the read: a slow or failing chip (or one at the edge of its timing), or one not\n"
+                   "     there at all (its pin floats and reads either way).\n", ++n,
+                   ic ? ic : "the chip", bank, i, e->late_seen[ar], e->late_addr[ar], e->late_wrote[ar], (e->late_wrote[ar] + 1) & 0xFF, i);
+            if (ar == AR_LRAM) ml &= ~(1u << i); else mu &= ~(1u << i);
+        }
+    }
     for (int ar = AR_LRAM; ar <= AR_URAM; ar++) {
         unsigned mm = ar == AR_LRAM ? ml : mu;
         const char *bank = ar == AR_LRAM ? "lower RAM" : "upper RAM", *chips = ar == AR_LRAM ? "LRAM" : "URAM";
@@ -2208,6 +2338,7 @@ done:
 #define mkdir1(p) mkdir(p, 0777)
 #endif
 
+#define STOP_MSG "  Couldn't capture it: the diagnosis goes on what the stages before show\n"
 static int diagnose(const la_cli_t *o) {
     const machine_t *m = o->machine ? o->machine : &machine_zx48;
     const char *dir = o->diagnose;
@@ -2261,7 +2392,7 @@ static int diagnose(const la_cli_t *o) {
             got = record_sim(m, o->faults, o->nfaults, pre * 2, post * 2, st->addr, arm, &d, err, sizeof(err));
             if (!got && i == 0) got = record_sim(m, o->faults, o->nfaults, pre * 2, post * 2, 0x0000, 0, &d, err, sizeof(err));
             if (!got) instead = record_sim(m, o->faults, o->nfaults, 2000, post * 2, -2, i == 0 ? 1 : (int)at, &d, err, sizeof(err));
-            if (!got && !instead) { la_err(err); return 1; }
+            if (!got && !instead) { la_err(err); if (fail_stage) { printf(STOP_MSG); break; } return 1; }
         } else {
             la_cli_t q = *o;
             q.trigger = st->name; q.capture = path; q.pre = pre; q.post = post; q.at = 0;
@@ -2276,17 +2407,19 @@ static int diagnose(const la_cli_t *o) {
                 if (want_enter(msg)) { d = old; got = true; }
                 else la_free(&old);
             }
-            if (!got && boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n"))
+            if (!got && boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n")) {
+                if (fail_stage) break;
                 return 1;
+            }
             if (!got) got = capture_real(&q, &d, err, sizeof(err));
             if (!got && strstr(err, "no trigger") && boot &&
                 want_enter("It didn't come. Once more? Hold the reset button, press Enter (or type n, Enter if you did let go and\n"
                            "it still didn't come)\n"))
                 got = capture_real(&q, &d, err, sizeof(err));
-            if (!got && !strstr(err, "no trigger") && !strstr(err, "no key")) { la_err(err); return 1; }
+            if (!got && !strstr(err, "no trigger") && !strstr(err, "no key")) { la_err(err); if (fail_stage) { printf(STOP_MSG); break; } return 1; }
             if (!got && i == 0) {
                 printf("The reset's FFFF never showed: now for its first fetch, 0000\n");
-                if (!want_enter("Hold the reset button down, press Enter, and let go once it says Armed\n")) return 1;
+                if (!want_enter("Hold the reset button down, press Enter, and let go once it says Armed\n")) { if (fail_stage) break; return 1; }
                 q.trigger = "addr=0000";
                 got = capture_real(&q, &d, err, sizeof(err));
                 if (got) d.trig_addr = 0x0000;
@@ -2295,9 +2428,9 @@ static int diagnose(const la_cli_t *o) {
                 if (i == 0) printf("Now what it's doing at all: let it run (switched on, reset button not held)\n");
                 else printf("Now what it's doing when %s should have come: hold the reset button down, press Enter, and\n"
                             "let go once it says Armed\n", st->name);
-                if (!want_enter(i == 0 ? "Press Enter\n" : "")) return 1;
+                if (!want_enter(i == 0 ? "Press Enter\n" : "")) { if (fail_stage) break; return 1; }
                 instead = capture_now(o, at, ipath, &d, err, sizeof(err));
-                if (!instead) { la_err(err); return 1; }
+                if (!instead) { la_err(err); if (fail_stage) { printf(STOP_MSG); break; } return 1; }
             }
             if (!la_write(got ? path : ipath, &d, err, sizeof(err))) la_err(err);
         }
