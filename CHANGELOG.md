@@ -27,6 +27,19 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser, `--la-diagnose`: the ULA's timing with the CPU
+  (contention). When every wrong byte of the lower RAM was written or read
+  while the ULA fetched the screen (placed from /INT in the capture), and
+  the right ones weren't, it names the ULA first and the RAM chips of the
+  bits that lose after it (a real faulty ULA lost D3, D4 and D6 this way).
+  A RAM bank wrong as a whole now names the data resistors to the CPU too,
+  not only the address multiplexers. `--la-all` takes the later stages
+  after one that's wrong and adds what they show (diagnose.bat uses it).
+  Also: a keyboard line or key read low, a port read with all five lines
+  low (the ULA's), "taken while /RESET was held" (and once more), no clock
+  and a CPU not running as one finding, and the RAM test's reads and
+  writes at the byte it stopped on. A simulated ULA fault for testing it:
+  `--fault IC1:nocontention`.
 - Logic analyser: `--la-diagnose DIR` diagnoses a Spectrum. It captures the
   boot stage by stage (reset, RAM test, its end, the copyright message, the
   main loop, a frame interrupt; it asks for each reset), compares each with

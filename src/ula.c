@@ -235,8 +235,9 @@ void ula_step(sim_t *s, part_t *p) {
     bool border = !screen, c23 = (c & 12) != 0;
     bool base = (c & 1) || h == 0;
     bool w362 = !u->ioreqt2 && !border && u->cpuclk && !u->mreqt2;
-    bool mem = (a14 || iorq) && (iorq || !a15) && c23 && w362;
-    bool io = !border && u->cpuclk && iorq && c23 && !u->ioreqt2;
+    bool held = p->cfault != CF_NOCONTENTION;      /* the fault: never held */
+    bool mem = held && (a14 || iorq) && (iorq || !a15) && c23 && w362;
+    bool io = held && !border && u->cpuclk && iorq && c23 && !u->ioreqt2;
     bool cpuclk = base || mem || io;
     if (!cpuclk) { u->mreqt2 = mreq; u->ioreqt2 = iorq; }
     /* /INT: 64 ticks (32 T states) at the start of line 248, half a

@@ -63,6 +63,11 @@ typedef uint8_t drive_t;
  * supply it drives like a normal output: another chip on a bus fights it. */
 enum { PF_OK = 0, PF_OPEN, PF_GND, PF_VCC, PF_OUT0, PF_OUT1 };
 
+/* A fault inside a chip's logic, part_t.cfault: the ULA that doesn't hold
+ * the CPU's clock while it fetches the screen ("IC1:nocontention"), so
+ * their accesses to the lower RAM clash. */
+enum { CF_OK, CF_NOCONTENTION };
+
 /* Faults inside a memory chip (ROM, SRAM, DRAM), see part_t.mfault:
  *  MF_DATA: data bit mf_bit reads mf_val at every address (a dead output
  *           buffer: on a 4164, the whole chip reads 0 or 1)
@@ -183,6 +188,7 @@ struct part {
     uint8_t mfault;     /* MF_* for memory chips, with: */
     uint8_t mf_bit, mf_val;
     uint32_t mf_addr;
+    uint8_t cfault;     /* CF_*: a fault inside a chip's logic (a test of the analyser's diagnosis) */
     part_fn eval;       /* compute output drives from inputs (may be NULL) */
     part_fn commit;     /* latch / store on clock edges (may be NULL) */
     part_fn reset;      /* power-on state (may be NULL) */

@@ -1590,6 +1590,10 @@ bool board_apply_fault_spec(board_t *b, const char *spec) {
         board_set_pin_fault(b, pi, f);
     } else if (!strcmp(what, "removed") || !strcmp(what, "present")) {
         board_set_removed(b, part, !strcmp(what, "removed"));
+    } else if (!strcmp(what, "nocontention")) {
+        const part_t *p = &b->sim.parts[part];
+        if (!p->name || strncmp(p->name, "ULA", 3)) return false;
+        b->sim.parts[part].cfault = CF_NOCONTENTION;
     } else if (part_memory(&b->sim.parts[part], NULL, NULL) && strcmp(what, "open") && strcmp(what, "short")) {
         mem_fault_t mf;
         if (!board_parse_mem_fault(b, part, what, &mf)) return false;
@@ -1610,6 +1614,7 @@ void board_clear_faults(board_t *b) {
         s->parts[i].removed = s->parts[i].unfitted;
         s->parts[i].rfault = RF_OK;
         s->parts[i].mfault = MF_OK;
+        s->parts[i].cfault = CF_OK;
     }
     b->nbridges = 0;
     board_rebuild(b);

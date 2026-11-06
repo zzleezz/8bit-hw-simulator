@@ -94,6 +94,7 @@ typedef struct {
     const char *diagnose;       /* --la-diagnose DIR: the boot stage by stage, and what's wrong */
     bool replay;                /* --la-replay: from DIR's captures, not the analyser */
     bool simulate;              /* --la-simulate: the simulated board with --fault as the one under test */
+    bool all;                   /* --la-all: after a stage that's wrong, capture the rest too */
     int tries;                  /* --la-tries N: re-arm after a glitch this often */
     const char *log;            /* --la-log FILE: a copy of what's printed */
     const struct machine *machine;
