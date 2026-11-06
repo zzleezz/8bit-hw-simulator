@@ -1215,6 +1215,14 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
         for (int k = 0; k < q.nchan; k++) free(v[k]);
         if (!ok) return false;
         if (addr < 0 || real_trigger(c, addr)) return true;
+        /* Kept, to see what the glitch was: NAME-glitchN.lac */
+        if (o->capture) {
+            char gp[1024], e2[256];
+            const char *dot = strrchr(o->capture, '.');
+            int stem = dot ? (int)(dot - o->capture) : (int)strlen(o->capture);
+            snprintf(gp, sizeof(gp), "%.*s-glitch%d.lac", stem, o->capture, attempt);
+            if (la_write(gp, c, e2, sizeof(e2))) printf("(kept as %s)\n", gp);
+        }
         la_free(c);
         if (attempt >= tries) {
             snprintf(err, errlen, "%d glitches on the address lines and not once %04X itself: given up", tries, addr);

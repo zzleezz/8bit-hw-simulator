@@ -523,8 +523,13 @@ int main(int argc, char **argv) {
      * already gave us real handles, keep those. */
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE), err = GetStdHandle(STD_ERROR_HANDLE);
-        if (!out || out == INVALID_HANDLE_VALUE) freopen("CONOUT$", "w", stdout);
-        if (!err || err == INVALID_HANDLE_VALUE) freopen("CONOUT$", "w", stderr);
+        /* Only a file or a pipe is kept: a GUI program's C library doesn't
+         * hook stdout to an inherited console handle (start /b from a .bat
+         * showed nothing), so the console is opened afresh. */
+        DWORD to = out && out != INVALID_HANDLE_VALUE ? GetFileType(out) : FILE_TYPE_UNKNOWN;
+        DWORD te = err && err != INVALID_HANDLE_VALUE ? GetFileType(err) : FILE_TYPE_UNKNOWN;
+        if (to != FILE_TYPE_DISK && to != FILE_TYPE_PIPE) freopen("CONOUT$", "w", stdout);
+        if (te != FILE_TYPE_DISK && te != FILE_TYPE_PIPE) freopen("CONOUT$", "w", stderr);
     }
 #endif
     bool atlas = false;
