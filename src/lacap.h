@@ -101,7 +101,7 @@ int la_cli(const la_cli_t *o);
 
 /* The stages a capture can be triggered at (--la-trigger NAME): the
  * address, and what it is. NULL name ends the list. */
-typedef struct { const char *name; int addr; const char *what; } la_stage_t;
+typedef struct { const char *name; int addr; double ms; const char *what; } la_stage_t;
 extern const la_stage_t la_stages[];
 
 #endif

@@ -129,9 +129,12 @@
  *       with channels 1-24) first. T, a stage of the boot (hold the reset
  *       button, let go once armed): reset (the default: the RAM test's
  *       first write, FFFF), ramcheck (4000: the fill's last write, then it reads the RAM back), ramdone
- *       (1200: the RAM test is over), copyright (1539), main (16B0: the
+ *       (5C7B: the RAM test is over), copyright (0012), main (5C59: the
  *       editor's main loop); or interrupt (0038, any time), addr=XXXX (the
- *       address bus), raw:TYPE,BASE,COUNT,VALUE. An address seen only for
+ *       address bus), raw:TYPE,BASE,COUNT,VALUE. The stages after the reset are
+ *       armed on the reset, then again 20 ms before the stage is due (the
+ *       RAM test writing every address could fake any trigger address for
+ *       an instant as the lines change). An address seen only for
  *       a glitch is re-armed for, --la-tries N times (5). 14285714 Hz, 1000
  *       before, 97000 after, 60 s unless given. --la-log FILE: a copy of
  *       what's printed. --la-record takes --la-trigger too: the simulated

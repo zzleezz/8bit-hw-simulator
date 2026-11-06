@@ -54,7 +54,13 @@ typedef struct {
     int trig_base, trig_count;  /* the master's channels base..base+count-1 */
     unsigned trig_value;        /* bit k: channel base+k */
     int timeout;                /* seconds to wait for the trigger (0: a minute) */
+    double start_at;            /* lp_now_ms() to arm at (the boards opened before); 0: at once */
 } lp_capture_req_t;
+
+/* Milliseconds, for start_at; and when the last capture's samples began
+ * to come (a little after its trigger and its samples after it). */
+double lp_now_ms(void);
+extern double lp_trigger_ms;
 
 /* Where "Armed" and "Triggered" are printed (printf unless set). */
 extern int (*lp_printf)(const char *fmt, ...);

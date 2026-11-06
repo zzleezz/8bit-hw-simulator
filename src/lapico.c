@@ -244,7 +244,11 @@ static bool send_packet(sp_t *s, int cmd, const uint8_t *data, int len) {
 
 static double now_ms(void) {
 #ifdef _WIN32
-    return (double)GetTickCount64();
+    static LARGE_INTEGER f;
+    LARGE_INTEGER c;
+    if (!f.QuadPart) QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
 #else
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
@@ -368,6 +372,9 @@ static void trace(const char *fmt, ...) {
 
 static int lround_pos(double x) { return (int)(x + 0.5); }
 
+double lp_now_ms(void) { return now_ms(); }
+double lp_trigger_ms;
+
 bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, char *err, int errlen) {
     if (q->ndev < 1 || q->ndev > LP_MAXDEV) { snprintf(err, errlen, "1 to %d boards", LP_MAXDEV); return false; }
     /* Each board's channels (its own numbers, 0-23), in the order asked. */
@@ -421,6 +428,11 @@ bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, ch
     double period = 1e9 / q->freq, delay = q->trig_type == LP_FAST ? 3 : 5;
     int moff = lround_pos(1e9 / maxf * delay / period + 0.3);
     int soff = lround_pos(delay / period + 0.3);
+    /* A timed start: the boards are open and have answered; wait (the
+     * last few ms without sleeping: Sleep is coarse). */
+    while (q->start_at > 0 && now_ms() < q->start_at) {
+        if (q->start_at - now_ms() > 30) sp_sleep(5);
+    }
     for (int d = 1; d < q->ndev; d++)
         if (dn[d] && !start(&s[d], q->port[d], LP_EDGE, 24, 0, 0, dchan[d], dn[d], q->freq, q->pre + soff,
                             q->post - soff, mode[d], err, errlen))
@@ -480,6 +492,7 @@ bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, ch
                 }
                 if (!triggered) {
                     triggered = true;
+                    lp_trigger_ms = now_ms();
                     lp_printf("Triggered: reading the samples\n");
                     fflush(stdout);
                 }
