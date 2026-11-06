@@ -545,12 +545,22 @@ static inline bool lo(uint64_t v, int sig) { return !(v >> sig & 1); }
 static inline unsigned addr_of(uint64_t v) { return (unsigned)(v >> LA_A0 & 0xFFFF); }
 static inline unsigned data_of(uint64_t v) { return (unsigned)(v >> LA_D0 & 0xFF); }
 
-/* Where /RESET goes high, or 0. */
+/* Where /RESET goes high, or 0. On a real Spectrum /RESET rises slowly
+ * (an RC): the Z80 is running milliseconds before the analyser's input
+ * sees it high. So: the last fetch from 0000 before the rise, if any. */
 static int la_start(const la_capture_t *c) {
     if (!(c->have >> LA_RESET & 1)) return 0;
-    for (int i = 1; i < c->n; i++)
-        if (!lo(c->s[i], LA_RESET) && lo(c->s[i - 1], LA_RESET)) return i;
-    return 0;
+    int r = 0;
+    for (int i = 1; i < c->n && !r; i++)
+        if (!lo(c->s[i], LA_RESET) && lo(c->s[i - 1], LA_RESET)) r = i;
+    if (!r) return 0;
+    bool m1 = c->have >> LA_M1 & 1;
+    int best = r;
+    for (int i = 1; i < r; i++)
+        if (lo(c->s[i], LA_MREQ) && !lo(c->s[i - 1], LA_MREQ) && addr_of(c->s[i]) == 0 &&
+            (!m1 || lo(c->s[i], LA_M1)))
+            best = i;
+    return best;
 }
 
 int la_cycles(const la_capture_t *c, la_cycle_t **out) {
@@ -635,7 +645,10 @@ static void print_info(const char *path, const la_capture_t *c, int count) {
     int start = la_start(c);
     printf("%s: %d samples", path, c->n);
     if (c->freq) printf(" at %.3f MHz (%.3f ms)", c->freq / 1e6, c->n * 1e3 / c->freq);
-    printf(", /RESET goes high at sample %d\n", start);
+    printf(", the Z80 starts after /RESET at sample %d\n", start);
+    if (c->freq && c->freq < 10000000)
+        printf("Too slow to tell the bus cycles apart (a T state is 286 ns): "
+               "capture at 14285714 Hz or faster; the cycles below are not to be trusted\n");
     printf("Channels:");
     for (int s = 0; s < LA_NSIG; s++) if (c->chan[s] >= 0) printf(" %d=%s", c->chan[s] + 1, sig_names[s]);
     printf("\nNot in the capture:");
