@@ -1623,7 +1623,7 @@ static const char *board_desc(const la_cli_t *o, char *out, int len) {
  * samples at 14 MHz): before the RAM test's end, enough to see the byte
  * it failed on. */
 static const struct { const char *stage; int pre, post; } diag_plan[] = {
-    { "reset", 1000, 97000 }, { "ramcheck", 1000, 97000 }, { "ramdone", 20000, 78000 },
+    { "reset", 1000, 97000 }, { "ramcheck", 1000, 97000 }, { "ramdone", 9000, 89000 },
     { "copyright", 1000, 97000 }, { "main", 1000, 97000 }, { "interrupt", 1000, 97000 },
 };
 #define DIAG_NSTAGES 6
@@ -1958,7 +1958,7 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
             printf("     Its first read there gave %02X: 02 was written.\n", e->test_got);
         if (!ml && !mu && e->test_addr < 0)
             printf("  %d. The %s, from %04X: which bit isn't in the capture (it holds the last %d us before the test ended)\n", ++n,
-                   e->pramt + 1 >= 0x8000 ? "upper RAM" : "lower RAM", e->pramt + 1, 20000 * 1000 / 14285714 * 1000 / 1000);
+                   e->pramt + 1 >= 0x8000 ? "upper RAM" : "lower RAM", e->pramt + 1, 9000 * 1000 / 14285);
     }
     if (!n) {
         if (missing)
@@ -2042,9 +2042,18 @@ static int diagnose(const la_cli_t *o) {
             q.trigger = st->name; q.capture = path; q.pre = pre; q.post = post; q.at = 0;
             q.timeout = boot ? 15 : 5;
             q.diagnose = NULL;
-            if (boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n"))
+            /* Captured on an earlier run into the same folder: use it again? */
+            la_capture_t old;
+            if (la_read(path, &old, err, sizeof(err))) {
+                char msg[200];
+                snprintf(msg, sizeof(msg), "%s.lac is in the folder from before: press Enter to use it, or type n, Enter to capture "
+                         "it again\n", st->name);
+                if (want_enter(msg)) { d = old; got = true; }
+                else la_free(&old);
+            }
+            if (!got && boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n"))
                 return 1;
-            got = capture_real(&q, &d, err, sizeof(err));
+            if (!got) got = capture_real(&q, &d, err, sizeof(err));
             if (!got && strstr(err, "no trigger") && boot &&
                 want_enter("It didn't come. Once more? Hold the reset button, press Enter (or type n, Enter if you did let go and\n"
                            "it still didn't come)\n"))
