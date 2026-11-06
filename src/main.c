@@ -122,6 +122,16 @@
  *   --la-devices
  *       The boards plugged in: port, USB serial number, firmware (stock, or
  *       the zx firmware of la-firmware, whose trigger ignores glitches).
+ *   --la-diagnose DIR [--board B] [--la-ports MASTER,OTHER] [--la-replay | --la-simulate --fault SPEC...]
+ *       Diagnose a Spectrum: capture the boot stage by stage (reset,
+ *       ramcheck, ramdone, copyright, main, interrupt; a reset each, you're
+ *       asked), compare each with the simulated working board B, stop at
+ *       the first that's wrong and say what to look at: a stuck line, a
+ *       data line, the ROM, which RAM chip (by the bit and the bank), what
+ *       the RAM test found. The captures and diagnosis.txt (every
+ *       comparison) go in DIR. --la-replay: from DIR's captures again.
+ *       --la-simulate: the board under test is the simulated B with the
+ *       --fault specs (a test of the diagnosis itself).
  *   --la-bootsel [--la-ports P,...]
  *       Restart the boards into the Pico's USB drive mode, to copy firmware
  *       (a .uf2) onto the RP2350 drive (la-firmware/README.md).
@@ -717,6 +727,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--la-tries") && i + 1 < argc) args.la.tries = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--la-at") && i + 1 < argc) args.la.at = atof(argv[++i]);
         else if (!strcmp(argv[i], "--la-bootsel")) args.la.bootsel = true;
+        else if (!strcmp(argv[i], "--la-diagnose") && i + 1 < argc) args.la.diagnose = argv[++i];
+        else if (!strcmp(argv[i], "--la-replay")) args.la.replay = true;
+        else if (!strcmp(argv[i], "--la-simulate")) args.la.simulate = true;
         else if (!strcmp(argv[i], "--la-log") && i + 1 < argc) args.la.log = argv[++i];
         else if (argv[i][0] == '-') { fprintf(stderr, "unknown option %s\n", argv[i]); return 1; }
         else {
@@ -751,7 +764,7 @@ int main(int argc, char **argv) {
     if (args.atlas_report || args.atlas_png) return atlas_report(args.atlas_path, args.atlas_png);
     if (args.healthy_sheet) return healthy_cli(args.healthy_sheet);
     if (args.la.info || args.la.cycles || args.la.record || args.la.compare || args.la.devices || args.la.capture || args.la.timeline ||
-        args.la.bootsel) {
+        args.la.bootsel || args.la.diagnose) {
         args.la.machine = args.machine;
         args.la.faults = args.faults;
         args.la.nfaults = args.nfaults;

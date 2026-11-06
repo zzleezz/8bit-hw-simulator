@@ -10,10 +10,12 @@
 
 /* Everything printed goes to the --la-log file as well. */
 static FILE *la_logf;
+static bool la_screen = true;           /* false: to the log alone */
 static int la_out(const char *fmt, ...) {
     va_list a;
+    int n = 0;
     va_start(a, fmt);
-    int n = vprintf(fmt, a);
+    if (la_screen) n = vprintf(fmt, a);
     va_end(a);
     if (la_logf) {
         va_start(a, fmt);
@@ -535,6 +537,7 @@ typedef struct {
     uint64_t *ring; int rpos, rcount;   /* before the trigger */
     uint64_t *out; int nout;            /* from the trigger */
     bool reset_prev, triggered, done;
+    long long reset_step;               /* when /RESET went high (trig_addr -2 counts from it) */
 } rec_t;
 
 static void rec_step(board_t *b, void *ctx) {
@@ -547,15 +550,19 @@ static void rec_step(board_t *b, void *ctx) {
         if (r->net[i] >= 0) v |= (uint64_t)(s->nread[s->nets[r->net[i]].root] & 1) << i;
     bool reset = v >> LA_RESET & 1;
     bool fire;
-    if (r->trig_addr < 0) fire = reset && !r->reset_prev;
+    if (r->trig_addr == -2) fire = r->after_reset && r->step - r->reset_step >= r->arm_step;
+    else if (r->trig_addr < 0) fire = reset && !r->reset_prev;
     else {
         /* As the analyser's pattern trigger: the address lines alone,
          * whatever the bus is doing, from the first match after reset. */
         unsigned a = (unsigned)(v >> LA_A0 & 0xFFFF);
         fire = r->after_reset && r->step >= r->arm_step && a == (unsigned)r->trig_addr && r->prev_addr != a;
         r->prev_addr = a;
+        /* While /RESET is low the real Z80's address lines float: the first
+         * address after it is a change, even if the simulation held it. */
+        if (reset && !r->reset_prev) r->prev_addr = 0x10000;
     }
-    if (reset && !r->reset_prev) r->after_reset = true;
+    if (reset && !r->reset_prev && !r->after_reset) { r->after_reset = true; r->reset_step = r->step; }
     if (!r->triggered && fire) {
         r->triggered = true;
         int start = r->rcount < r->pre ? 0 : r->rpos;
@@ -618,7 +625,8 @@ bool la_record_at(board_t *b, int pre, int post, int trig_addr, int arm_ms, int 
     free(r.ring);
     if (!r.triggered) {
         free(r.out);
-        if (trig_addr < 0) snprintf(err, errlen, "/RESET never went high in %d ms: the analyser would not trigger", max_ms);
+        if (trig_addr == -2) snprintf(err, errlen, "it didn't run to %d ms after the reset", arm_ms);
+        else if (trig_addr < 0) snprintf(err, errlen, "/RESET never went high in %d ms: the analyser would not trigger", max_ms);
         else snprintf(err, errlen, "the address bus never showed %04X from %d to %d ms after power on", trig_addr, arm_ms, max_ms);
         return false;
     }
@@ -1097,8 +1105,16 @@ static int filter(la_cycle_t *cy, int n, bool refresh) {
     return m;
 }
 
+/* What compare() found. */
+typedef struct {
+    int rc;                     /* 0 the same (or only the state), 2 a fault */
+    bool diverged;              /* the CPU went another way (not an interrupt's timing) */
+    int cycle;                  /* there */
+    la_cycle_t a, b;
+} cmp_out_t;
+
 static int compare(const char *an, const la_capture_t *a, const char *bn, const la_capture_t *b,
-                   int context, bool refresh) {
+                   int context, bool refresh, cmp_out_t *res) {
     la_cycle_t *ca, *cb;
     int na = la_cycles(a, &ca), nb = la_cycles(b, &cb);
     na = filter(ca, na, refresh);
@@ -1264,6 +1280,10 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
         const la_cycle_t *y = &cb[ib + k];
         if (rom_wrong(b, y)) printf("B read %02X at %04X: the ROM holds %02X\n", y->data, y->addr, zx48_rom_image()[y->addr]);
     }
+    if (res) {
+        *res = (cmp_out_t){ .rc = rc, .diverged = !end && !irq, .cycle = k };
+        if (!end) { res->a = ca[ia + k]; res->b = cb[ib + k]; }
+    }
     free(ca); free(cb);
     return rc;
 }
@@ -1401,10 +1421,11 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
      * trigger; with an address the CPU is at all the time, it fires at
      * once, and the capture shows where the boot is MS after the reset. */
     la_stage_t at_stage;
-    if (o->at > 0 && addr >= 0) {
+    if (o->at > 0) {
         at_stage = (la_stage_t){ "the time", addr, o->at, "armed again a set time after the reset" };
         st = &at_stage;
-        printf("Armed on the reset, then again %.1f ms after it, for %04X\n", o->at, addr);
+        if (addr >= 0) printf("Armed on the reset, then again %.1f ms after it, for %04X\n", o->at, addr);
+        else printf("Armed on the reset, then again %.1f ms after it\n", o->at);
     }
     else if (st) printf("Trigger: %s\n", st->what);
     else if (addr >= 0) printf("Trigger: the address bus showing %04X\n", addr);
@@ -1593,6 +1614,506 @@ static const char *board_desc(const la_cli_t *o, char *out, int len) {
     return out;
 }
 
+
+/* ------------------------------------------------------------------------ */
+/* --la-diagnose: the boot stage by stage, and what's wrong                  */
+/* ------------------------------------------------------------------------ */
+
+/* The stages in order, and how much to capture of each (the analyser's
+ * samples at 14 MHz): before the RAM test's end, enough to see the byte
+ * it failed on. */
+static const struct { const char *stage; int pre, post; } diag_plan[] = {
+    { "reset", 1000, 97000 }, { "ramcheck", 1000, 97000 }, { "ramdone", 20000, 78000 },
+    { "copyright", 1000, 97000 }, { "main", 1000, 97000 }, { "interrupt", 1000, 97000 },
+};
+#define DIAG_NSTAGES 6
+
+enum { AR_ROM, AR_LRAM, AR_URAM, AR_N };
+
+/* What a capture of the board under test shows against a working one's. */
+typedef struct {
+    int bad[AR_N][8], low[AR_N][8], high[AR_N][8];  /* reads with the bit wrong; of them 0 for 1, 1 for 0 */
+    int nbad[AR_N], first[AR_N];                    /* reads with a bit wrong, the first one's address */
+    int stuck[LA_NSIG];                             /* 1 low, 2 high all through, where a working one's changes */
+    int pramt, pramt_ref;                           /* the RAM test's result (P-RAMT), -1 not seen */
+    int test_addr, test_got;                        /* the byte it stopped on and its first read (02 was written) */
+} ev_t;
+
+static void ev_init(ev_t *e) {
+    memset(e, 0, sizeof(*e));
+    e->pramt = e->pramt_ref = e->test_addr = -1;
+}
+
+static int area_of(unsigned a) { return a < 0x4000 ? AR_ROM : a < 0x8000 ? AR_LRAM : AR_URAM; }
+
+static void ev_bits(ev_t *e, unsigned addr, unsigned got, unsigned want) {
+    int ar = area_of(addr);
+    unsigned x = (got ^ want) & 0xFF;
+    if (!x) return;
+    if (!e->nbad[ar]++) e->first[ar] = (int)addr;
+    for (int i = 0; i < 8; i++)
+        if (x >> i & 1) {
+            e->bad[ar][i]++;
+            if (want >> i & 1) e->low[ar][i]++;
+            else e->high[ar][i]++;
+        }
+}
+
+static unsigned ev_mask(const ev_t *e, int ar) {
+    unsigned m = 0;
+    for (int i = 0; i < 8; i++) if (e->bad[ar][i]) m |= 1u << i;
+    return m;
+}
+
+static bool ev_pramt_bad(const ev_t *e) { return e->pramt >= 0 && e->pramt_ref >= 0 && e->pramt != e->pramt_ref; }
+
+static bool ev_any(const ev_t *e) {
+    for (int s = 0; s < LA_NSIG; s++) if (e->stuck[s]) return true;
+    return e->nbad[0] || e->nbad[1] || e->nbad[2] || ev_pramt_bad(e);
+}
+
+/* The RAM test's result: the last write of P-RAMT (5CB4) in the capture. */
+static int pramt_of(const la_cycle_t *cy, int n) {
+    int lo_b = -1, hi_b = -1;
+    for (int k = 0; k < n; k++)
+        if (cy[k].kind == LA_WRITE) {
+            if (cy[k].addr == 0x5CB4) lo_b = cy[k].data;
+            if (cy[k].addr == 0x5CB5) hi_b = cy[k].data;
+        }
+    return lo_b >= 0 && hi_b >= 0 ? hi_b << 8 | lo_b : -1;
+}
+
+/* A line that never changes in D from the reset (or the start) on. */
+static int line_state(const la_capture_t *c, int s) {
+    int from = la_start(c);
+    if (from >= c->n) return -1;
+    uint64_t v0 = c->s[from] >> s & 1;
+    for (int i = from + 1; i < c->n; i++) if ((c->s[i] >> s & 1) != v0) return -1;
+    return v0 ? 2 : 1;
+}
+
+/* The evidence in D (the board under test) against R (a working one). */
+static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
+    la_cycle_t *cy;
+    int n = la_cycles(d, &cy);
+    static short last[65536];
+    for (int k = 0; k < 65536; k++) last[k] = -1;
+    for (int k = 0; k < n; k++) {
+        const la_cycle_t *x = &cy[k];
+        if (rom_wrong(d, x)) ev_bits(e, x->addr, x->data, zx48_rom_image()[x->addr]);
+        if (x->addr < 0x4000) continue;
+        if (x->kind == LA_WRITE) last[x->addr] = (short)x->data;
+        else if ((x->kind == LA_READ || x->kind == LA_FETCH) && last[x->addr] >= 0 && last[x->addr] != x->data) {
+            ev_bits(e, x->addr, x->data, (unsigned)last[x->addr]);
+            last[x->addr] = (short)x->data;
+        }
+    }
+    int p = pramt_of(cy, n);
+    if (p >= 0) e->pramt = p;
+    if (r) {
+        la_cycle_t *cr;
+        int nr = la_cycles(r, &cr);
+        int pr = pramt_of(cr, nr);
+        if (pr >= 0) e->pramt_ref = pr;
+        free(cr);
+    }
+    /* The RAM test stopped short: the byte after P-RAMT. It wrote 02 there
+     * (the fill), and reads it back first. */
+    if (ev_pramt_bad(e) && e->pramt < 0xFFFF && e->pramt >= 0x3FFF) {
+        unsigned x = (unsigned)e->pramt + 1;
+        for (int k = 0; k < n; k++)
+            if (cy[k].kind == LA_READ && cy[k].addr == x) {
+                e->test_addr = (int)x;
+                e->test_got = cy[k].data;
+                ev_bits(e, x, cy[k].data, 0x02);
+                break;
+            }
+    }
+    free(cy);
+    /* Lines any running Z80 changes all the time. */
+    static const int busy[] = { LA_MREQ, LA_RD, LA_WR, LA_M1, LA_RFSH, LA_CLK };
+    for (int s = 0; r && s < LA_NSIG; s++) {
+        bool look = (s >= LA_A0 && s <= LA_A15) || (s >= LA_D0 && s <= LA_D7);
+        for (int k = 0; k < 6; k++) look |= s == busy[k];
+        if (!look || !(d->have >> s & 1) || !(r->have >> s & 1)) continue;
+        int st = line_state(d, s);
+        if (st > 0 && line_state(r, s) < 0) e->stuck[s] = st;
+    }
+}
+
+/* Where the CPU was in a capture (taken at a time, not at a stage). */
+static void where_text(const la_capture_t *c, char *out, int len) {
+    la_cycle_t *cy;
+    int n = la_cycles(c, &cy), nf = 0, ram = 0, lo_a = 0xFFFF, hi_a = 0, fill = 0, rb = 0, irq = 0;
+    for (int k = 0; k < n; k++) {
+        if (cy[k].kind != LA_FETCH) continue;
+        unsigned a = cy[k].addr;
+        nf++;
+        if (a >= 0x4000) ram++;
+        if ((int)a < lo_a) lo_a = (int)a;
+        if ((int)a > hi_a) hi_a = (int)a;
+        fill += a >= 0x11DC && a <= 0x11E1;
+        rb += a >= 0x11E2 && a <= 0x11EE;
+        irq += a >= 0x0038 && a <= 0x0052;
+    }
+    free(cy);
+    int halt = 0, from = la_start(c);
+    if (c->have >> LA_HALT & 1)
+        for (int i = from; i < c->n; i++) halt += lo(c->s[i], LA_HALT);
+    if (!nf) snprintf(out, len, "no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)");
+    else if (halt > (c->n - from) / 2) snprintf(out, len, "halted (HALT low): it ran into a HALT, so it went astray before");
+    else if (2 * fill > nf) snprintf(out, len, "still filling the RAM for the RAM test (11DC-11E1)");
+    else if (2 * rb > nf) snprintf(out, len, "still reading the RAM back for the RAM test (11E2-11EE)");
+    else if (2 * ram > nf) snprintf(out, len, "running code from RAM (%04X-%04X): it went astray", lo_a, hi_a);
+    else snprintf(out, len, "fetching from %04X-%04X%s", lo_a, hi_a, irq ? " (and the frame interrupt)" : "");
+}
+
+/* A simulated board's capture: with FAULTS, triggered at TRIG (-1 the
+ * reset, -2 ARM_MS after the reset, else the address from ARM_MS after
+ * power on). */
+static bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int pre, int post, int trig, int arm_ms,
+                       la_capture_t *c, char *err, int errlen) {
+    board_t *b = board_create(m);
+    for (int i = 0; i < nfaults; i++)
+        if (!board_apply_fault_spec(b, faults[i])) {
+            snprintf(err, errlen, "bad fault spec: %s", faults[i]);
+            board_destroy(b);
+            return false;
+        }
+    bool ok = trig == -1 ? la_record(b, pre, post, c, err, errlen)
+                         : la_record_at(b, pre, post, trig, arm_ms, trig == -2 ? arm_ms + 1000 : arm_ms + 4000, c, err, errlen);
+    board_destroy(b);
+    return ok;
+}
+
+/* A capture at a time: armed on the reset, then again AT_MS after it (0:
+ * at once, no reset) on A0 being high for 60 ns, which a running Z80 shows
+ * all the time (or low, if A0 is stuck high). */
+static bool capture_now(const la_cli_t *o, double at_ms, const char *save, la_capture_t *c, char *err, int errlen) {
+    la_cli_t q = *o;
+    q.at = at_ms;
+    q.capture = save;
+    q.tries = 3;
+    q.timeout = 5;
+    q.pre = 1000;
+    q.post = 97000;
+    q.trigger = "raw:1,15,1,1";
+    if (capture_real(&q, c, err, errlen)) return true;
+    if (!strstr(err, "no trigger")) return false;
+    printf("Again, for A0 low this time (it was never high)%s\n",
+           at_ms > 0 ? ": hold the reset button down, press Enter, and let go once it says Armed" : "");
+    if (at_ms > 0) { char line[16]; if (!fgets(line, sizeof(line), stdin)) return false; }
+    q.trigger = "raw:1,15,1,0";
+    return capture_real(&q, c, err, errlen);
+}
+
+static bool want_enter(const char *msg) {
+    printf("%s", msg);
+    char line[64];
+    if (!fgets(line, sizeof(line), stdin)) return false;
+    return line[0] != 'n' && line[0] != 'N';
+}
+
+static board_t *vboard;     /* the board's parts, for their references */
+
+static const char *ref_of(const char *label) {
+    for (int i = 0; vboard && i < vboard->sim.nparts; i++) {
+        const char *l = board_part_label(vboard, i);
+        if (l && !strcmp(l, label)) return vboard->sim.parts[i].ref;
+    }
+    return NULL;
+}
+
+/* The parts that serve one bank of RAM as a whole (their description
+ * says "lower RAM" or "upper RAM"), but its chips. */
+static void bank_parts(const char *bank, const char *chips, char *out, int len) {
+    int n = 0;
+    out[0] = 0;
+    for (int i = 0; vboard && i < vboard->sim.nparts && n < len; i++) {
+        const char *d = board_part_detail(vboard, i), *l = board_part_label(vboard, i);
+        if (!d || !strstr(d, bank) || (l && !strncmp(l, chips, 4))) continue;
+        n += snprintf(out + n, len - n, "%s%s (%s)", n ? ", " : "", vboard->sim.parts[i].ref, l ? l : "?");
+    }
+}
+
+static int z80_pin(int s) {
+    static const int a[16] = { 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 1, 2, 3, 4, 5 };
+    static const int d[8] = { 14, 15, 12, 8, 7, 9, 10, 13 };
+    if (s >= LA_A0 && s <= LA_A15) return a[s - LA_A0];
+    if (s >= LA_D0 && s <= LA_D7) return d[s - LA_D0];
+    switch (s) {
+    case LA_MREQ: return 19; case LA_RD: return 21; case LA_WR: return 22; case LA_M1: return 27; case LA_RFSH: return 28;
+    case LA_CLK: return 6;
+    default: return 0;
+    }
+}
+
+static const char *bits_way(const ev_t *e, int ar, int bit) {
+    if (!e->high[ar][bit]) return "reads 0 where it should be 1";
+    if (!e->low[ar][bit]) return "reads 1 where it should be 0";
+    return "reads wrong both ways";
+}
+
+static void bits_text(unsigned m, char *out, int len) {
+    int n = 0;
+    out[0] = 0;
+    for (int i = 0; i < 8 && n < len; i++) if (m >> i & 1) n += snprintf(out + n, len - n, "%sD%d", n ? " " : "", i);
+}
+
+static int popcount8(unsigned m) { int c = 0; for (; m; m &= m - 1) c++; return c; }
+
+/* What it points at, most likely first. */
+static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, const cmp_out_t *co, const char *where) {
+    vboard = board_create(m);
+    const char *cpu = ref_of("CPU"), *rom = ref_of("ROM"), *ula = ref_of("ULA");
+    if (!cpu) cpu = "the CPU";
+    if (!rom) rom = "the ROM";
+    int n = 0;
+    char buf[400], bits[64];
+    printf("\nWhat to look at, most likely first:\n");
+    /* Most of the lines dead: the CPU isn't running at all. */
+    int nstuck = 0, nctl = 0;
+    for (int s = 0; s < LA_NSIG; s++)
+        if (e->stuck[s]) { nstuck++; nctl += s == LA_MREQ || s == LA_RD || s == LA_WR || s == LA_M1 || s == LA_RFSH; }
+    if (e->stuck[LA_CLK])
+        printf("  %d. No clock: CLK (%s's pin 6) is stuck %s. It comes from %s (the ULA, from the 14 MHz crystal): the ULA, the\n"
+               "     crystal, or a short on the line. Nothing runs without it.\n", ++n, cpu, e->stuck[LA_CLK] == 1 ? "low" : "high",
+               ula ? ula : "ULA");
+    if (nstuck >= 8) {
+        printf("  %d. The CPU isn't running: %d of the lines a running Z80 changes all the time never change. Check what it\n"
+               "     needs: its clock (pin 6), /RESET (pin 26) high, /WAIT (24) and /BUSRQ (25) high, 5 V on pin 11, 0 V on\n"
+               "     pin 29; then the CPU (%s) itself%s.\n", ++n, nstuck, cpu, e->stuck[LA_CLK] ? "" : "");
+        goto done;
+    }
+    /* A line that doesn't change: stuck, whatever drives it. */
+    for (int s = 0; s < LA_NSIG; s++) {
+        if (!e->stuck[s] || s == LA_CLK) continue;
+        printf("  %d. %s is stuck %s all through, where a working board's changes all the time: a short to %s, or the line\n"
+               "     broken. It's %s's pin %d; every chip on the line is a suspect, and the line's tracks.\n",
+               ++n, la_signal_name(s), e->stuck[s] == 1 ? "low" : "high", e->stuck[s] == 1 ? "0 V (or another line)" : "5 V (or another line)",
+               cpu, z80_pin(s));
+    }
+    unsigned mr = ev_mask(e, AR_ROM), ml = ev_mask(e, AR_LRAM), mu = ev_mask(e, AR_URAM);
+    unsigned shared = (mr & ml) | (mr & mu) | (ml & mu);
+    for (int i = 0; i < 8; i++) {
+        if (!(shared >> i & 1) || e->stuck[LA_D0 + i]) continue;
+        printf("  %d. Data line D%d is wrong from %s%s%s: not one chip, the line itself (%s's pin %d) or a chip that\n"
+               "     holds it (a short, a chip driving it when it shouldn't)\n", ++n, i,
+               mr >> i & 1 ? "the ROM" : "", mr >> i & 1 && (ml | mu) >> i & 1 ? " and " : "", (ml | mu) >> i & 1 ? "the RAM" : "",
+               cpu, z80_pin(LA_D0 + i));
+    }
+    unsigned stuckd = 0;
+    for (int i = 0; i < 8; i++) if (e->stuck[LA_D0 + i]) stuckd |= 1u << i;
+    mr &= ~(shared | stuckd); ml &= ~(shared | stuckd); mu &= ~(shared | stuckd);
+    /* A stuck control or address line: the wrong bytes follow from it. */
+    bool addr_stuck = false;
+    for (int i = 0; i < 16; i++) addr_stuck |= e->stuck[LA_A0 + i] != 0;
+    if (nctl || addr_stuck) { mr = ml = mu = 0; shared = 0; }
+    if (mr) {
+        bits_text(mr, bits, sizeof(bits));
+        if (popcount8(mr) >= 3)
+            printf("  %d. %s, the ROM: %d reads with bits %s wrong (the first at %04X): the chip, or its address lines or\n"
+                   "     select (/ROMCS)\n", ++n, rom, e->nbad[AR_ROM], bits, e->first[AR_ROM]);
+        else
+            for (int i = 0; i < 8; i++)
+                if (mr >> i & 1)
+                    printf("  %d. %s, the ROM: its D%d %s (%d read%s, the first at %04X)\n", ++n, rom, i, bits_way(e, AR_ROM, i),
+                           e->bad[AR_ROM][i], e->bad[AR_ROM][i] == 1 ? "" : "s", e->first[AR_ROM]);
+    }
+    for (int ar = AR_LRAM; ar <= AR_URAM; ar++) {
+        unsigned mm = ar == AR_LRAM ? ml : mu;
+        const char *bank = ar == AR_LRAM ? "lower RAM" : "upper RAM", *chips = ar == AR_LRAM ? "LRAM" : "URAM";
+        const char *range = ar == AR_LRAM ? "4000-7FFF" : "8000-FFFF";
+        if (!mm) continue;
+        bits_text(mm, bits, sizeof(bits));
+        if (popcount8(mm) >= 3) {
+            bank_parts(bank, chips, buf, sizeof(buf));
+            printf("  %d. The %s (%s) as a whole: bits %s wrong (the first at %04X). Not one chip: what all its\n"
+                   "     chips share: %s%s\n", ++n, bank, range, bits, e->first[ar], buf[0] ? buf : "its address multiplexers and select",
+                   ar == AR_LRAM && ula ? "" : "");
+            continue;
+        }
+        int reads = 0;
+        for (int i = 0; i < 8; i++) {
+            if (!(mm >> i & 1)) continue;
+            char lab[8];
+            snprintf(lab, sizeof(lab), "%s%d", chips, i);
+            const char *ic = ref_of(lab);
+            reads += e->bad[ar][i];
+            printf("  %d. %s, the %s's bit D%d (%s): it %s (%d read%s, the first at %04X)\n", ++n, ic ? ic : "the chip", bank, i,
+                   range, bits_way(e, ar, i), e->bad[ar][i], e->bad[ar][i] == 1 ? "" : "s", e->first[ar]);
+        }
+        if (reads <= 2) {
+            /* One byte wrong can be the bank's addressing as well as a chip. */
+            bank_parts(bank, chips, buf, sizeof(buf));
+            if (buf[0])
+                printf("  %d. Or what the %s's chips share, if they are all addressed wrong (only %d wrong read%s to go on):\n"
+                       "     %s\n", ++n, bank, reads, reads == 1 ? "" : "s", buf);
+        }
+    }
+    if (ev_pramt_bad(e)) {
+        printf("     The RAM test (the ROM's own, at the switch on) stopped at %04X, in the %s; a working one's goes to %04X.\n",
+               e->pramt + 1, e->pramt + 1 >= 0x8000 ? "upper RAM" : "lower RAM", e->pramt_ref);
+        if (e->test_addr >= 0)
+            printf("     Its first read there gave %02X: 02 was written.\n", e->test_got);
+        if (!ml && !mu && e->test_addr < 0)
+            printf("  %d. The %s, from %04X: which bit isn't in the capture (it holds the last %d us before the test ended)\n", ++n,
+                   e->pramt + 1 >= 0x8000 ? "upper RAM" : "lower RAM", e->pramt + 1, 20000 * 1000 / 14285714 * 1000 / 1000);
+    }
+    if (!n) {
+        if (missing)
+            printf("  No one part shows in the captures: %s never came. When it should have, the CPU was %s.\n"
+                   "  So it went astray after the stage before passed: the captures are in the folder, and the log has them.\n",
+                   stage, where && where[0] ? where : "somewhere else");
+        else if (co && co->diverged) {
+            char tx[32], ty[32];
+            cycle_text(&co->a, tx, sizeof(tx));
+            cycle_text(&co->b, ty, sizeof(ty));
+            printf("  No one part shows: at %s the CPU went another way, %s where a working one does %s.\n"
+                   "  Look at the cycles before it in the log: the byte it read last decides where it goes.\n", stage, tx, ty);
+        }
+    }
+done:
+    board_destroy(vboard);
+    vboard = NULL;
+    return n;
+}
+
+#ifdef _WIN32
+#include <direct.h>
+#define mkdir1(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#define mkdir1(p) mkdir(p, 0777)
+#endif
+
+static int diagnose(const la_cli_t *o) {
+    const machine_t *m = o->machine ? o->machine : &machine_zx48;
+    const char *dir = o->diagnose;
+    char path[1024], err[512], bn[300];
+    mkdir1(dir);
+    if (!la_logf) {
+        snprintf(path, sizeof(path), "%s/diagnosis.txt", dir);
+        la_logf = fopen(path, "w");
+    }
+    const char *how = o->replay ? "from the captures in the folder" :
+                      o->simulate ? "of the simulated board" : "with the logic analyser";
+    printf("Diagnosing a %s, stage by stage, %s\n", m->board_name, how);
+    if (o->simulate) {
+        printf("The board under test: the simulated %s", m->board_name);
+        for (int i = 0; i < o->nfaults; i++) printf("%s%s", i ? " " : ", with ", o->faults[i]);
+        printf("\n");
+    }
+    if (!o->replay && !o->simulate)
+        printf("Each stage after the reset is once a boot: you hold the Spectrum's reset button, press Enter here, and let go\n"
+               "once it says Armed. The captures and a log go in %s\n", dir);
+    la_cli_t ref = *o;
+    ref.faults = NULL; ref.nfaults = 0; ref.capture = NULL; ref.pre = ref.post = 0; ref.machine = m;
+    ev_t e;
+    ev_init(&e);
+    cmp_out_t co = { 0 };
+    char where[200] = "";
+    const char *fail_stage = NULL;
+    bool missing = false;
+    int passed = 0;
+    for (int i = 0; i < DIAG_NSTAGES; i++) {
+        const la_stage_t *st = stage_named(diag_plan[i].stage);
+        int pre = diag_plan[i].pre, post = diag_plan[i].post;
+        bool boot = st->addr != 0x0038;
+        la_capture_t d, r;
+        bool got = false, instead = false;
+        char ipath[1024];
+        snprintf(path, sizeof(path), "%s/%s.lac", dir, st->name);
+        snprintf(ipath, sizeof(ipath), "%s/%s-instead.lac", dir, st->name);
+        printf("\n%d of %d, %s: %s\n", i + 1, DIAG_NSTAGES, st->name, st->what);
+        double at = i == 0 ? 0 : st->ms + 5;    /* when it's past due */
+        if (o->replay) {
+            got = la_read(path, &d, err, sizeof(err));
+            if (!got) instead = la_read(ipath, &d, err, sizeof(err));
+            if (!got && !instead) { printf("  Not in the folder (%s): the diagnosis stops here\n", path); break; }
+        } else if (o->simulate) {
+            int arm = boot ? 0 : 2000;
+            got = record_sim(m, o->faults, o->nfaults, pre * 2, post * 2, st->addr, arm, &d, err, sizeof(err));
+            if (!got && i == 0) got = record_sim(m, o->faults, o->nfaults, pre * 2, post * 2, 0x0000, 0, &d, err, sizeof(err));
+            if (!got) instead = record_sim(m, o->faults, o->nfaults, 2000, post * 2, -2, i == 0 ? 1 : (int)at, &d, err, sizeof(err));
+            if (!got && !instead) { la_err(err); return 1; }
+        } else {
+            la_cli_t q = *o;
+            q.trigger = st->name; q.capture = path; q.pre = pre; q.post = post; q.at = 0;
+            q.timeout = boot ? 15 : 5;
+            q.diagnose = NULL;
+            if (boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n"))
+                return 1;
+            got = capture_real(&q, &d, err, sizeof(err));
+            if (!got && strstr(err, "no trigger") && boot &&
+                want_enter("It didn't come. Once more? Hold the reset button, press Enter (or type n, Enter if you did let go and\n"
+                           "it still didn't come)\n"))
+                got = capture_real(&q, &d, err, sizeof(err));
+            if (!got && !strstr(err, "no trigger") && !strstr(err, "no key")) { la_err(err); return 1; }
+            if (!got && i == 0) {
+                printf("The reset's FFFF never showed: now for its first fetch, 0000\n");
+                if (!want_enter("Hold the reset button down, press Enter, and let go once it says Armed\n")) return 1;
+                q.trigger = "addr=0000";
+                got = capture_real(&q, &d, err, sizeof(err));
+                if (got) d.trig_addr = 0x0000;
+            }
+            if (!got) {
+                if (i == 0) printf("Now what it's doing at all: let it run (switched on, reset button not held)\n");
+                else printf("Now what it's doing when %s should have come: hold the reset button down, press Enter, and\n"
+                            "let go once it says Armed\n", st->name);
+                if (!want_enter(i == 0 ? "Press Enter\n" : "")) return 1;
+                instead = capture_now(o, at, ipath, &d, err, sizeof(err));
+                if (!instead) { la_err(err); return 1; }
+            }
+            if (!la_write(got ? path : ipath, &d, err, sizeof(err))) la_err(err);
+        }
+        if ((o->simulate) && !la_write(got ? path : ipath, &d, err, sizeof(err))) la_err(err);
+        /* A working board's, to compare with. */
+        bool have_r = got ? record_board(&ref, sim_length(&d), d.trig_addr, &r, err, sizeof(err))
+                          : record_sim(m, NULL, 0, 2000, 194000, -2, i == 0 ? 1 : (int)at, &r, err, sizeof(err));
+        if (!have_r) { la_err(err); la_free(&d); return 1; }
+        ev_t se;
+        ev_init(&se);
+        cmp_out_t sco = { 0 };
+        la_screen = false;
+        printf("\n==== %s: %s\n", st->name, got ? path : ipath);
+        if (got) compare(got ? path : ipath, &d, board_desc(&ref, bn, sizeof(bn)), &r, 8, o->refresh, &sco);
+        gather(&se, &d, &r);
+        if (instead) where_text(&d, where, sizeof(where));
+        la_screen = true;
+        la_free(&d);
+        la_free(&r);
+        bool bad = instead || sco.rc == 2 || ev_any(&se);
+        if (!bad) {
+            passed++;
+            printf("  OK: the same as a working one%s\n",
+                   se.pramt == 0xFFFF ? " (the RAM test passed all 48K)" : se.pramt == 0x7FFF ? " (the RAM test passed 16K)" : "");
+            continue;
+        }
+        e = se;
+        co = sco;
+        fail_stage = st->name;
+        missing = instead;
+        if (instead) printf("  It never came. When it should have, the CPU was %s\n", where);
+        else if (sco.diverged) printf("  FAULT: the CPU went another way (cycle %d)\n", sco.cycle);
+        else printf("  FAULT: it got there, but the bus shows something wrong\n");
+        break;
+    }
+    printf("\n");
+    if (!fail_stage) {
+        if (passed == DIAG_NSTAGES)
+            printf("All %d stages are the same as a working %s: the CPU, the ROM, all of the RAM (the ROM's RAM test)\n"
+                   "and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.\n",
+                   passed, m->board_name);
+        return 0;
+    }
+    printf("The boot goes wrong at %s (%d stage%s before it %s good).\n", fail_stage, passed, passed == 1 ? "" : "s",
+           passed == 1 ? "is" : "are");
+    verdict(&e, m, fail_stage, missing, &co, where);
+    printf("\nThe captures and the whole comparison: %s (diagnosis.txt)\n", dir);
+    return 2;
+}
+
 int la_cli(const la_cli_t *o) {
     char err[512];
     if (o->bootsel) {                   /* --la-bootsel [--la-ports P1,P2] */
@@ -1611,6 +2132,7 @@ int la_cli(const la_cli_t *o) {
     int count = o->count > 0 ? o->count : 20;
     la_capture_t c;
     if (o->devices) { list_devices(); return 0; }
+    if (o->diagnose) return diagnose(o);
     if (o->timeline) return timeline(o);
     if (o->capture) {
         if (!capture_real(o, &c, err, sizeof(err))) { la_err(err); return 1; }
@@ -1623,7 +2145,7 @@ int la_cli(const la_cli_t *o) {
             char bn[300];
             printf("\n");
             if (!record_board(o, sim_length(&c), c.trig_addr, &b, err, sizeof(err))) { la_err(err); la_free(&c); return 1; }
-            rc = compare(o->capture, &c, board_desc(o, bn, sizeof(bn)), &b, count < 8 ? count : 8, o->refresh);
+            rc = compare(o->capture, &c, board_desc(o, bn, sizeof(bn)), &b, count < 8 ? count : 8, o->refresh, NULL);
             la_free(&b);
         }
         la_free(&c);
@@ -1664,7 +2186,7 @@ int la_cli(const la_cli_t *o) {
         bool ok = o->against ? la_read(o->against, &b, err, sizeof(err)) : record_board(o, sim_length(&c), c.trig_addr, &b, err, sizeof(err));
         if (!ok) { fprintf(stderr, "%s: %s\n", o->against ? o->against : "recording", err); la_free(&c); return 1; }
         int rc = compare(o->compare, &c, o->against ? o->against : board_desc(o, bn, sizeof(bn)), &b,
-                         o->count > 0 ? o->count : 8, o->refresh);
+                         o->count > 0 ? o->count : 8, o->refresh, NULL);
         la_free(&c); la_free(&b);
         return rc;
     }

@@ -27,6 +27,16 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser: `--la-diagnose DIR` diagnoses a Spectrum. It captures the
+  boot stage by stage (reset, RAM test, its end, the copyright message, the
+  main loop, a frame interrupt; it asks for each reset), compares each with
+  the simulated working board, stops at the first that's wrong and says
+  what to look at: a stuck line (with the Z80's pin), a data line, the ROM,
+  the RAM chip by its bit and bank (or what the bank's chips share), where
+  the ROM's own RAM test stopped, a CPU that isn't running or has no clock.
+  A stage that never comes: what the CPU was doing then instead.
+  `--la-replay` runs it again on DIR's captures, `--la-simulate --fault`
+  on a simulated faulty board (21 faults tested, each named right).
 - Logic analyser: the zx firmware for the boards (`la-firmware`, a small
   change to gusmanb's, GPL-3): its trigger needs the address for 60 ns, so
   the glitches as the Spectrum's address lines change don't fire it (they
