@@ -700,13 +700,21 @@ and will take the captures; Pico model to be agreed with Jim.
 - [x] 2026-11-06 Capture from the simulator itself over USB (src/lapico.c,
       --la-devices, --la-capture): no LogicAnalyzer program needed. Works
       with both Pico 2 boards and nothing on the inputs (10 in a row).
-- [ ] --la-capture with the Spectrum attached: check the bits come back
-      on the right channels (the ROM's opening bytes), then --board issue2.
-- [ ] Remember which board is the master (now --la-ports COM12,COM13 or
-      the serial numbers each time), and capture from the GUI.
-- [ ] Capture scenarios: start-up first (obvious faults), then triggers at
-      later stages (after the RAM test, the copyright screen, BASIC, a
-      game). The trigger can only be the address bus (master ch 1-16).
+- [x] --la-capture with the Spectrum attached (live1.lac): the bits are on
+      the right channels, all 5116 shared cycles match the simulated Issue 2.
+- [ ] Setup for anyone's boards (other serial numbers): plug in the board
+      nearest the Spectrum first (the master), then the other (the slave);
+      the simulator sees which COM port came and saves both serials
+      (--la-setup and in the GUI). Then capture from the GUI.
+- [x] 2026-11-06 Capture scenarios: --la-trigger reset/ramcheck/ramdone/
+      copyright/main/interrupt/addr=XXXX, glitch re-arm, the simulated
+      board at the same stage, CPU vs data in the compare, RAM read-backs,
+      P-RAMT. Real Issue 2: reset and interrupt match.
+- [ ] Real captures of ramcheck, ramdone, copyright, main (capture.bat).
+- [ ] A game running as a health test (needs a trigger inside the game:
+      addr= on its own code, or interrupt with the game's IM 2 vector).
+- [ ] Name the RAM chip from the wrong bit and the address (Issue 2: IC6-13
+      lower 16K, IC15-22 upper 32K, one per data bit).
 - [ ] Open the simulated .lac in the LogicAnalyzer program (does it load?).
 - [ ] Step 1, readings: each signal low / high / pulsing (--la-info has
       them) imported into "Diagnose by probing" ("Import capture").
