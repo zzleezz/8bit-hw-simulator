@@ -561,7 +561,8 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
     int cap = 1024, n = 0;
     la_cycle_t *cy = malloc((size_t)cap * sizeof(la_cycle_t));
     int t = 0;
-    bool in = false, mreq = false, saw_m1 = false, saw_rfsh = false, saw_rd = false, saw_wr = false;
+    bool in = false, mreq = false, saw_rd = false, saw_wr = false;
+    int n_act = 0, n_m1 = 0, n_rfsh = 0;
     unsigned rdata = 0xFF, wdata = 0xFF;
     la_cycle_t cur = { 0 };
     int start = la_start(c);
@@ -572,19 +573,24 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
         if (act && !in) {
             in = true;
             mreq = lo(v, LA_MREQ);
-            saw_m1 = saw_rfsh = saw_rd = saw_wr = false;
+            saw_rd = saw_wr = false;
+            n_act = n_m1 = n_rfsh = 0;
             cur = (la_cycle_t){ .addr = (uint16_t)addr_of(v), .sample = i, .t = clk ? t : -1 };
         }
         if (in && act) {
-            if (m1 && lo(v, LA_M1)) saw_m1 = true;
-            if (rfsh && lo(v, LA_RFSH)) saw_rfsh = true;
+            /* /M1 and /RFSH by most of the cycle: on a real board /RFSH
+             * falls a sample or so before the fetch's /MREQ rises. */
+            n_act++;
+            if (m1 && lo(v, LA_M1)) n_m1++;
+            if (rfsh && lo(v, LA_RFSH)) n_rfsh++;
             if (lo(v, LA_RD)) { saw_rd = true; rdata = data_of(v); }
             if (lo(v, LA_WR)) { saw_wr = true; wdata = data_of(v); }
-            if (saw_m1 && !mreq) rdata = data_of(v);       /* the interrupt vector */
+            if (m1 && lo(v, LA_M1) && !mreq) rdata = data_of(v);       /* the interrupt vector */
             continue;
         }
         if (!in) continue;
         in = false;
+        bool saw_m1 = 2 * n_m1 > n_act, saw_rfsh = 2 * n_rfsh > n_act;
         int kind;
         if (mreq) kind = saw_rfsh ? LA_REFRESH : saw_m1 ? LA_FETCH : saw_wr ? LA_WRITE : saw_rd ? LA_READ : -1;
         else kind = saw_m1 ? LA_INTACK : saw_wr ? LA_OUT : saw_rd ? LA_IN : -1;
