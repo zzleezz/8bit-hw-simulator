@@ -710,11 +710,13 @@ and will take the captures; Pico model to be agreed with Jim.
       copyright/main/interrupt/addr=XXXX, glitch re-arm, the simulated
       board at the same stage, CPU vs data in the compare, RAM read-backs,
       P-RAMT. Real Issue 2: reset and interrupt match.
-- [ ] Real captures of ramcheck, ramdone, copyright, main (capture.bat).
+- [x] Real captures of ramcheck, ramdone, copyright, main (done by
+      --la-diagnose, diagnose.bat, 2026-11-06).
 - [ ] A game running as a health test (needs a trigger inside the game:
       addr= on its own code, or interrupt with the game's IM 2 vector).
-- [ ] Name the RAM chip from the wrong bit and the address (Issue 2: IC6-13
-      lower 16K, IC15-22 upper 32K, one per data bit).
+- [x] Name the RAM chip from the wrong bit and the address (Issue 2: IC6-13
+      lower 16K, IC15-22 upper 32K, one per data bit). Done in
+      --la-diagnose; a real faulty 4116 (i2-lr1, IC7) named right.
 - [ ] Open the simulated .lac in the LogicAnalyzer program (does it load?).
 - [ ] Step 1, readings: each signal low / high / pulsing (--la-info has
       them) imported into "Diagnose by probing" ("Import capture").
@@ -806,6 +808,45 @@ the bitmap and leave out the border colour and the attribute colours.
       drawn over five readings, not four, so they differ). No change from
       bad levels; the drop against the README's figures is the atlas
       refresh / this fault set, not the probing code.
+
+## 12. Logic analyser diagnosis: next (agreed 2026-11-06)
+Where it stands: `--la-diagnose` (diagnose.bat) takes an idle capture
+(left running, no reset) and six boot stages, and names the part. Checked
+on the user's real faulty boards: ULAs (contention, clock, keyboard), CPUs
+(dead, /RESET held, A11 weak, data garbage), 74LS157s (IC3 A3 alias, IC26
+holding A9), 4116s (IC7 D1, IC22 D7 late, pulled chips).
+Tonight (the user away, no manual tests):
+- [ ] 1. The regression test into the repo (tests/la/): replays every real
+      diagnosis folder and a set of simulated faults, compares with the
+      last run. The captures stay outside git (5 MB each).
+- [ ] 3. The diagnosis in the GUI: a "Diagnose with the analyser" window,
+      prompts on screen instead of "press Enter", the verdict beside the
+      board with the suspect chips highlighted.
+- [ ] 4. Merge logic-analyser into main and push.
+Later, needs the user at the bench:
+- [ ] The idle stage on real faults: edge connector /WAIT to 0 V, then
+      /BUSRQ to 0 V (both inputs with pull-ups: safe), the reset button
+      held through the idle capture. A real board whose /RESET is broken.
+- [ ] Screenshots of the video-side ULA faults (i2-ula2, mc-3): they pass
+      every stage (the edge connector can't see the ULA's own RAM reads).
+      Make the screenshot matcher a last step of the same diagnosis.
+- [ ] More RAM tests (the user has more), more Z80s.
+Later, software:
+- [ ] Simulated IC4.9:gnd (lower RAM multiplexer) passes all six stages:
+      find out why the RAM test misses it.
+- [ ] The frame interrupt's ULA pin: /INT reaches the CPU through a
+      resistor, so only the ULA chip is named, not its pin.
+- [ ] Other Spectrum issues (1, 3B, 4A/4B, 6A): the diagnosis works from
+      each board's netlist but is tested on the Issue 2 only.
+- [ ] The CLK shape as a hint of the ULA's version (the share of pulses
+      the analyser sees: 85-90% on good ULAs).
+- [ ] The idle capture's stuck lines are left out of the verdict (a faulty
+      board left running is in other code: they misled on simulated RAM
+      faults); a longer or repeated idle capture could make them usable.
+- [ ] A line that changes a few times where a working one's changes
+      thousands now counts as stuck: the no-clock boards (mc-4,
+      majorchip-1) count 27 and 23 dead lines (13 and 9 before). Same
+      verdict; check the count's wording.
 
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
