@@ -939,6 +939,20 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
     unsigned run_a = 0, best_a = 0;
     int run_n = 0, best_n = 0;
     int start = la_start(c);
+    /* /M1 or /RFSH that hardly change while /MREQ goes all the time: a
+     * Z80 with that output dead (the 48K doesn't use /M1, and runs with
+     * it). Decoded without it: a fetch is a read with a refresh straight
+     * after it; a refresh, a memory cycle with neither /RD nor /WR. */
+    bool m1_dead = false, rfsh_dead = false;
+    if (m1 || rfsh) {
+        int cm = 0, cr = 0, cq = 0;
+        for (int i = start + 1; i < c->n; i++) {
+            uint64_t x = c->s[i] ^ c->s[i - 1];
+            cm += x >> LA_M1 & 1; cr += x >> LA_RFSH & 1; cq += x >> LA_MREQ & 1;
+        }
+        if (m1 && cq > 1000 && cm <= 20) { m1 = false; m1_dead = true; }
+        if (rfsh && cq > 1000 && cr <= 20) { rfsh = false; rfsh_dead = true; }
+    }
     for (int i = start; i < c->n; i++) {
         uint64_t v = c->s[i];
         if (clk && i > start && (v >> LA_CLK & 1) && lo(c->s[i - 1], LA_CLK)) t++;
@@ -976,7 +990,7 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
         in = false;
         bool saw_m1 = 2 * n_m1 > n_act, saw_rfsh = 2 * n_rfsh > n_act;
         int kind;
-        if (mreq) kind = saw_rfsh ? LA_REFRESH : saw_m1 ? LA_FETCH : saw_wr ? LA_WRITE : saw_rd ? LA_READ : -1;
+        if (mreq) kind = saw_rfsh ? LA_REFRESH : saw_m1 ? LA_FETCH : saw_wr ? LA_WRITE : saw_rd ? LA_READ : !rfsh ? LA_REFRESH : -1;
         else kind = saw_m1 ? LA_INTACK : saw_wr ? LA_OUT : saw_rd ? LA_IN : -1;
         if (kind < 0) continue;
         cur.kind = (uint8_t)kind;
@@ -985,6 +999,10 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
         if (n == cap) cy = realloc(cy, (size_t)(cap *= 2) * sizeof(la_cycle_t));
         cy[n++] = cur;
     }
+    if (m1_dead || !(c->have >> LA_M1 & 1))
+        for (int k = 0; k + 1 < n; k++)
+            if (cy[k].kind == LA_READ && cy[k + 1].kind == LA_REFRESH) cy[k].kind = LA_FETCH;
+    (void)rfsh_dead;
     *out = cy;
     return n;
 }
@@ -1662,6 +1680,7 @@ typedef struct {
     int bad[AR_N][8], low[AR_N][8], high[AR_N][8];  /* reads with the bit wrong; of them 0 for 1, 1 for 0 */
     int nbad[AR_N], first[AR_N];                    /* reads with a bit wrong, the first one's address */
     int stuck[LA_NSIG];                             /* 1 low, 2 high all through, where a working one's changes */
+    int nearly[LA_NSIG];                            /* of them: but for a few moments (how many changes) */
     int pramt, pramt_ref;                           /* the RAM test's result (P-RAMT), -1 not seen */
     /* Wrong ROM reads that are the ROM's byte with address bit k the
      * other way: the ROM sees A<k> otherwise than the edge connector. */
@@ -1811,7 +1830,8 @@ static bool int_wrong(const ev_t *e) {
 }
 
 static bool ev_any(const ev_t *e) {
-    for (int s = 0; s < LA_NSIG; s++) if (e->stuck[s]) return true;
+    for (int s = 0; s < LA_NSIG; s++)                   /* /M1, /RFSH: nothing on a 48K uses them; it runs without */
+        if (e->stuck[s] && s != LA_M1 && s != LA_RFSH) return true;
     for (int k = 0; k < 5; k++) if (e->kb_low[k]) return true;
     if (e->kb_all) return true;
     for (int ar = 0; ar < AR_N; ar++) if (e->late_n[ar]) return true;
@@ -1838,6 +1858,18 @@ static int line_state(const la_capture_t *c, int s) {
     uint64_t v0 = c->s[from] >> s & 1;
     for (int i = from + 1; i < c->n; i++) if ((c->s[i] >> s & 1) != v0) return -1;
     return v0 ? 2 : 1;
+}
+
+/* How often line SG changes, from the start of the bus; *mostly_high: it's
+ * high more than half the time. */
+static void line_changes(const la_capture_t *c, int sg, int *changes, int *mostly_high) {
+    int from = la_start(c), ch = 0, hi = 0;
+    for (int i = from; i < c->n; i++) {
+        hi += !lo(c->s[i], sg);
+        if (i > from && (c->s[i] >> sg & 1) != (c->s[i - 1] >> sg & 1)) ch++;
+    }
+    *changes = ch;
+    *mostly_high = 2 * hi > c->n - from;
 }
 
 /* The evidence in D (the board under test) against R (a working one). */
@@ -1928,6 +1960,12 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
         if (!look || !(d->have >> s & 1) || !(r->have >> s & 1)) continue;
         int st = line_state(d, s);
         if (st > 0 && line_state(r, s) < 0) e->stuck[s] = st;
+        else if (st < 0) {
+            int cd, hd, cr, hr;
+            line_changes(d, s, &cd, &hd);
+            line_changes(r, s, &cr, &hr);
+            if (cd <= 20 && cr >= 1000) { e->stuck[s] = hd ? 2 : 1; e->nearly[s] = cd; }
+        }
     }
 }
 
@@ -1950,7 +1988,9 @@ static void where_text(const la_capture_t *c, char *out, int len) {
     int halt = 0, from = la_start(c);
     if (c->have >> LA_HALT & 1)
         for (int i = from; i < c->n; i++) halt += lo(c->s[i], LA_HALT);
-    if (!nf) snprintf(out, len, "no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)");
+    if (!nf && n > 100)
+        snprintf(out, len, "making bus cycles (%d) but not one instruction fetch: /M1 doesn't go low with them", n);
+    else if (!nf) snprintf(out, len, "no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)");
     else if (halt > (c->n - from) / 2) snprintf(out, len, "halted (HALT low): it ran into a HALT, so it went astray before");
     else if (2 * fill > nf) snprintf(out, len, "still filling the RAM for the RAM test (11DC-11E1)");
     else if (2 * rb > nf) snprintf(out, len, "still reading the RAM back for the RAM test (11E2-11EE)");
@@ -2066,6 +2106,44 @@ static int z80_pin(int s) {
     case LA_WAIT: return 24; case LA_BUSRQ: return 25; case LA_RESET: return 26;
     default: return 0;
     }
+}
+
+/* The chips on the signal's line, the CPU apart (and those through a
+ * resistor from it, not a pull-up): "IC26 pin 2, IC5 pin 9". How many. */
+static int line_chips(int sig, char *out, int len) {
+    out[0] = 0;
+    if (!vboard) return 0;
+    int net[LA_NSIG];
+    find_nets(vboard, net, NULL);
+    if (net[sig] < 0) return 0;
+    sim_t *s = &vboard->sim;
+    int roots[8], nr = 0;
+    roots[nr++] = s->nets[net[sig]].root;
+    bool bus = (sig >= LA_A0 && sig <= LA_A15) || (sig >= LA_D0 && sig <= LA_D7);   /* to the RAM through resistors */
+    for (int i = 0; bus && i < s->nparts && nr < 8; i++) {
+        const part_t *r = &s->parts[i];
+        if (r->npins != 2 || strcmp(board_part_kind_name(vboard, i), "resistor")) continue;
+        int r0 = s->pins[r->first_pin].root, r1 = s->pins[r->first_pin + 1].root;
+        if (r0 == roots[0] && board_net_supply(vboard, r1) == RAIL_NONE) roots[nr++] = r1;
+        else if (r1 == roots[0] && board_net_supply(vboard, r0) == RAIL_NONE) roots[nr++] = r0;
+    }
+    const char *cpu = ref_of("CPU");
+    int k = 0, m = 0;
+    for (int i = 0; i < s->nparts; i++) {
+        const char *kind = board_part_kind_name(vboard, i);
+        if (!strcmp(kind, "resistor") || !strcmp(kind, "capacitor") || !strcmp(kind, "connector")) continue;
+        if (cpu && !strcmp(s->parts[i].ref, cpu)) continue;
+        for (int j = 0; j < s->parts[i].npins; j++) {
+            bool on = false;
+            for (int q = 0; q < nr && !on; q++) on = s->pins[s->parts[i].first_pin + j].root == roots[q];
+            if (!on) continue;
+            if (m < len) m += snprintf(out + m, len - m, "%s%s pin %d", !k ? "" : k % 8 ? ", " : ",\n     ", s->parts[i].ref,
+                                       s->pins[s->parts[i].first_pin + j].number);
+            k++;
+            break;
+        }
+    }
+    return k;
 }
 
 /* The pin of part REF on the signal's line (0: none). */
@@ -2202,19 +2280,61 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
                sg == LA_WAIT ? "waits for ever in its bus cycle" : "hands the bus over and stops");
         goto done;
     }
+    bool inputs_ok = e->idle && !e->in_reset && !e->rst_pulses && !e->stuck[LA_CLK] && e->clk_pct >= 30 &&
+                     !e->held[LA_WAIT] && !e->held[LA_BUSRQ];
+    if (nstuck >= 8 && inputs_ok) {
+        bool together = e->stuck[LA_RD] == 1 && e->stuck[LA_WR] == 1;
+        printf("  %d. The CPU isn't running: %d of the lines a running Z80 changes all the time never change. What it\n"
+               "     needs is right, left running: its clock, /RESET high, /WAIT and /BUSRQ high. So it's the CPU (%s)\n"
+               "     itself, or its power: measure 5 V on pin 11 and 0 V on pin 29 at the chip's legs.\n", ++n, nstuck, cpu);
+        if (together)
+            printf("     /RD and /WR are both low all through, which a working Z80 never does: it drives nothing right,\n"
+                   "     as a dead or unpowered one.\n");
+        goto done;
+    }
     if (nstuck >= 8) {
         printf("  %d. The CPU isn't running: %d of the lines a running Z80 changes all the time never change. Check what it\n"
                "     needs: its clock (pin 6), /RESET (pin 26) high, /WAIT (24) and /BUSRQ (25) high, 5 V on pin 11, 0 V on\n"
                "     pin 29; then the CPU (%s) itself.\n", ++n, nstuck, cpu);
         goto done;
     }
+    /* Two of the CPU's own outputs stuck, the rest of the bus going: one
+     * fault on two lines is the CPU (not /M1: the 48K runs without it). */
+    {
+        static const int outs[] = { LA_MREQ, LA_RD, LA_WR };
+        char names[64];
+        int k = 0, m = 0;
+        for (int q = 0; q < 3; q++)
+            if (e->stuck[outs[q]]) { m += snprintf(names + m, sizeof(names) - m, "%s%s", k ? " and " : "", la_signal_name(outs[q])); k++; }
+        if (k >= 2 && nstuck < 8)
+            printf("  %d. Two of the CPU's own outputs, %s, are stuck while the rest of the bus goes on: one fault on\n"
+                   "     two lines is most likely the CPU (%s). Try another one first.\n", ++n, names, cpu);
+    }
     /* A line that doesn't change: stuck, whatever drives it. */
     for (int s = 0; s < LA_NSIG; s++) {
-        if (!e->stuck[s] || s == LA_CLK) continue;
-        printf("  %d. %s is stuck %s all through, where a working board's changes all the time: a short to %s, or the line\n"
-               "     broken. It's %s's pin %d; every chip on the line is a suspect, and the line's tracks.\n",
-               ++n, la_signal_name(s), e->stuck[s] == 1 ? "low" : "high", e->stuck[s] == 1 ? "0 V (or another line)" : "5 V (or another line)",
-               cpu, z80_pin(s));
+        if (!e->stuck[s] || s == LA_CLK || s == LA_M1 || s == LA_RFSH) continue;
+        char how[64], on[400];
+        if (e->nearly[s]) snprintf(how, sizeof(how), "but for %d moment%s", (e->nearly[s] + 1) / 2, e->nearly[s] > 2 ? "s" : "");
+        else snprintf(how, sizeof(how), "all through");
+        int k = line_chips(s, on, sizeof(on));
+        printf("  %d. %s is stuck %s %s, where a working board's changes all the time: a short to %s, or the line\n"
+               "     broken. It's %s's pin %d.", ++n, la_signal_name(s), e->stuck[s] == 1 ? "low" : "high", how,
+               e->stuck[s] == 1 ? "0 V (or another line)" : "5 V (or another line)", cpu, z80_pin(s));
+        if (!k)
+            printf(" No other chip is on it (the edge connector apart): the CPU itself, unless the line is\n"
+                   "     shorted to its neighbour.\n");
+        else
+            printf("\n     Also on it: %s.\n     Any of them can hold it (a failed input), and its tracks: pull the socketed ones first,\n"
+                   "     then the CPU.\n", on);
+    }
+    for (int s = LA_M1; s <= LA_RFSH; s++) {
+        if (!e->stuck[s]) continue;
+        char on[200];
+        if (line_chips(s, on, sizeof(on))) continue;        /* a board that uses it: not here */
+        printf("  Note: %s (%s pin %d) is stuck %s%s. Nothing on this board uses it (only the edge connector has\n"
+               "  it), so a Z80 with that output dead still runs it: not the fault, unless something plugged in needs it.\n",
+               la_signal_name(s), cpu, s == LA_M1 ? 27 : 28, e->stuck[s] == 1 ? "low" : "high",
+               e->nearly[s] ? " (but for a moment or two)" : "");
     }
     /* Left running: the frame interrupt (the ULA's, every 20 ms) and HALT. */
     {
@@ -2299,6 +2419,17 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
         if (alias_ar == AR_LRAM) ml = 0; else mu = 0;
         shared &= ~0u;
         shared = (mr & ml) | (mr & mu) | (ml & mu);
+    }
+    unsigned sh = shared;
+    for (int i = 0; i < 8; i++) if (e->stuck[LA_D0 + i]) sh &= ~(1u << i);
+    if (popcount8(sh) >= 6 && (mr & sh) && ((ml | mu) & sh)) {
+        bits_text(sh, bits, sizeof(bits));
+        printf("  %d. Data lines %s are all wrong, from the ROM and the RAM alike: not a memory chip and not one\n"
+               "     line. What they share is the CPU (%s) reading them (its data inputs, its timing), or the data bus\n"
+               "     as a whole: a chip driving it when it shouldn't (the ULA, %s; the ROM, %s), a short across it.\n"
+               "     Swap the CPU first.\n", ++n, bits, cpu, ula ? ula : "the ULA", rom);
+        mr &= ~sh; ml &= ~sh; mu &= ~sh;
+        shared = sh = 0;
     }
     for (int i = 0; i < 8; i++) {
         if (!(shared >> i & 1) || e->stuck[LA_D0 + i]) continue;
@@ -2583,7 +2714,7 @@ static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev
         if (ie->held[k] && k != LA_RESET && k != LA_INT) printf("  %s: low all through\n", la_signal_name(k));
     printf("  The CPU: %s\n", ie->idle_where);
     bool dead = idle_dead(ie), bad = dead || ev_any(ie);
-    if (!bad && (strstr(ie->idle_where, "astray") || strstr(ie->idle_where, "not running"))) bad = true;
+    if (!bad && (strstr(ie->idle_where, "astray") || strstr(ie->idle_where, "not running") || strstr(ie->idle_where, "not one instruction"))) bad = true;
     if (!bad) { printf("  OK: the same as a working one\n"); return 0; }
     if (dead) { printf("  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)\n"); return 2; }
     printf("  FAULT: something's wrong (below); the boot's stages next show more\n");
@@ -2755,7 +2886,7 @@ static int diagnose(const la_cli_t *o) {
     printf("\n");
     if (idle == 1) {
         if (!fail_stage) { e = ie; fail_stage = "idle"; snprintf(where, sizeof(where), "%s", ie.idle_where); }
-        else ev_merge(&e, &ie);
+        else ev_merge(&e, &ie);     /* not its stuck lines: left running, a faulty board's in other code */
     }
     if (!fail_stage) {
         if (idle == 0) printf("Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.\n");

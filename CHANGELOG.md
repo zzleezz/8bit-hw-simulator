@@ -27,6 +27,16 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser, `--la-diagnose`, from two real faulty Z80s: a CPU that
+  isn't running while the idle capture shows its clock, /RESET, /WAIT and
+  /BUSRQ right is named itself (or its power), and /RD with /WR both low
+  marks one that drives nothing; all the data lines wrong from the ROM and
+  the RAM alike are one item (the CPU first). A stuck line lists every chip
+  on it from the netlist (a real faulty 74LS157 held A9 high). /M1 and
+  /RFSH, which nothing on a 48K uses, are only a note when stuck (a Z80
+  with a dead /M1 runs a 48K), and the bus is decoded without a line of
+  them that hardly changes. A line that changes a few times where a working
+  one's changes thousands counts as stuck.
 - Logic analyser, `--la-diagnose`: a first stage, idle, before any reset:
   the Spectrum left running, captured at once at 14 MHz and for 49 ms at
   2 MHz. It needs no reset, so it works when /RESET is broken: /RESET low
