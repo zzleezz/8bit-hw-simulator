@@ -646,6 +646,14 @@ typedef struct {
     float *first_fetch, *first_read;    /* ms after /RESET went high, a 64K table each; -1 never */
     uint32_t *fetches;
     uint32_t ints;                      /* fetches from 0038 */
+    /* For the analyser's address trigger: when each address is first on
+     * the bus for 8 steps or more (2 analyser samples at 14 MHz), and when
+     * it could first be seen for an instant as the bus changes. On a real
+     * Issue 2 the low byte switches a few ns before the high byte
+     * (11DD -> D1E2 showed 11E2), so A -> B can show A's high byte with
+     * B's low byte, or the other way round. ms after /RESET; -1 never. */
+    float *held_first, *glitch_first;
+    unsigned cur_addr; int cur_hold;
 } tl_t;
 
 static void tl_step(board_t *b, void *ctx) {
@@ -668,9 +676,38 @@ static void tl_step(board_t *b, void *ctx) {
             t->fetches[a]++;
         } else if (t->first_read[a] < 0) t->first_read[a] = ms;
     }
+    unsigned a = 0;
+    for (int i = 0; i < 16; i++) a |= (unsigned)TL(LA_A0 + i) << i;
 #undef TL
+    float now = (float)((t->step - t->reset_at) / (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000.0));
+    if (a != t->cur_addr) {
+        unsigned p = t->cur_addr, g1 = (p & 0xFF00) | (a & 0xFF), g2 = (a & 0xFF00) | (p & 0xFF);
+        if (g1 != p && g1 != a && t->glitch_first[g1] < 0) t->glitch_first[g1] = now;
+        if (g2 != p && g2 != a && t->glitch_first[g2] < 0) t->glitch_first[g2] = now;
+        t->cur_addr = a;
+        t->cur_hold = 0;
+    }
+    if (++t->cur_hold == 8 && t->held_first[a] < 0) t->held_first[a] = now;
     t->prev_fetch = fetch;
     t->prev_read = read;
+}
+
+/* A trigger address for a stage at time T (ms) that the analyser can't
+ * see before it: on the bus (held) at T or soon after, not held and not
+ * possible as a glitch before that. A ROM address (below 4000, not a
+ * refresh's 3Fxx) unless none; -1 if none in 0.2 ms. */
+static int safe_trigger(const tl_t *t, float at) {
+    int best = -1;
+    float bt = 0;
+    for (int pass = 0; pass < 2 && best < 0; pass++)
+        for (unsigned x = 0; x < 65536; x++) {
+            float h = t->held_first[x], g = t->glitch_first[x];
+            if (h < at - 0.01f || h > at + 0.2f) continue;
+            if (g >= 0 && g <= h) continue;
+            if (!pass && (x >= 0x4000 || (x & 0xFF00) == 0x3F00)) continue;
+            if (best < 0 || h < bt) { best = (int)x; bt = h; }
+        }
+    return best;
 }
 
 static const struct { uint16_t addr; bool read; const char *what; } milestones[] = {
@@ -701,7 +738,9 @@ static int timeline(const la_cli_t *o) {
     t.first_fetch = malloc(65536 * sizeof(float));
     t.first_read = malloc(65536 * sizeof(float));
     t.fetches = calloc(65536, sizeof(uint32_t));
-    for (int a = 0; a < 65536; a++) t.first_fetch[a] = t.first_read[a] = -1;
+    t.held_first = malloc(65536 * sizeof(float));
+    t.glitch_first = malloc(65536 * sizeof(float));
+    for (int a = 0; a < 65536; a++) t.first_fetch[a] = t.first_read[a] = t.held_first[a] = t.glitch_first[a] = -1;
     int ms = o->ms > 0 ? o->ms : 3000;
     board_step_hook(b, tl_step, &t);
     long long limit = (long long)ZX_FREQ * ms / 1000;
@@ -718,6 +757,22 @@ static int timeline(const la_cli_t *o) {
         else printf("  %-9.3f %04X   %-10u %s\n", f, a, milestones[i].read ? 0u : t.fetches[a], milestones[i].what);
     }
     printf("Frame interrupts (0038 fetches): %u\n", t.fetches[0x38]);
+    /* The stages' triggers: would the analyser fire before the stage? */
+    printf("\nThe --la-trigger stages (an address can show for an instant when the bus changes):\n");
+    for (const la_stage_t *st = la_stages; st->name; st++) {
+        unsigned x = (unsigned)st->addr;
+        if (x == 0x0038) continue;      /* any time: the first is all right */
+        float h = t.held_first[x], g = t.glitch_first[x];
+        printf("  %-10s %04X  on the bus at %.3f ms", st->name, x, h);
+        if (g >= 0 && g < h) {
+            printf(", but possible as a glitch from %.3f ms", g);
+            int sx = safe_trigger(&t, h);
+            if (sx >= 0) printf(": %04X is safe (on the bus at %.3f ms)", sx, t.held_first[sx]);
+            else printf(": no safe address near it");
+        } else printf(": safe");
+        printf("\n");
+    }
+    free(t.held_first); free(t.glitch_first);
     free(t.first_fetch); free(t.first_read); free(t.fetches);
     board_destroy(b);
     return 0;
@@ -1117,13 +1172,16 @@ static int pick_ports(const char *list, char ports[][64], int max, char *err, in
 }
 
 /* The stages of a 48K's boot to trigger at, from the simulated Issue 2's
- * timeline (--la-timeline): after the reset button is let go. */
+ * timeline (--la-timeline): after the reset button is let go. Each is an
+ * address the bus can't show before the stage, not even for an instant
+ * as it changes (the low byte switches before the high byte: 11E2 itself
+ * showed in the RAM fill, 11DD -> D1E2). --la-timeline checks them. */
 const la_stage_t la_stages[] = {
     { "reset",     0xFFFF, "the reset: the RAM test's first write (FFFF), about 110 T after it" },
-    { "ramcheck",  0x11E2, "the RAM test starts reading the RAM back, from 4000 up (0.45 s after the reset)" },
-    { "ramdone",   0x11EF, "the RAM test is over (1.65 s after the reset; sooner if the RAM has a fault)" },
+    { "ramcheck",  0x4000, "the RAM fill's last write (4000), just before the RAM test reads the RAM back from 4000 up (0.45 s after the reset)" },
+    { "ramdone",   0x1200, "the RAM test is over (1200, just after 11EF; 1.65 s after the reset, sooner if the RAM has a fault)" },
     { "copyright", 0x1539, "the copyright message (1.71 s after the reset)" },
-    { "main",      0x12A9, "the editor's main loop (1.73 s after the reset)" },
+    { "main",      0x16B0, "the editor's main loop starts (16B0, just after 12A9; 1.73 s after the reset)" },
     { "interrupt", 0x0038, "a frame interrupt (50 a second, while the ROM's interrupt routine is used)" },
     { NULL, 0, NULL }
 };
@@ -1214,6 +1272,17 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
         bool ok = la_build(c, ch, q.nchan, err, errlen);
         for (int k = 0; k < q.nchan; k++) free(v[k]);
         if (!ok) return false;
+        /* Fired the moment it armed: the board fills the samples before the
+         * trigger with 0 (all 40 lines low, which a running Z80 never
+         * shows). The Spectrum was past the stage already. */
+        bool instant = c->pre > 0 && c->n > 0 && c->s[0] == 0 && c->s[c->pre / 2] == 0;
+        if (instant && st && st->addr != 0x0038) {
+            la_free(c);
+            if (attempt >= tries) { snprintf(err, errlen, "it fired as soon as it was armed every time: is the reset button held?"); return false; }
+            printf("It fired as soon as it was armed: the Spectrum was past that stage already (was the reset button held down?)\n"
+                   "Trying again (%d of %d). Hold the reset button down, and let go once it says Armed.\n", attempt + 1, tries);
+            continue;
+        }
         if (addr < 0 || real_trigger(c, addr)) return true;
         /* Kept, to see what the glitch was: NAME-glitchN.lac */
         if (o->capture) {

@@ -128,8 +128,8 @@
  *       are COM ports or the boards' serial numbers, the master (the board
  *       with channels 1-24) first. T, a stage of the boot (hold the reset
  *       button, let go once armed): reset (the default: the RAM test's
- *       first write, FFFF), ramcheck (11E2: it reads the RAM back), ramdone
- *       (11EF: the RAM test is over), copyright (1539), main (12A9: the
+ *       first write, FFFF), ramcheck (4000: the fill's last write, then it reads the RAM back), ramdone
+ *       (1200: the RAM test is over), copyright (1539), main (16B0: the
  *       editor's main loop); or interrupt (0038, any time), addr=XXXX (the
  *       address bus), raw:TYPE,BASE,COUNT,VALUE. An address seen only for
  *       a glitch is re-armed for, --la-tries N times (5). 14285714 Hz, 1000
