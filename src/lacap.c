@@ -1221,6 +1221,8 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
             return false;
         }
         printf("That was a glitch on the address lines, not %04X itself: trying again (%d of %d)\n", addr, attempt + 1, tries);
+        if (addr != 0x0038)
+            printf("Hold the Spectrum's reset button down again, and let go once it says Armed.\n");
     }
 }
 
