@@ -6,6 +6,7 @@
 #include "zx48.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -585,7 +586,13 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
             mreq = lo(v, LA_MREQ);
             saw_rd = saw_wr = false;
             n_act = n_m1 = n_rfsh = 0;
-            cur = (la_cycle_t){ .addr = (uint16_t)addr_of(v), .sample = i, .t = clk ? t : -1 };
+            /* T states by the time since the start when the rate is known:
+             * on the real board CLK is high for only about 40 ns as the
+             * analyser sees it, so at 14 MHz most of its rises are missed.
+             * The CPU clock is 3.5 MHz (ULA contention stretches it, and
+             * the simulated capture stretches the same). */
+            int tt = c->freq > 0 ? (int)((int64_t)(i - start) * ZX_FREQ / c->freq) : clk ? t : -1;
+            cur = (la_cycle_t){ .addr = (uint16_t)addr_of(v), .sample = i, .t = tt };
         }
         if (in && act) {
             /* /M1 and /RFSH by most of the cycle: on a real board /RFSH
@@ -726,12 +733,27 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
             soft++;             /* a port or the floating bus: may differ */
             continue;
         }
-        if (timing < 0 && x->t >= 0 && y->t >= 0 && abs((x->t - ta) - (y->t - tb)) > 1) timing = k;
         if (!same) break;
     }
+    /* Timing, after taking out a steady difference of the clocks (the real
+     * Spectrum's crystal against the analyser's): what's left is a real
+     * difference in when things happen. */
+    double scale = 1;
+    int last = k > 0 ? k - 1 : 0;
+    if (ca[ia + last].t >= 0 && cb[ib + last].t - tb > 1000)
+        scale = (double)(ca[ia + last].t - ta) / (cb[ib + last].t - tb);
+    for (int j = 0; j < k && timing < 0; j++) {
+        const la_cycle_t *x = &ca[ia + j], *y = &cb[ib + j];
+        if (x->t >= 0 && y->t >= 0 && fabs((x->t - ta) - scale * (y->t - tb)) > 1.5) timing = j;
+    }
+    if (scale != 1)
+        printf("Clocks: A runs %+.0f ppm against B (%d T against %d T over the cycles that match)\n",
+               (1 / scale - 1) * 1e6, ca[ia + last].t - ta, cb[ib + last].t - tb);
     if (timing >= 0)
         printf("Timing: from cycle %d the T states differ (A T %d, B T %d from the first fetch)\n", timing,
                ca[ia + timing].t - ta, cb[ib + timing].t - tb);
+    else if (k > 0)
+        printf("Timing: the same, within a T state\n");
     if (soft) printf("%d port reads / interrupt acknowledges read differently (ports, the floating bus)\n", soft);
     int rc = 0;
     if (ia + k >= na || ib + k >= nb)

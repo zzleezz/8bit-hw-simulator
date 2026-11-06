@@ -676,15 +676,27 @@ and will take the captures; Pico model to be agreed with Jim.
       Max 100 MHz (200 MHz with the Turbo build). A simulated capture cut to
       14 and 7 MHz still decodes all 1386 cycles; 14 MHz is the rate to use
       on the real board (7 MHz is one sample per half T: no margin).
-- [ ] With the real kit: a healthy capture, triggered on /RESET going high
-      (pattern trigger, 1 channel), at 14 MHz (or 28 MHz). Simulated to
-      match: --la-record FILE --la-post 98000 (and cut to 14 MHz).
-      Check: the channel map (--la-info prints which channel is which),
-      that the bus cycles read as the ROM's (0 wrong ROM reads), and the
-      T states against the simulation (--la-compare prints where timing
-      starts to differ). The .lac the program saves: check the field names
-      read_lac() expects (Settings, Frequency, PreTriggerSamples,
-      CaptureChannels: ChannelNumber, ChannelName, Samples).
+- [x] 2026-11-06 With the real kit: a healthy capture (test8.lac, the
+      user's own Spectrum) matches a simulated Issue 3B for all 5224 bus
+      cycles (refresh left out) over 6.9 ms, timing within a T state once
+      a steady 503 ppm clock difference is taken out. How it was taken:
+      14285714 Hz (100 MHz / 7: 0 % jitter; 14000000 failed), 45 channels
+      (18, 19, 47 off), Fast trigger on channel 1 (A15) = 1, 999 before,
+      97000 after; hold the reset button, start, release (the RAM test
+      writes FFFF about 110 T after the reset). Found on the way:
+      - The real channel map is the names in Jim's video (ch 1-16 A15..A0,
+        17 /RESET, 25 /M1, 26 /WR, 27 /RD, 28-35 D7..D0, 40 /MREQ,
+        41 /IORQ, 44 /RFSH, 45 /ROMCS, 48 CLK...), not the one read off the
+        schematic; names in the .lac now win over the default map.
+      - /RESET rises slowly (RC): the analyser sees it high about 3.7 ms
+        after the Z80 starts. Cycles start at the last fetch from 0000.
+      - /RFSH falls about 10 ns before a fetch's /MREQ rises: fetch and
+        refresh are now told apart by most of the cycle.
+      - CLK is high only about 40 ns as the analyser sees it: T states are
+        counted from the sample rate, not from CLK.
+      - The all-zero address pattern trigger fires on glitches (and while
+        the reset is held); multi-device triggers only on ch 1-16.
+      - The power-on reset bounces (about 30 restarts in 1 ms).
 - [ ] Open the simulated .lac in the LogicAnalyzer program (does it load?).
 - [ ] Step 1, readings: each signal low / high / pulsing (--la-info has
       them) imported into "Diagnose by probing" ("Import capture").
