@@ -1363,7 +1363,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
     if (st && st->addr != 0x0038)
         printf("Hold the Spectrum's reset button down now, and let go once it says Armed.\n");
     if (st && st->ms > 1)
-        printf("(armed on the reset, then again just before %s is due)\n", st->name);
+        printf("(armed for the reset first, then again by itself just before %s is due)\n", st->name);
     printf("Capturing %d channels from %s%s%s at %d Hz, %d samples before the trigger and %d after\n", q.nchan,
            ports[0], q.ndev > 1 ? " (master) and " : "", q.ndev > 1 ? ports[1] : "", q.freq, q.pre, q.post);
     lp_printf = la_out;
@@ -1391,21 +1391,51 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
             r.pre = 100; r.post = 1000;
             long pv = addr_pattern(0xFFFF);
             r.trig_type = LP_COMPLEX; r.trig_base = 0; r.trig_count = 16; r.trig_value = (unsigned)pv;
-            lp_printf = quiet_out;
             bool got = lp_capture(&r, v, &n, &pre, err, errlen);
-            lp_printf = la_out;
-            for (int k = 0; k < r.nchan; k++) { free(v[k]); v[k] = NULL; }
             if (!got) return false;
+            /* The Spectrum starting, or the address lines floating while the
+             * button is held down (they can show FFFF)? Started, the ROM's
+             * RAM fill (11DC-11E1) follows FFFF within a few us. */
+            la_capture_t rc;
+            rawchan_t ch[LP_MAXDEV * 24];
+            for (int k = 0; k < r.nchan; k++) {
+                ch[k].number = r.chan[k];
+                snprintf(ch[k].name, sizeof(ch[k].name), "%s", la_signal_name(chan_map[r.chan[k]]));
+                ch[k].v = v[k];
+                ch[k].n = n;
+            }
+            memset(&rc, 0, sizeof(rc));
+            rc.freq = r.freq;
+            rc.pre = pre;
+            bool built = la_build(&rc, ch, r.nchan, err, errlen);
+            for (int k = 0; k < r.nchan; k++) { free(v[k]); v[k] = NULL; }
+            if (!built) return false;
+            int fill = 0;
+            for (int i = rc.pre; i < rc.n; i++) {
+                unsigned a = addr_of(rc.s[i]);
+                if (a >= 0x11DC && a <= 0x11E1 && lo(rc.s[i], LA_M1) && lo(rc.s[i], LA_MREQ)) fill++;
+            }
+            la_free(&rc);
+            if (fill < 8) {
+                if (attempt >= tries) { snprintf(err, errlen, "%d times it saw the address lines floating, not the reset", tries); return false; }
+                printf("That wasn't the Spectrum starting (the address lines float while the button is held down): "
+                       "trying again (%d of %d)\n", attempt + 1, tries);
+                continue;
+            }
             /* The reset's FFFF came this long before its samples did: its 1000
              * after it, and the USB (about a ms). */
             double t_reset = lp_trigger_ms - 1000.0 * 1000 / q.freq - 1;
             q.start_at = t_reset + st->ms - margin;
             double wait = q.start_at - lp_now_ms();
-            printf("The reset: armed again %.0f ms from now, %.0f ms before %s\n", wait, margin, st->name);
+            printf("The reset seen: now waiting for %s (armed again by itself in %.0f ms, %.0f ms before it's due)\n",
+                   st->name, wait, margin);
             if (wait < 50) { snprintf(err, errlen, "the reset came in %.0f ms too late to arm for %s", -wait, st->name); return false; }
             q.timeout = 3;
         }
+        if (timed) lp_printf = quiet_out;  /* not "Armed" again: the button is let go already */
         bool got = lp_capture(&q, v, &n, &pre, err, errlen);
+        lp_printf = la_out;
+        if (got && timed) printf("Got %s\n", st->name);
         q.start_at = 0;
         if (!got && timed && strstr(err, "no trigger")) {
             /* Armed too late: the stage came sooner, or never: a fault

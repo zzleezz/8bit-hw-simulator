@@ -533,6 +533,10 @@ int main(int argc, char **argv) {
         DWORD te = err && err != INVALID_HANDLE_VALUE ? GetFileType(err) : FILE_TYPE_UNKNOWN;
         if (to != FILE_TYPE_DISK && to != FILE_TYPE_PIPE) freopen("CONOUT$", "w", stdout);
         if (te != FILE_TYPE_DISK && te != FILE_TYPE_PIPE) freopen("CONOUT$", "w", stderr);
+        /* And the keyboard (--la-capture asks for Enter between tries). */
+        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD ti = in && in != INVALID_HANDLE_VALUE ? GetFileType(in) : FILE_TYPE_UNKNOWN;
+        if (ti != FILE_TYPE_DISK && ti != FILE_TYPE_PIPE) freopen("CONIN$", "r", stdin);
     }
 #endif
     bool atlas = false;
