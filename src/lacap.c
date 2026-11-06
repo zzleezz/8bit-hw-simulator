@@ -2110,10 +2110,22 @@ static int diagnose(const la_cli_t *o) {
     }
     printf("\n");
     if (!fail_stage) {
-        if (passed == DIAG_NSTAGES)
+        if (passed == DIAG_NSTAGES) {
+            vboard = board_create(m);
+            const char *u = ref_of("ULA");
+            char ula[32];
+            snprintf(ula, sizeof(ula), "the ULA (%s)", u ? u : "IC1");
+            board_destroy(vboard);
+            vboard = NULL;
             printf("All %d stages are the same as a working %s: the CPU, the ROM, all of the RAM (the ROM's RAM test)\n"
-                   "and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.\n",
-                   passed, m->board_name);
+                   "and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.\n"
+                   "If the picture is wrong all the same (the copyright message garbled, wrong colours): the CPU wrote\n"
+                   "the screen right and the RAM keeps it, so it's the ULA's video side: %s reads the screen over its own\n"
+                   "address and data lines to the lower RAM, which the edge connector doesn't show. Diagnose a\n"
+                   "screenshot of it: the atlas has the ULA's outputs shorted and its pins bridged, though not every\n"
+                   "fault inside the chip.\n",
+                   passed, m->board_name, ula);
+        }
         return 0;
     }
     printf("The boot goes wrong at %s (%d stage%s before it %s good).\n", fail_stage, passed, passed == 1 ? "" : "s",
