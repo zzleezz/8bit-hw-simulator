@@ -120,7 +120,11 @@
  *       gets to each stage of the boot (the RAM test, the copyright
  *       message, the main loop...), how often each is fetched.
  *   --la-devices
- *       The boards plugged in: port, USB serial number, firmware.
+ *       The boards plugged in: port, USB serial number, firmware (stock, or
+ *       the zx firmware of la-firmware, whose trigger ignores glitches).
+ *   --la-bootsel [--la-ports P,...]
+ *       Restart the boards into the Pico's USB drive mode, to copy firmware
+ *       (a .uf2) onto the RP2350 drive (la-firmware/README.md).
  *   --la-capture FILE [--la-ports MASTER,OTHER] [--la-trigger T]
  *           [--la-freq HZ] [--la-pre N] [--la-post N] [--la-timeout S] [--board B]
  *       Capture, save FILE (.lac or .csv), print what --la-info does; with
@@ -128,17 +132,16 @@
  *       are COM ports or the boards' serial numbers, the master (the board
  *       with channels 1-24) first. T, a stage of the boot (hold the reset
  *       button, let go once armed): reset (the default: the RAM test's
- *       first write, FFFF), ramcheck (4000: the fill's last write, then it reads the RAM back), ramdone
- *       (5C7B: the RAM test is over), copyright (0012), main (5C59: the
+ *       first write, FFFF), ramcheck (11E2: it reads the RAM back), ramdone
+ *       (11EF: the RAM test is over), copyright (1539), main (12A9: the
  *       editor's main loop); or interrupt (0038, any time), addr=XXXX (the
- *       address bus), raw:TYPE,BASE,COUNT,VALUE. The stages after the reset are
- *       armed on the reset, then again 20 ms before the stage is due (the
- *       RAM test writing every address could fake any trigger address for
- *       an instant as the lines change). An address seen only for
+ *       address bus), raw:TYPE,BASE,COUNT,VALUE. An address seen only for
  *       a glitch is re-armed for, --la-tries N times (5). 14285714 Hz, 1000
  *       before, 97000 after, 60 s unless given. --la-log FILE: a copy of
  *       what's printed. --la-record takes --la-trigger too: the simulated
- *       board at that stage. */
+ *       board at that stage. The stages after the reset need the zx
+ *       firmware. --la-at MS: armed on the reset, then again MS after it
+ *       for the trigger (an address the CPU is at often: where it is then). */
 #include "sokol_headers.h"
 #include "atlas.h"
 #include "probe_db.h"
@@ -712,6 +715,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--la-freq") && i + 1 < argc) args.la.freq = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--la-timeout") && i + 1 < argc) args.la.timeout = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--la-tries") && i + 1 < argc) args.la.tries = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--la-at") && i + 1 < argc) args.la.at = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--la-bootsel")) args.la.bootsel = true;
         else if (!strcmp(argv[i], "--la-log") && i + 1 < argc) args.la.log = argv[++i];
         else if (argv[i][0] == '-') { fprintf(stderr, "unknown option %s\n", argv[i]); return 1; }
         else {
@@ -745,7 +750,8 @@ int main(int argc, char **argv) {
     }
     if (args.atlas_report || args.atlas_png) return atlas_report(args.atlas_path, args.atlas_png);
     if (args.healthy_sheet) return healthy_cli(args.healthy_sheet);
-    if (args.la.info || args.la.cycles || args.la.record || args.la.compare || args.la.devices || args.la.capture || args.la.timeline) {
+    if (args.la.info || args.la.cycles || args.la.record || args.la.compare || args.la.devices || args.la.capture || args.la.timeline ||
+        args.la.bootsel) {
         args.la.machine = args.machine;
         args.la.faults = args.faults;
         args.la.nfaults = args.nfaults;

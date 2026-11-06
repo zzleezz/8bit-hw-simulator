@@ -316,6 +316,10 @@ static bool hello(sp_t *s, lp_info_t *info, const char *port, char *err, int err
         snprintf(err, errlen, "%s: an answer the board shouldn't give", port);
         return false;
     }
+    /* Which firmware: the zx one answers command 10, the stock one says
+     * ERR_UNKNOWN_MSG. */
+    if (send_packet(s, 10, NULL, 0) && read_line(s, line, sizeof(line), 1000))
+        sscanf(line, "ZX_FIRMWARE:%d", &info->zx);
     return true;
 }
 
@@ -323,6 +327,20 @@ bool lp_info(const char *port, lp_info_t *info, char *err, int errlen) {
     sp_t s;
     if (!sp_open(port, &s, err, errlen)) return false;
     bool ok = hello(&s, info, port, err, errlen);
+    sp_close(&s);
+    return ok;
+}
+
+bool lp_bootsel(const char *port, char *err, int errlen) {
+    sp_t s;
+    lp_info_t info;
+    if (!sp_open(port, &s, err, errlen)) return false;
+    bool ok = hello(&s, &info, port, err, errlen);
+    char line[64];
+    if (ok && !(send_packet(&s, 4, NULL, 0) && read_line(&s, line, sizeof(line), 2000) && !strncmp(line, "RESTARTING_BOOTLOADER", 21))) {
+        snprintf(err, errlen, "%s: it didn't restart into the USB drive mode", port);
+        ok = false;
+    }
     sp_close(&s);
     return ok;
 }
@@ -374,6 +392,7 @@ static int lround_pos(double x) { return (int)(x + 0.5); }
 
 double lp_now_ms(void) { return now_ms(); }
 double lp_trigger_ms;
+bool lp_zx_firmware;
 
 bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, char *err, int errlen) {
     if (q->ndev < 1 || q->ndev > LP_MAXDEV) { snprintf(err, errlen, "1 to %d boards", LP_MAXDEV); return false; }
@@ -400,6 +419,8 @@ bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, ch
         if (!sp_open(q->port[nopen], &s[nopen], err, errlen)) goto done;
         if (!hello(&s[nopen], &info[nopen], q->port[nopen], err, errlen)) { sp_close(&s[nopen]); goto done; }
     }
+    lp_zx_firmware = true;
+    for (int d = 0; d < q->ndev; d++) if (!info[d].zx) lp_zx_firmware = false;
     for (int d = 1; d < q->ndev; d++)
         if (strcmp(info[d].version, info[0].version)) {
             snprintf(err, errlen, "the boards have different firmware: %s %s, %s %s (they must be the same)",

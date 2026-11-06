@@ -1252,7 +1252,8 @@ static void list_devices(void) {
         char err[256];
         printf("%-8s serial %-18s ", p[i].port, p[i].serial[0] ? p[i].serial : "?");
         if (lp_info(p[i].port, &info, err, sizeof(err)))
-            printf("%s, %d channels, up to %d Hz, %d byte buffer\n", info.version, info.channels, info.max_freq, info.buffer);
+            printf("%s, %d channels, up to %d Hz, %d byte buffer, %s\n", info.version, info.channels, info.max_freq, info.buffer,
+                   info.zx ? "zx firmware (no glitch triggers)" : "stock firmware");
         else
             printf("%s\n", err);
     }
@@ -1284,16 +1285,17 @@ static int pick_ports(const char *list, char ports[][64], int max, char *err, in
 }
 
 /* The stages of a 48K's boot to trigger at, from the simulated Issue 2's
- * timeline (--la-timeline): after the reset button is let go. Each is an
- * address the bus can't show before the stage, not even for an instant
- * as it changes (the low byte switches before the high byte: 11E2 itself
- * showed in the RAM fill, 11DD -> D1E2). --la-timeline checks them. */
+ * timeline (--la-timeline): after the reset button is let go, ms after it.
+ * The address is first on the bus at the stage; but as the lines change
+ * they show other addresses for a few ns, and the stock firmware's trigger
+ * fires on those (the RAM test's writes can fake almost any address):
+ * these need the zx firmware (la-firmware), whose trigger wants 75 ns. */
 const la_stage_t la_stages[] = {
     { "reset",     0xFFFF,    0.031, "the reset: the RAM test's first write (FFFF), about 110 T after it" },
-    { "ramcheck",  0x4000,  449.413, "the RAM fill's last write (4000), just before the RAM test reads the RAM back from 4000 up (0.45 s after the reset)" },
-    { "ramdone",   0x5C7B, 1650.579, "the RAM test is over (it ends at 11EF, then sets UDG, 5C7B; 1.65 s after the reset, sooner if the RAM has a fault)" },
-    { "copyright", 0x0012, 1714.337, "the copyright message (from 1539, printed with RST 10, 0012; 1.71 s after the reset)" },
-    { "main",      0x5C59, 1728.534, "the editor's main loop starts (12A9, then E-LINE, 5C59; 1.73 s after the reset)" },
+    { "ramcheck",  0x11E2,  449.419, "the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)" },
+    { "ramdone",   0x11EF, 1650.562, "the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)" },
+    { "copyright", 0x1539, 1714.319, "the copyright message (1539, 1.71 s after the reset)" },
+    { "main",      0x12A9, 1728.527, "the editor's main loop starts (12A9, 1.73 s after the reset)" },
     { "interrupt", 0x0038,       -1, "a frame interrupt (50 a second, while the ROM's interrupt routine is used)" },
     { NULL, 0, 0, NULL }
 };
@@ -1358,12 +1360,21 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
     int addr;
     if (!pick_trigger(o->trigger, &q, &addr, err, errlen)) return false;
     const la_stage_t *st = stage_named(o->trigger ? o->trigger : "reset");
-    if (st) printf("Trigger: %s\n", st->what);
+    /* --la-at MS: arm MS after the reset (seen on FFFF) whatever the
+     * trigger; with an address the CPU is at all the time, it fires at
+     * once, and the capture shows where the boot is MS after the reset. */
+    la_stage_t at_stage;
+    if (o->at > 0 && addr >= 0) {
+        at_stage = (la_stage_t){ "the time", addr, o->at, "armed again a set time after the reset" };
+        st = &at_stage;
+        printf("Armed on the reset, then again %.1f ms after it, for %04X\n", o->at, addr);
+    }
+    else if (st) printf("Trigger: %s\n", st->what);
     else if (addr >= 0) printf("Trigger: the address bus showing %04X\n", addr);
     if (st && st->addr != 0x0038)
         printf("Hold the Spectrum's reset button down now, and let go once it says Armed.\n");
-    if (st && st->ms > 1)
-        printf("(armed for the reset first, then again by itself just before %s is due)\n", st->name);
+    if (st == &at_stage)
+        printf("(armed for the reset first, then again by itself %.1f ms after it)\n", st->ms);
     printf("Capturing %d channels from %s%s%s at %d Hz, %d samples before the trigger and %d after\n", q.nchan,
            ports[0], q.ndev > 1 ? " (master) and " : "", q.ndev > 1 ? ports[1] : "", q.freq, q.pre, q.post);
     lp_printf = la_out;
@@ -1374,8 +1385,11 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
      * MARGIN ms before the stage is due. Armed for the whole boot, the RAM
      * test's writes to every address could show the stage's address for an
      * instant as the lines change (ramcheck, ramdone 2026-11-06). */
-    bool timed = boot && st->ms > 1;
-    double margin = 20;
+    /* Armed once from the reset: with the zx firmware the trigger needs its
+     * address for 75 ns, and a glitch can't fire it. Timed (armed again
+     * a set time after the reset) only for --la-at. */
+    bool timed = st == &at_stage;
+    double margin = st == &at_stage ? 0 : 20;
     for (int attempt = 1; ; attempt++) {
         if (attempt > 1 && boot) {
             /* The stage comes once a boot: the next try needs a reset. */
@@ -1389,7 +1403,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
         if (timed) {
             lp_capture_req_t r = q;
             r.pre = 100; r.post = 1000;
-            long pv = addr_pattern(0xFFFF);
+            long pv = addr_pattern(getenv("LA_FIRST_ADDR") ? (unsigned)strtoul(getenv("LA_FIRST_ADDR"), NULL, 16) : 0xFFFFu); /* LA_FIRST_ADDR: a test without a reset */
             r.trig_type = LP_COMPLEX; r.trig_base = 0; r.trig_count = 16; r.trig_value = (unsigned)pv;
             bool got = lp_capture(&r, v, &n, &pre, err, errlen);
             if (!got) return false;
@@ -1416,7 +1430,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
                 if (a >= 0x11DC && a <= 0x11E1 && lo(rc.s[i], LA_M1) && lo(rc.s[i], LA_MREQ)) fill++;
             }
             la_free(&rc);
-            if (fill < 8) {
+            if (fill < 8 && !getenv("LA_FIRST_ADDR")) {
                 if (attempt >= tries) { snprintf(err, errlen, "%d times it saw the address lines floating, not the reset", tries); return false; }
                 printf("That wasn't the Spectrum starting (the address lines float while the button is held down): "
                        "trying again (%d of %d)\n", attempt + 1, tries);
@@ -1437,7 +1451,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
         lp_printf = la_out;
         if (got && timed) printf("Got %s\n", st->name);
         q.start_at = 0;
-        if (!got && timed && strstr(err, "no trigger")) {
+        if (!got && timed && strstr(err, "no trigger") && st != &at_stage) {
             /* Armed too late: the stage came sooner, or never: a fault
              * before it (the RAM test ends early on bad RAM). Once more
              * armed sooner, in case it's the PC's timing. */
@@ -1476,7 +1490,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
         bool basic = false;
         for (int i = 0; boot && !instant && i < c->pre && i < c->n && !basic; i++)
             basic = addr_of(c->s[i]) == 0x10A8 && lo(c->s[i], LA_M1) && lo(c->s[i], LA_MREQ);
-        if ((instant || basic) && boot) {
+        if ((instant || basic) && boot && st != &at_stage) {
             la_free(c);
             if (attempt >= tries) { snprintf(err, errlen, "the Spectrum wasn't reset while it was armed, %d times", tries); return false; }
             printf("%s: the Spectrum was past that stage already (the reset button wasn't held down when it armed)\n"
@@ -1499,6 +1513,8 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
             return false;
         }
         printf("That was a glitch on the address lines, not %04X itself: trying again (%d of %d)\n", addr, attempt + 1, tries);
+        if (!lp_zx_firmware)
+            printf("(the boards' stock firmware fires on glitches a few ns long; the zx firmware doesn't: see la-firmware)\n");
     }
 }
 
@@ -1517,10 +1533,7 @@ static bool record_board(const la_cli_t *o, int post, int trig_addr, la_capture_
     /* A frame interrupt: once it's idle in BASIC (the main loop is 1.8 s
      * after power on), as a running Spectrum is when it's captured. */
     int arm = trig_addr == 0x0038 ? 2000 : 0;
-    /* A stage: armed as --la-capture arms the analyser, TL_ARMED ms before
-     * it's due (70 ms of power-on reset first). */
-    for (const la_stage_t *st = la_stages; st->name; st++)
-        if (st->addr == trig_addr && st->ms > 1) arm = 70 + (int)(st->ms - TL_ARMED);
+
     bool ok = trig_addr >= 0 ? la_record_at(b, pre, post, trig_addr, arm, arm + 4000, c, err, errlen)
                              : la_record(b, pre, post, c, err, errlen);
     board_destroy(b);
@@ -1545,6 +1558,17 @@ static const char *board_desc(const la_cli_t *o, char *out, int len) {
 
 int la_cli(const la_cli_t *o) {
     char err[512];
+    if (o->bootsel) {                   /* --la-bootsel [--la-ports P1,P2] */
+        char ports[LP_MAXDEV][64];
+        int n = pick_ports(o->ports, ports, LP_MAXDEV, err, sizeof(err));
+        if (n <= 0) { la_err(err); return 1; }
+        int rc = 0;
+        for (int i = 0; i < n; i++) {
+            if (lp_bootsel(ports[i], err, sizeof(err))) printf("%s: restarted into USB drive mode (a drive named RP2350)\n", ports[i]);
+            else { la_err(err); rc = 1; }
+        }
+        return rc;
+    }
     if (o->log && !(la_logf = fopen(o->log, "w"))) fprintf(stderr, "can't write %s\n", o->log);
     if (o->map && !la_load_map(o->map, err, sizeof(err))) { la_err(err); return 1; }
     int count = o->count > 0 ? o->count : 20;

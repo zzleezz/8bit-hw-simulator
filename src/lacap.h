@@ -89,6 +89,8 @@ typedef struct {
     const char *trigger;        /* --la-trigger reset | addr=XXXX | raw:T,B,C,V */
     int freq;                   /* --la-freq HZ */
     int timeout;                /* --la-timeout S */
+    double at;                  /* --la-at MS: armed on the reset, then again MS after it */
+    bool bootsel;               /* --la-bootsel: restart the boards (--la-ports) into USB drive mode */
     int tries;                  /* --la-tries N: re-arm after a glitch this often */
     const char *log;            /* --la-log FILE: a copy of what's printed */
     const struct machine *machine;

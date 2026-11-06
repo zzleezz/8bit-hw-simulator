@@ -27,6 +27,13 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser: the zx firmware for the boards (`la-firmware`, a small
+  change to gusmanb's, GPL-3): its trigger needs the address for 60 ns, so
+  the glitches as the Spectrum's address lines change don't fire it (they
+  faked the later boot stages' addresses on a real Issue 2), and a capture
+  is sent as soon as it's done. `--la-bootsel` restarts a board to flash
+  it, `--la-devices` says which firmware each has, `--la-at MS` captures a
+  set time after the reset.
 - Diagnose by probing: the bench procedure always starts with reset, then
   the clock, at the CPU (C64 and Spectrum), even after picking the screen.
   Before, it skipped them when the faults left all showed the same there.

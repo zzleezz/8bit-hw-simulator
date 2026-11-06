@@ -35,10 +35,15 @@ int lp_find(lp_port_t *out, int max);
 typedef struct {
     char version[64];           /* LOGIC_ANALYZER_PICO_2_V6_0 */
     int max_freq, blast_freq, buffer, channels;
+    int zx;                     /* the 8bit-hw-simulator firmware's version (la-firmware/zx), 0 stock */
 } lp_info_t;
 
 /* Ask one board what it is. */
 bool lp_info(const char *port, lp_info_t *info, char *err, int errlen);
+
+/* Restart a board into the Pico's USB drive mode (its firmware's command
+ * 4), to copy new firmware (a .uf2) onto the drive that appears. */
+bool lp_bootsel(const char *port, char *err, int errlen);
 
 /* Trigger types, as the firmware numbers them. */
 enum { LP_EDGE = 0, LP_COMPLEX = 1, LP_FAST = 2 };
@@ -61,6 +66,10 @@ typedef struct {
  * to come (a little after its trigger and its samples after it). */
 double lp_now_ms(void);
 extern double lp_trigger_ms;
+
+/* The last capture's boards all had the zx firmware: the trigger needs its
+ * pattern for 75 ns (no glitches), and the capture is sent at once. */
+extern bool lp_zx_firmware;
 
 /* Where "Armed" and "Triggered" are printed (printf unless set). */
 extern int (*lp_printf)(const char *fmt, ...);
