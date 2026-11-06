@@ -250,6 +250,8 @@ static double now_ms(void) {
 
 static void trace(const char *fmt, ...);
 
+int (*lp_printf)(const char *fmt, ...) = printf;
+
 /* A line (without the \n), waiting up to ms. */
 static bool read_line(sp_t *s, char *out, int len, int ms) {
     int n = 0;
@@ -413,7 +415,7 @@ bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, ch
         goto cancel;
 
     int timeout = q->timeout > 0 ? q->timeout : 60;
-    printf("Armed: waiting up to %d s for the trigger (Ctrl+C to give up)\n", timeout);
+    lp_printf("Armed: waiting up to %d s for the trigger (Ctrl+C to give up)\n", timeout);
     fflush(stdout);
     catch_ctrl_c(true);
     int nsamp = q->pre + q->post;
@@ -463,7 +465,7 @@ bool lp_capture(const lp_capture_req_t *q, uint8_t **v, int *n, int *pre_out, ch
                 }
                 if (!triggered) {
                     triggered = true;
-                    printf("Triggered: reading the samples\n");
+                    lp_printf("Triggered: reading the samples\n");
                     fflush(stdout);
                 }
             }

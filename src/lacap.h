@@ -35,6 +35,7 @@ typedef struct {
     uint64_t have;              /* the signals the capture has */
     int freq;                   /* samples per second (0: not known) */
     int pre;                    /* samples before the trigger */
+    int trig_addr;              /* triggered on the address bus showing this, or -1 (a reset; not known) */
     int chan[LA_NSIG];          /* each signal's channel (0-47), or -1 */
 } la_capture_t;
 
@@ -67,6 +68,10 @@ void la_free(la_capture_t *c);
  * samples before and POST after. B is a board_t (a Spectrum). */
 struct board;
 bool la_record(struct board *b, int pre, int post, la_capture_t *c, char *err, int errlen);
+/* The same, triggered as the analyser is on the address bus showing
+ * TRIG_ADDR (from /RESET going high and ARM_MS after power on; -1: on
+ * /RESET going high), the simulation run up to MAX_MS from power on. */
+bool la_record_at(struct board *b, int pre, int post, int trig_addr, int arm_ms, int max_ms, la_capture_t *c, char *err, int errlen);
 
 /* The bus cycles of a capture, from /RESET going high (or the start).
  * Returns how many (*out malloc'ed). */
@@ -77,11 +82,15 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out);
 typedef struct {
     const char *info, *cycles, *record, *compare, *against, *map;
     bool devices;               /* --la-devices: list the boards */
+    bool timeline;              /* --la-timeline: when the simulated boot gets where */
+    int ms;                     /* --la-ms: how long to run it */
     const char *capture;        /* --la-capture FILE */
     const char *ports;          /* --la-ports MASTER,OTHER (ports or serial numbers) */
     const char *trigger;        /* --la-trigger reset | addr=XXXX | raw:T,B,C,V */
     int freq;                   /* --la-freq HZ */
     int timeout;                /* --la-timeout S */
+    int tries;                  /* --la-tries N: re-arm after a glitch this often */
+    const char *log;            /* --la-log FILE: a copy of what's printed */
     const struct machine *machine;
     const char *const *faults; int nfaults;
     int count;                  /* --la-count: cycles to list / context */
@@ -89,5 +98,10 @@ typedef struct {
     bool refresh;               /* --la-refresh: compare refresh cycles too */
 } la_cli_t;
 int la_cli(const la_cli_t *o);
+
+/* The stages a capture can be triggered at (--la-trigger NAME): the
+ * address, and what it is. NULL name ends the list. */
+typedef struct { const char *name; int addr; const char *what; } la_stage_t;
+extern const la_stage_t la_stages[];
 
 #endif

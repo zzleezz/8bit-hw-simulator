@@ -18,6 +18,15 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   LogicAnalyzer program (`--la-devices`, `--la-capture`; Windows and
   Linux). The channel map is now the real one (Jim's video), checked on a
   real Issue 2 that matches the simulated one for every bus cycle.
+- Logic analyser: capture at a stage of the boot (`--la-trigger reset`,
+  `ramcheck`, `ramdone`, `copyright`, `main`, `interrupt`, `addr=XXXX`),
+  re-armed when the trigger was only a glitch on the address lines; the
+  simulated board is recorded at the same stage to compare with. The
+  comparison now tells what the CPU does apart from the data it moves (RAM
+  data differences alone are the machine's state, not a fault), checks that
+  RAM reads give back what was written, and reports the RAM test's result
+  (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
+  copy of what's printed.
 - Diagnose by probing: the bench procedure always starts with reset, then
   the clock, at the CPU (C64 and Spectrum), even after picking the screen.
   Before, it skipped them when the faults left all showed the same there.

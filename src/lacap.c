@@ -5,6 +5,30 @@
 #include "board.h"
 #include "zx48.h"
 #include "lapico.h"
+#include <stdarg.h>
+#include <stdio.h>
+
+/* Everything printed goes to the --la-log file as well. */
+static FILE *la_logf;
+static int la_out(const char *fmt, ...) {
+    va_list a;
+    va_start(a, fmt);
+    int n = vprintf(fmt, a);
+    va_end(a);
+    if (la_logf) {
+        va_start(a, fmt);
+        vfprintf(la_logf, fmt, a);
+        va_end(a);
+        fflush(la_logf);
+    }
+    fflush(stdout);
+    return n;
+}
+static void la_err(const char *msg) {
+    fprintf(stderr, "%s\n", msg);
+    if (la_logf) { fprintf(la_logf, "%s\n", msg); fflush(la_logf); }
+}
+#define printf la_out
 #include <ctype.h>
 #include <stdio.h>
 #include <math.h>
@@ -300,8 +324,32 @@ static bool la_build(la_capture_t *c, rawchan_t *ch, int nch, char *err, int err
     return true;
 }
 
+/* The trigger value for the address A on the master's channels 1-16, or
+ * -1 if they aren't the address bus; and back. */
+static long addr_pattern(unsigned a) {
+    unsigned v = 0;
+    for (int k = 0; k < 16; k++) {
+        int s = chan_map[k];
+        if (s < LA_A0 || s > LA_A15) return -1;
+        v |= (a >> (s - LA_A0) & 1u) << k;
+    }
+    return (long)v;
+}
+static int pattern_addr(unsigned v) {
+    unsigned a = 0;
+    for (int k = 0; k < 16; k++) {
+        int s = chan_map[k];
+        if (s < LA_A0 || s > LA_A15) return -1;
+        a |= (v >> k & 1u) << (s - LA_A0);
+    }
+    return (int)a;
+}
+
 static bool read_lac(const char *text, size_t len, la_capture_t *c, char *err, int errlen) {
     js_t j = { text, text + len, false };
+    int ttype = -1, tchan = -1, tcount = -1;
+    long tpat = -1;
+    c->trig_addr = -1;
     rawchan_t *ch = NULL;
     int nch = 0;
     bool ok = false;
@@ -317,6 +365,10 @@ static bool read_lac(const char *text, size_t len, la_capture_t *c, char *err, i
             if (!js_string(&j, k2, sizeof(k2)) || !js_is(&j, ':')) break;
             if (!strcmp(k2, "Frequency")) c->freq = (int)js_number(&j);
             else if (!strcmp(k2, "PreTriggerSamples")) c->pre = (int)js_number(&j);
+            else if (!strcmp(k2, "TriggerType")) ttype = (int)js_number(&j);
+            else if (!strcmp(k2, "TriggerChannel")) tchan = (int)js_number(&j);
+            else if (!strcmp(k2, "TriggerBitCount")) tcount = (int)js_number(&j);
+            else if (!strcmp(k2, "TriggerPattern")) tpat = (long)js_number(&j);
             else if (!strcmp(k2, "CaptureChannels") && js_is(&j, '[')) {
                 if (js_is(&j, ']')) continue;
                 do {
@@ -348,6 +400,8 @@ static bool read_lac(const char *text, size_t len, la_capture_t *c, char *err, i
     if (j.bad) snprintf(err, errlen, "the .lac file is damaged (JSON at byte %d)", (int)(j.p - text));
     else if (!settings || !nch) snprintf(err, errlen, "no capture channels in the .lac file");
     else ok = la_build(c, ch, nch, err, errlen);
+    /* A 16 bit pattern on channels 1-16: the address it was triggered on. */
+    if (ok && ttype == 1 && tchan == 0 && tcount == 16 && tpat >= 0) c->trig_addr = pattern_addr((unsigned)tpat);
     for (int k = 0; k < nch; k++) free(ch[k].v);
     free(ch);
     return ok;
@@ -406,6 +460,7 @@ bool la_read(const char *path, la_capture_t *c, char *err, int errlen) {
     fclose(f);
     text[got] = 0;
     size_t n = strlen(path);
+    c->trig_addr = -1;
     bool ok = n > 4 && !strcasecmp(path + n - 4, ".csv") ? read_csv(text, c, err, errlen)
                                                           : read_lac(text, got, c, err, errlen);
     free(text);
@@ -450,9 +505,14 @@ bool la_write(const char *path, const la_capture_t *c, char *err, int errlen) {
             fputs("\"}", f);
         }
         free(v);
-        fprintf(f, "],\"Bursts\":null,\"TriggerType\":1,\"TriggerChannel\":%d,\"TriggerInverted\":false,"
-                "\"TriggerBitCount\":1,\"TriggerPattern\":1},\"Samples\":null,\"SelectedRegions\":null}\n",
-                reset_ch < 0 ? 0 : reset_ch);
+        long pat = c->trig_addr >= 0 ? addr_pattern((unsigned)c->trig_addr) : -1;
+        if (pat >= 0)
+            fprintf(f, "],\"Bursts\":null,\"TriggerType\":1,\"TriggerChannel\":0,\"TriggerInverted\":false,"
+                    "\"TriggerBitCount\":16,\"TriggerPattern\":%ld},\"Samples\":null,\"SelectedRegions\":null}\n", pat);
+        else
+            fprintf(f, "],\"Bursts\":null,\"TriggerType\":1,\"TriggerChannel\":%d,\"TriggerInverted\":false,"
+                    "\"TriggerBitCount\":1,\"TriggerPattern\":1},\"Samples\":null,\"SelectedRegions\":null}\n",
+                    reset_ch < 0 ? 0 : reset_ch);
     }
     bool ok = !ferror(f);
     if (fclose(f) != 0) ok = false;
@@ -467,6 +527,10 @@ bool la_write(const char *path, const la_capture_t *c, char *err, int errlen) {
 typedef struct {
     int net[LA_NSIG];
     int pre, post;
+    int trig_addr;                      /* -1: /RESET going high; else the address bus becoming this */
+    long long step, arm_step;           /* bus steps since power on; the address trigger counts from arm_step */
+    bool after_reset;                   /* /RESET has gone high (address triggers count from then) */
+    unsigned prev_addr;
     uint64_t *ring; int rpos, rcount;   /* before the trigger */
     uint64_t *out; int nout;            /* from the trigger */
     bool reset_prev, triggered, done;
@@ -476,11 +540,22 @@ static void rec_step(board_t *b, void *ctx) {
     rec_t *r = ctx;
     if (r->done) return;
     sim_t *s = &b->sim;
+    r->step++;
     uint64_t v = 0;
     for (int i = 0; i < LA_NSIG; i++)
         if (r->net[i] >= 0) v |= (uint64_t)(s->nread[s->nets[r->net[i]].root] & 1) << i;
     bool reset = v >> LA_RESET & 1;
-    if (!r->triggered && reset && !r->reset_prev) {
+    bool fire;
+    if (r->trig_addr < 0) fire = reset && !r->reset_prev;
+    else {
+        /* As the analyser's pattern trigger: the address lines alone,
+         * whatever the bus is doing, from the first match after reset. */
+        unsigned a = (unsigned)(v >> LA_A0 & 0xFFFF);
+        fire = r->after_reset && r->step >= r->arm_step && a == (unsigned)r->trig_addr && r->prev_addr != a;
+        r->prev_addr = a;
+    }
+    if (reset && !r->reset_prev) r->after_reset = true;
+    if (!r->triggered && fire) {
         r->triggered = true;
         int start = r->rcount < r->pre ? 0 : r->rpos;
         for (int k = 0; k < r->rcount; k++) r->out[r->nout++] = r->ring[(start + k) % r->pre];
@@ -496,26 +571,37 @@ static void rec_step(board_t *b, void *ctx) {
     }
 }
 
-bool la_record(board_t *b, int pre, int post, la_capture_t *c, char *err, int errlen) {
-    memset(c, 0, sizeof(*c));
-    if (!board_is_zx48(b)) { snprintf(err, errlen, "the analyser is made for the Spectrum's edge connector"); return false; }
+/* The edge connector's nets for the signals (-1: not there); the capture's
+ * channels and signals from the map. */
+static void find_nets(board_t *b, int net[LA_NSIG], la_capture_t *c) {
     sim_t *s = &b->sim;
-    rec_t r = { .pre = pre, .post = post };
     for (int i = 0; i < LA_NSIG; i++) {
-        c->chan[i] = -1;
-        r.net[i] = -1;
+        if (c) c->chan[i] = -1;
+        net[i] = -1;
         char names[64];
         snprintf(names, sizeof(names), "%s", sig_names[i]);
         for (size_t k = 0; k < sizeof(sig_nets) / sizeof(sig_nets[0]); k++)
             if (sig_nets[k].sig == i) snprintf(names, sizeof(names), "%s", sig_nets[k].nets);
-        for (char *w = strtok(names, " "); w && r.net[i] < 0; w = strtok(NULL, " ")) {
-            int net = sim_find_net(s, w);
-            if (net >= 0 && board_net_simulated(b, net)) r.net[i] = net;
+        for (char *w = strtok(names, " "); w && net[i] < 0; w = strtok(NULL, " ")) {
+            int n = sim_find_net(s, w);
+            if (n >= 0 && board_net_simulated(b, n)) net[i] = n;
         }
-        if (r.net[i] < 0) continue;
+        if (net[i] < 0 || !c) continue;
         c->have |= 1ull << i;
         for (int k = 0; k < 48; k++) if (chan_map[k] == i) c->chan[i] = k;
     }
+}
+
+bool la_record(board_t *b, int pre, int post, la_capture_t *c, char *err, int errlen) {
+    return la_record_at(b, pre, post, -1, 0, 1000, c, err, errlen);
+}
+
+bool la_record_at(board_t *b, int pre, int post, int trig_addr, int arm_ms, int max_ms, la_capture_t *c, char *err, int errlen) {
+    memset(c, 0, sizeof(*c));
+    if (!board_is_zx48(b)) { snprintf(err, errlen, "the analyser is made for the Spectrum's edge connector"); return false; }
+    rec_t r = { .pre = pre, .post = post, .trig_addr = trig_addr,
+                .arm_step = (long long)arm_ms * (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000) };
+    find_nets(b, r.net, c);
     if (r.net[LA_RESET] < 0) { snprintf(err, errlen, "no /RESET net on the edge connector"); return false; }
     r.ring = calloc((size_t)(pre > 0 ? pre : 1), sizeof(uint64_t));
     r.out = calloc((size_t)pre + (size_t)post, sizeof(uint64_t));
@@ -524,20 +610,117 @@ bool la_record(board_t *b, int pre, int post, la_capture_t *c, char *err, int er
         snprintf(err, errlen, "the board is busy (edge counting)");
         return false;
     }
-    /* Power on is 70 ms of reset (C27): wait up to a second for it. */
-    for (int t = 0; !r.done && t < ZX_FREQ; t += 1000) board_run(b, 1000);
+    /* Power on is 70 ms of reset (C27); then up to max_ms in all. */
+    long long limit = (long long)ZX_FREQ * max_ms / 1000;
+    for (long long t = 0; !r.done && t < limit; t += 1000) board_run(b, 1000);
     board_step_hook(b, NULL, NULL);
     free(r.ring);
     if (!r.triggered) {
         free(r.out);
-        snprintf(err, errlen, "/RESET never went high in the first second: the analyser would not trigger");
+        if (trig_addr < 0) snprintf(err, errlen, "/RESET never went high in %d ms: the analyser would not trigger", max_ms);
+        else snprintf(err, errlen, "the address bus never showed %04X from %d to %d ms after power on", trig_addr, arm_ms, max_ms);
+        return false;
+    }
+    if (!r.done) {
+        snprintf(err, errlen, "the simulation stopped %d ms after power on, before all the samples after the trigger", max_ms);
+        free(r.out);
         return false;
     }
     c->s = r.out;
     c->n = r.nout;
     c->pre = r.rcount;
+    c->trig_addr = trig_addr;
     c->freq = ZX_FREQ * ZX_STEPS_PER_CYCLE;
     return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* The boot's timeline: when the ROM gets where                              */
+/* ------------------------------------------------------------------------ */
+
+typedef struct {
+    int net[LA_NSIG];
+    long long step;                     /* bus steps since power on */
+    long long reset_at;                 /* the step /RESET went high, or -1 */
+    bool prev_fetch, prev_read, reset_prev;
+    float *first_fetch, *first_read;    /* ms after /RESET went high, a 64K table each; -1 never */
+    uint32_t *fetches;
+    uint32_t ints;                      /* fetches from 0038 */
+} tl_t;
+
+static void tl_step(board_t *b, void *ctx) {
+    tl_t *t = ctx;
+    sim_t *s = &b->sim;
+    t->step++;
+#define TL(sig) (s->nread[s->nets[t->net[sig]].root] & 1)
+    bool reset = TL(LA_RESET);
+    if (reset && !t->reset_prev && t->reset_at < 0) t->reset_at = t->step;
+    t->reset_prev = reset;
+    if (t->reset_at < 0) return;
+    bool mreq = !TL(LA_MREQ), m1 = !TL(LA_M1), rd = !TL(LA_RD);
+    bool fetch = mreq && m1, read = mreq && rd && !m1 && TL(LA_RFSH);
+    if ((fetch && !t->prev_fetch) || (read && !t->prev_read)) {
+        unsigned a = 0;
+        for (int i = 0; i < 16; i++) a |= (unsigned)TL(LA_A0 + i) << i;
+        float ms = (float)((t->step - t->reset_at) / (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000.0));
+        if (fetch) {
+            if (t->first_fetch[a] < 0) t->first_fetch[a] = ms;
+            t->fetches[a]++;
+        } else if (t->first_read[a] < 0) t->first_read[a] = ms;
+    }
+#undef TL
+    t->prev_fetch = fetch;
+    t->prev_read = read;
+}
+
+static const struct { uint16_t addr; bool read; const char *what; } milestones[] = {
+    { 0x0000, false, "START: the reset" },
+    { 0x11CB, false, "START/NEW" },
+    { 0x11DC, false, "RAM-FILL: the RAM test writes 02 from FFFF down" },
+    { 0x11E2, false, "RAM-READ: it checks the RAM, from 4000 up" },
+    { 0x11EF, false, "RAM-DONE: the RAM test is over" },
+    { 0x1219, false, "RAM-SET: the system variables" },
+    { 0x0038, false, "MASK-INT: the first frame interrupt" },
+    { 0x1539, true,  "the copyright message is read" },
+    { 0x12A9, false, "MAIN-1: the editor's main loop" },
+    { 0x10A8, false, "KEY-INPUT" },
+};
+
+static const char *board_desc(const la_cli_t *o, char *out, int len);
+
+static int timeline(const la_cli_t *o) {
+    board_t *b = board_create(o->machine ? o->machine : &machine_zx48);
+    for (int i = 0; i < o->nfaults; i++)
+        if (!board_apply_fault_spec(b, o->faults[i])) { fprintf(stderr, "bad fault spec: %s\n", o->faults[i]); board_destroy(b); return 1; }
+    if (!board_is_zx48(b)) { fprintf(stderr, "the timeline is for the Spectrum\n"); board_destroy(b); return 1; }
+    tl_t t = { .reset_at = -1 };
+    find_nets(b, t.net, NULL);
+    const int need[] = { LA_RESET, LA_MREQ, LA_M1, LA_RD, LA_RFSH };
+    for (size_t i = 0; i < sizeof(need) / sizeof(need[0]); i++)
+        if (t.net[need[i]] < 0) { fprintf(stderr, "no %s net\n", sig_names[need[i]]); board_destroy(b); return 1; }
+    t.first_fetch = malloc(65536 * sizeof(float));
+    t.first_read = malloc(65536 * sizeof(float));
+    t.fetches = calloc(65536, sizeof(uint32_t));
+    for (int a = 0; a < 65536; a++) t.first_fetch[a] = t.first_read[a] = -1;
+    int ms = o->ms > 0 ? o->ms : 3000;
+    board_step_hook(b, tl_step, &t);
+    long long limit = (long long)ZX_FREQ * ms / 1000;
+    for (long long n = 0; n < limit; n += 1000) board_run(b, 1000);
+    board_step_hook(b, NULL, NULL);
+    char d[300];
+    printf("%s, %d ms from power on; /RESET went high at %.1f ms\n", board_desc(o, d, sizeof(d)), ms,
+           t.reset_at < 0 ? -1.0 : t.reset_at / (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000.0));
+    printf("  %-9s %-6s %-10s %s\n", "ms", "addr", "fetches", "");
+    for (size_t i = 0; i < sizeof(milestones) / sizeof(milestones[0]); i++) {
+        unsigned a = milestones[i].addr;
+        float f = milestones[i].read ? t.first_read[a] : t.first_fetch[a];
+        if (f < 0) printf("  %-9s %04X   %-10s %s\n", "never", a, "", milestones[i].what);
+        else printf("  %-9.3f %04X   %-10u %s\n", f, a, milestones[i].read ? 0u : t.fetches[a], milestones[i].what);
+    }
+    printf("Frame interrupts (0038 fetches): %u\n", t.fetches[0x38]);
+    free(t.first_fetch); free(t.first_read); free(t.fetches);
+    board_destroy(b);
+    return 0;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -650,6 +833,28 @@ static bool rom_wrong(const la_capture_t *c, const la_cycle_t *y) {
 /* The command line                                                          */
 /* ------------------------------------------------------------------------ */
 
+/* RAM reads that don't give back what was written there earlier in the
+ * same capture: a fault in the RAM (or its buffers, the multiplexers),
+ * whatever the machine was doing. Prints up to SHOW of them. */
+static int ram_readback(const la_cycle_t *cy, int n, int show) {
+    static short last[65536];
+    for (int k = 0; k < 65536; k++) last[k] = -1;
+    int bad = 0;
+    for (int k = 0; k < n; k++) {
+        const la_cycle_t *x = &cy[k];
+        if (x->addr < 0x4000) continue;
+        if (x->kind == LA_WRITE) last[x->addr] = (short)x->data;
+        else if ((x->kind == LA_READ || x->kind == LA_FETCH) && last[x->addr] >= 0 && last[x->addr] != x->data) {
+            if (bad < show)
+                printf("  T %d: %s %04X gave %02X, %02X was written there (bits %02X wrong)\n", x->t,
+                       kind_names[x->kind], x->addr, x->data, last[x->addr], (x->data ^ last[x->addr]) & 0xFF);
+            bad++;
+            last[x->addr] = (short)x->data;     /* report each wrong cell once */
+        }
+    }
+    return bad;
+}
+
 static void print_info(const char *path, const la_capture_t *c, int count) {
     int start = la_start(c);
     printf("%s: %d samples", path, c->n);
@@ -685,6 +890,25 @@ static void print_info(const char *path, const la_capture_t *c, int count) {
     printf("\n%d bus cycles:", n);
     for (int k = 0; k < 7; k++) if (per[k]) printf(" %d %s", per[k], kind_names[k]);
     printf("\nROM reads that aren't what the ROM holds: %d\n", wrong);
+    int rb = ram_readback(cy, n, 0);
+    printf("RAM reads that don't give back what was written: %d\n", rb);
+    if (rb) ram_readback(cy, n, 5);
+    /* The RAM test's result: the ROM keeps the top of the RAM it found
+     * good in P-RAMT (5CB4); its last write here is the one that counts. */
+    int lo_b = -1, hi_b = -1;
+    for (int k = 0; k < n; k++)
+        if (cy[k].kind == LA_WRITE) {
+            if (cy[k].addr == 0x5CB4) lo_b = cy[k].data;
+            if (cy[k].addr == 0x5CB5) hi_b = cy[k].data;
+        }
+    if (lo_b >= 0 && hi_b >= 0) {
+        unsigned top = (unsigned)(hi_b << 8 | lo_b);
+        printf("The RAM test: the RAM is good up to %04X (P-RAMT)", top);
+        if (top == 0xFFFF) printf(": all 48K passed\n");
+        else if (top == 0x7FFF) printf(": it stopped at 8000, the first byte of the upper 32K (or it's a 16K machine)\n");
+        else if (top >= 0x8000) printf(": it stopped at %04X, in the upper 32K (8000-FFFF)\n", top + 1);
+        else printf(": it stopped at %04X, in the lower 16K (4000-7FFF)\n", top + 1);
+    }
     for (int k = 0, shown = 0; k < n && shown < 5; k++)
         if (rom_wrong(c, &cy[k])) {
             printf("  T %d: %s %04X gave %02X, the ROM holds %02X\n", cy[k].t, kind_names[cy[k].kind], cy[k].addr,
@@ -698,6 +922,12 @@ static void print_info(const char *path, const la_capture_t *c, int count) {
         printf("  T %6d  %s%s\n", cy[k].t, tx, rom_wrong(c, &cy[k]) ? "  <- not the ROM's" : "");
     }
     free(cy);
+}
+
+/* The first cycle at ADDR from just before the trigger on, or -1. */
+static int at_trigger(const la_cycle_t *cy, int n, const la_capture_t *c, int addr) {
+    for (int k = 0; k < n; k++) if (cy[k].addr == addr && cy[k].sample >= c->pre - 16) return k;
+    return -1;
 }
 
 static int first_fetch0(const la_cycle_t *cy, int n) {
@@ -723,19 +953,46 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
         free(ca); free(cb);
         return 1;
     }
-    int ia = first_fetch0(ca, na), ib = first_fetch0(cb, nb);
-    int ta = ca[ia].t, tb = cb[ib].t;
-    printf("A: %s (%d cycles%s)\nB: %s (%d cycles%s)\n", an, na - ia, ia ? ", from its first fetch at 0000" : "",
-           bn, nb - ib, ib ? ", from its first fetch at 0000" : "");
-    int k = 0, soft = 0, timing = -1;
-    for (; ia + k < na && ib + k < nb; k++) {
-        const la_cycle_t *x = &ca[ia + k], *y = &cb[ib + k];
-        bool same = x->kind == y->kind && x->addr == y->addr && (x->kind == LA_REFRESH || x->data == y->data);
-        if (!same && x->kind == y->kind && x->addr == y->addr && (x->kind == LA_IN || x->kind == LA_INTACK)) {
-            soft++;             /* a port or the floating bus: may differ */
-            continue;
+    /* Lined up on the reset's first fetch from 0000, or, triggered on
+     * another address, on the cycle at the trigger with that address, from
+     * a few cycles before it. */
+    int align = a->trig_addr >= 0 ? a->trig_addr : b->trig_addr;
+    int ia, ib;
+    char from[64] = "";
+    if (align < 0 || align == 0xFFFF) {
+        ia = first_fetch0(ca, na);
+        ib = first_fetch0(cb, nb);
+        if (ia || ib) snprintf(from, sizeof(from), ", from the first fetch at 0000");
+    } else {
+        ia = at_trigger(ca, na, a, align);
+        ib = at_trigger(cb, nb, b, align);
+        if (ia < 0 || ib < 0) {
+            printf("No bus cycle at %04X at the trigger in %s\n", align, ia < 0 ? an : bn);
+            free(ca); free(cb);
+            return 1;
         }
-        if (!same) break;
+        int back = ia < ib ? ia : ib;
+        if (back > 40) back = 40;
+        if (align == 0x0038) back = 0;  /* what it interrupted is anyone's */
+        ia -= back;
+        ib -= back;
+        snprintf(from, sizeof(from), ", from %d before the trigger's %04X", back, align);
+    }
+    int ta = ca[ia].t, tb = cb[ib].t;
+    printf("A: %s (%d cycles%s)\nB: %s (%d cycles%s)\n", an, na - ia, from, bn, nb - ib, from);
+    int k = 0, soft = 0, timing = -1, ndiff = 0, diffs[8], area[4] = { 0 };
+    for (; ia + k < na && ib + k < nb; k++) {
+        /* The same bus cycle (kind and address) is the CPU doing the same;
+         * the data can differ under that (a fault in what is read, or a
+         * counter, a pushed address). The first cycle that isn't the same
+         * ends it. */
+        const la_cycle_t *x = &ca[ia + k], *y = &cb[ib + k];
+        if (x->kind != y->kind || x->addr != y->addr) break;
+        if (x->kind == LA_REFRESH || x->data == y->data) continue;
+        if (x->kind == LA_IN || x->kind == LA_INTACK) { soft++; continue; }   /* a port or the floating bus */
+        if (ndiff < 8) diffs[ndiff] = k;
+        ndiff++;
+        area[x->addr < 0x4000 ? 0 : x->addr < 0x5B00 ? 1 : x->addr < 0x5CC0 ? 2 : 3]++;
     }
     /* Timing, after taking out a steady difference of the clocks (the real
      * Spectrum's crystal against the analyser's): what's left is a real
@@ -758,11 +1015,39 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
         printf("Timing: the same, within a T state\n");
     if (soft) printf("%d port reads / interrupt acknowledges read differently (ports, the floating bus)\n", soft);
     int rc = 0;
-    if (ia + k >= na || ib + k >= nb)
-        printf("The same for all %d cycles both have\n", k);
-    else {
+    bool end = ia + k >= na || ib + k >= nb;
+    if (end && !ndiff) printf("The same for all %d cycles both have\n", k);
+    else if (end) printf("The CPU does the same for all %d cycles both have\n", k);
+    else printf("The CPU does the same for %d cycles\n", k);
+    if (ndiff) {
+        if (area[0]) rc = 2;            /* the ROM read differently: a fault; RAM: the state */
+        /* Where: a ROM read that differs is a fault; the system variables
+         * (FRAMES, the last key...) and the stack (pushed return addresses)
+         * differ on any two machines captured at different times. */
+        printf("The data differ in %d of them:", ndiff);
+        const char *an_[4] = { "ROM (0000-3FFF: a fault)", "the screen (4000-5AFF)",
+                               "the system variables (5B00-5CBF: counters, keys)", "the rest of the RAM (5CC0-FFFF: the stack, programs)" };
+        for (int z = 0, first = 1; z < 4; z++)
+            if (area[z]) { printf("%s %d in %s", first ? "" : ",", area[z], an_[z]); first = 0; }
+        printf("\n%s:\n", ndiff > 8 ? "The first 8" : "They are");
+        printf("  %-6s %-9s %-16s   %-9s %s\n", "cycle", "A T", "A", "B T", "B");
+        for (int d = 0; d < ndiff && d < 8; d++) {
+            int j = diffs[d];
+            char tx[32], ty[32];
+            cycle_text(&ca[ia + j], tx, sizeof(tx));
+            cycle_text(&cb[ib + j], ty, sizeof(ty));
+            printf("  %-6d %-9d %-16s   %-9d %s%s\n", j, ca[ia + j].t - ta, tx, cb[ib + j].t - tb, ty,
+                   rom_wrong(a, &ca[ia + j]) ? "  <- A's isn't the ROM's" : rom_wrong(b, &cb[ib + j]) ? "  <- B's isn't the ROM's" : "");
+        }
+    }
+    int rba = ram_readback(ca + ia, na - ia, 0), rbb = ram_readback(cb + ib, nb - ib, 0);
+    if (rba) { printf("%s: %d RAM reads don't give back what was written there:\n", an, rba); ram_readback(ca + ia, na - ia, 5); rc = 2; }
+    if (rbb) { printf("%s: %d RAM reads don't give back what was written there:\n", bn, rbb); ram_readback(cb + ib, nb - ib, 5); rc = 2; }
+    if (ndiff && !area[0] && end && !rba && !rbb)
+        printf("Only RAM data differ (counters, the stack's pushed registers): the state the machines were in, not a fault\n");
+    if (!end) {
         rc = 2;
-        printf("\nThe first difference, cycle %d:\n", k);
+        printf("\nThe first difference in what the CPU does, cycle %d:\n", k);
         printf("  %-6s %-9s %-16s   %-9s %s\n", "cycle", "A T", "A", "B T", "B");
         for (int j = k - context < 0 ? 0 : k - context; j <= k + 2 && ia + j < na && ib + j < nb; j++) {
             char tx[32], ty[32];
@@ -831,27 +1116,61 @@ static int pick_ports(const char *list, char ports[][64], int max, char *err, in
     return n;
 }
 
-/* --la-trigger: reset (the address FFFF: the RAM test's first write, about
- * 110 T after the reset), addr=XXXX (all 16 address lines),
- * raw:TYPE,BASE,COUNT,VALUE. Not A15 alone: while the reset is held the
- * Z80's address lines float, and A15 and A14 drift high (live1.lac). */
-static bool pick_trigger(const char *t, lp_capture_req_t *q, char *err, int errlen) {
+/* The stages of a 48K's boot to trigger at, from the simulated Issue 2's
+ * timeline (--la-timeline): after the reset button is let go. */
+const la_stage_t la_stages[] = {
+    { "reset",     0xFFFF, "the reset: the RAM test's first write (FFFF), about 110 T after it" },
+    { "ramcheck",  0x11E2, "the RAM test starts reading the RAM back, from 4000 up (0.45 s after the reset)" },
+    { "ramdone",   0x11EF, "the RAM test is over (1.65 s after the reset; sooner if the RAM has a fault)" },
+    { "copyright", 0x1539, "the copyright message (1.71 s after the reset)" },
+    { "main",      0x12A9, "the editor's main loop (1.73 s after the reset)" },
+    { "interrupt", 0x0038, "a frame interrupt (50 a second, while the ROM's interrupt routine is used)" },
+    { NULL, 0, NULL }
+};
+
+static const la_stage_t *stage_named(const char *t) {
+    for (const la_stage_t *s = la_stages; s->name; s++) if (!strcasecmp(s->name, t)) return s;
+    return NULL;
+}
+
+/* --la-trigger: a stage's name, addr=XXXX (all 16 address lines), or
+ * raw:TYPE,BASE,COUNT,VALUE. Sets *addr to the address (-1 for raw). Not
+ * A15 alone for the reset: while the button is held the Z80's address
+ * lines float, and A15 and A14 drift high (live1.lac). */
+static bool pick_trigger(const char *t, lp_capture_req_t *q, int *addr, char *err, int errlen) {
     unsigned a, ty, base, count, value;
-    if (!t || !strcasecmp(t, "reset")) t = "addr=FFFF";
+    *addr = -1;
+    if (!t) t = "reset";
+    const la_stage_t *st = stage_named(t);
+    char buf[32];
+    if (st) { snprintf(buf, sizeof(buf), "addr=%04X", st->addr); t = buf; }
     if (sscanf(t, "addr=%x", &a) == 1) {
-        q->trig_type = LP_COMPLEX; q->trig_base = 0; q->trig_count = 16; q->trig_value = 0;
-        for (int k = 0; k < 16; k++) {
-            int s = chan_map[k];
-            if (s < LA_A0 || s > LA_A15) { snprintf(err, errlen, "an address trigger needs A0-A15 on channels 1-16"); return false; }
-            q->trig_value |= (a >> (s - LA_A0) & 1u) << k;
-        }
+        long v = addr_pattern(a & 0xFFFF);
+        if (v < 0) { snprintf(err, errlen, "an address trigger needs A0-A15 on channels 1-16"); return false; }
+        q->trig_type = LP_COMPLEX; q->trig_base = 0; q->trig_count = 16; q->trig_value = (unsigned)v;
+        *addr = (int)(a & 0xFFFF);
         return true;
     }
     if (sscanf(t, "raw:%u,%u,%u,%u", &ty, &base, &count, &value) == 4) {
         q->trig_type = (int)ty; q->trig_base = (int)base; q->trig_count = (int)count; q->trig_value = value;
         return true;
     }
-    snprintf(err, errlen, "--la-trigger %s: reset, addr=XXXX or raw:TYPE,BASE,COUNT,VALUE", t);
+    int n = snprintf(err, errlen, "--la-trigger %s: a stage (", t);
+    for (const la_stage_t *s = la_stages; s->name && n < errlen; s++) n += snprintf(err + n, errlen - n, "%s%s", s == la_stages ? "" : ", ", s->name);
+    if (n < errlen) snprintf(err + n, errlen - n, "), addr=XXXX or raw:TYPE,BASE,COUNT,VALUE");
+    return false;
+}
+
+/* Was it the address, or a glitch while the lines changed? A bus cycle
+ * holds its address for 2 T or more (8 samples at 14 MHz); a glitch lasts
+ * a few ns. Wants it for 3 samples in a row near the trigger. */
+static bool real_trigger(const la_capture_t *c, int addr) {
+    int run = 0, need = c->freq > 0 && c->freq < 10000000 ? 1 : 3;
+    for (int i = c->pre - 8; i < c->pre + 40 && i < c->n; i++) {
+        if (i < 0) continue;
+        run = (int)(c->s[i] >> LA_A0 & 0xFFFF) == addr ? run + 1 : 0;
+        if (run >= need) return true;
+    }
     return false;
 }
 
@@ -866,31 +1185,46 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
     q.pre = o->pre > 0 ? o->pre : 1000;
     q.post = o->post > 0 ? o->post : 97000;
     q.timeout = o->timeout;
-    if (!pick_trigger(o->trigger, &q, err, errlen)) return false;
-    if (!o->trigger || !strcasecmp(o->trigger, "reset"))
-        printf("Trigger: the Spectrum's reset. Hold its reset button down now, and let go once it says Armed.\n");
+    int addr;
+    if (!pick_trigger(o->trigger, &q, &addr, err, errlen)) return false;
+    const la_stage_t *st = stage_named(o->trigger ? o->trigger : "reset");
+    if (st) printf("Trigger: %s\n", st->what);
+    else if (addr >= 0) printf("Trigger: the address bus showing %04X\n", addr);
+    if (st && st->addr != 0x0038)
+        printf("Hold the Spectrum's reset button down now, and let go once it says Armed.\n");
     printf("Capturing %d channels from %s%s%s at %d Hz, %d samples before the trigger and %d after\n", q.nchan,
            ports[0], q.ndev > 1 ? " (master) and " : "", q.ndev > 1 ? ports[1] : "", q.freq, q.pre, q.post);
-    fflush(stdout);
-    uint8_t *v[LP_MAXDEV * 24] = { 0 };
-    int n = 0, pre = 0;
-    if (!lp_capture(&q, v, &n, &pre, err, errlen)) return false;
-    rawchan_t ch[LP_MAXDEV * 24];
-    for (int k = 0; k < q.nchan; k++) {
-        ch[k].number = q.chan[k];
-        snprintf(ch[k].name, sizeof(ch[k].name), "%s", la_signal_name(chan_map[q.chan[k]]));
-        ch[k].v = v[k];
-        ch[k].n = n;
+    lp_printf = la_out;
+    int tries = o->tries > 0 ? o->tries : 5;
+    for (int attempt = 1; ; attempt++) {
+        uint8_t *v[LP_MAXDEV * 24] = { 0 };
+        int n = 0, pre = 0;
+        if (!lp_capture(&q, v, &n, &pre, err, errlen)) return false;
+        rawchan_t ch[LP_MAXDEV * 24];
+        for (int k = 0; k < q.nchan; k++) {
+            ch[k].number = q.chan[k];
+            snprintf(ch[k].name, sizeof(ch[k].name), "%s", la_signal_name(chan_map[q.chan[k]]));
+            ch[k].v = v[k];
+            ch[k].n = n;
+        }
+        memset(c, 0, sizeof(*c));
+        c->freq = q.freq;
+        c->pre = pre;
+        c->trig_addr = addr;
+        bool ok = la_build(c, ch, q.nchan, err, errlen);
+        for (int k = 0; k < q.nchan; k++) free(v[k]);
+        if (!ok) return false;
+        if (addr < 0 || real_trigger(c, addr)) return true;
+        la_free(c);
+        if (attempt >= tries) {
+            snprintf(err, errlen, "%d glitches on the address lines and not once %04X itself: given up", tries, addr);
+            return false;
+        }
+        printf("That was a glitch on the address lines, not %04X itself: trying again (%d of %d)\n", addr, attempt + 1, tries);
     }
-    memset(c, 0, sizeof(*c));
-    c->freq = q.freq;
-    c->pre = pre;
-    bool ok = la_build(c, ch, q.nchan, err, errlen);
-    for (int k = 0; k < q.nchan; k++) free(v[k]);
-    return ok;
 }
 
-static bool record_board(const la_cli_t *o, int post, la_capture_t *c, char *err, int errlen) {
+static bool record_board(const la_cli_t *o, int post, int trig_addr, la_capture_t *c, char *err, int errlen) {
     board_t *b = board_create(o->machine ? o->machine : &machine_zx48);
     for (int i = 0; i < o->nfaults; i++)
         if (!board_apply_fault_spec(b, o->faults[i])) {
@@ -898,9 +1232,26 @@ static bool record_board(const la_cli_t *o, int post, la_capture_t *c, char *err
             board_destroy(b);
             return false;
         }
-    bool ok = la_record(b, o->pre > 0 ? o->pre : 512, post > 0 ? post : o->post > 0 ? o->post : 32000, c, err, errlen);
+    /* Before the trigger: the analyser's 1000 samples at 14 MHz are 70 us,
+     * 2000 here at 28 MHz. The stages are up to 1.8 s after power on. */
+    int pre = o->pre > 0 && !o->capture ? o->pre : trig_addr >= 0 ? 2000 : 512;
+    post = post > 0 ? post : o->post > 0 ? o->post : 32000;
+    /* A frame interrupt: once it's idle in BASIC (the main loop is 1.8 s
+     * after power on), as a running Spectrum is when it's captured. */
+    int arm = trig_addr == 0x0038 ? 2000 : 0;
+    bool ok = trig_addr >= 0 ? la_record_at(b, pre, post, trig_addr, arm, arm + 4000, c, err, errlen)
+                             : la_record(b, pre, post, c, err, errlen);
     board_destroy(b);
     return ok;
+}
+
+/* --la-record --la-trigger: the address of a stage or addr=XXXX, else -1. */
+static int trigger_addr_of(const char *t) {
+    const la_stage_t *st = stage_named(t);
+    unsigned a;
+    if (st) return st->addr;
+    if (sscanf(t, "addr=%x", &a) == 1) return (int)(a & 0xFFFF);
+    return -1;
 }
 
 static const char *board_desc(const la_cli_t *o, char *out, int len) {
@@ -912,13 +1263,15 @@ static const char *board_desc(const la_cli_t *o, char *out, int len) {
 
 int la_cli(const la_cli_t *o) {
     char err[512];
-    if (o->map && !la_load_map(o->map, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
+    if (o->log && !(la_logf = fopen(o->log, "w"))) fprintf(stderr, "can't write %s\n", o->log);
+    if (o->map && !la_load_map(o->map, err, sizeof(err))) { la_err(err); return 1; }
     int count = o->count > 0 ? o->count : 20;
     la_capture_t c;
     if (o->devices) { list_devices(); return 0; }
+    if (o->timeline) return timeline(o);
     if (o->capture) {
-        if (!capture_real(o, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
-        if (!la_write(o->capture, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); la_free(&c); return 1; }
+        if (!capture_real(o, &c, err, sizeof(err))) { la_err(err); return 1; }
+        if (!la_write(o->capture, &c, err, sizeof(err))) { la_err(err); la_free(&c); return 1; }
         printf("Saved %s\n\n", o->capture);
         print_info(o->capture, &c, count);
         int rc = 0;
@@ -926,7 +1279,7 @@ int la_cli(const la_cli_t *o) {
             la_capture_t b;
             char bn[300];
             printf("\n");
-            if (!record_board(o, sim_length(&c), &b, err, sizeof(err))) { fprintf(stderr, "%s\n", err); la_free(&c); return 1; }
+            if (!record_board(o, sim_length(&c), c.trig_addr, &b, err, sizeof(err))) { la_err(err); la_free(&c); return 1; }
             rc = compare(o->capture, &c, board_desc(o, bn, sizeof(bn)), &b, count < 8 ? count : 8, o->refresh);
             la_free(&b);
         }
@@ -934,11 +1287,13 @@ int la_cli(const la_cli_t *o) {
         return rc;
     }
     if (o->record) {
-        if (!record_board(o, 0, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
-        if (!la_write(o->record, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); la_free(&c); return 1; }
+        if (!record_board(o, 0, o->trigger ? trigger_addr_of(o->trigger) : -1, &c, err, sizeof(err))) { la_err(err); return 1; }
+        if (!la_write(o->record, &c, err, sizeof(err))) { la_err(err); la_free(&c); return 1; }
         char d[300];
-        printf("%s: %s, %d samples (%d before /RESET went high) at %.0f MHz\n", o->record,
-               board_desc(o, d, sizeof(d)), c.n, c.pre, c.freq / 1e6);
+        char when[32] = "/RESET went high";
+        if (c.trig_addr >= 0) snprintf(when, sizeof(when), "the trigger at %04X", c.trig_addr);
+        printf("%s: %s, %d samples (%d before %s) at %.0f MHz\n", o->record,
+               board_desc(o, d, sizeof(d)), c.n, c.pre, when, c.freq / 1e6);
         la_free(&c);
         return 0;
     }
@@ -963,7 +1318,7 @@ int la_cli(const la_cli_t *o) {
         la_capture_t b;
         if (!la_read(o->compare, &c, err, sizeof(err))) { fprintf(stderr, "%s: %s\n", o->compare, err); return 1; }
         char bn[300];
-        bool ok = o->against ? la_read(o->against, &b, err, sizeof(err)) : record_board(o, sim_length(&c), &b, err, sizeof(err));
+        bool ok = o->against ? la_read(o->against, &b, err, sizeof(err)) : record_board(o, sim_length(&c), c.trig_addr, &b, err, sizeof(err));
         if (!ok) { fprintf(stderr, "%s: %s\n", o->against ? o->against : "recording", err); la_free(&c); return 1; }
         int rc = compare(o->compare, &c, o->against ? o->against : board_desc(o, bn, sizeof(bn)), &b,
                          o->count > 0 ? o->count : 8, o->refresh);

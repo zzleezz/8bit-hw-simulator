@@ -56,6 +56,9 @@ typedef struct {
     int timeout;                /* seconds to wait for the trigger (0: a minute) */
 } lp_capture_req_t;
 
+/* Where "Armed" and "Triggered" are printed (printf unless set). */
+extern int (*lp_printf)(const char *fmt, ...);
+
 /* Take a capture. On success *v[k] holds the samples (0/1, *n of them) of
  * req->chan[k], malloc'ed; *pre the samples before the trigger. */
 bool lp_capture(const lp_capture_req_t *req, uint8_t **v, int *n, int *pre, char *err, int errlen);
