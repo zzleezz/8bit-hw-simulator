@@ -917,6 +917,11 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
     int n_act = 0, n_m1 = 0, n_rfsh = 0;
     unsigned rdata = 0xFF, wdata = 0xFF;
     la_cycle_t cur = { 0 };
+    /* The address: the one held longest in the cycle. Taken at /MREQ's
+     * fall alone, it is sometimes still changing there (seen with some
+     * ULAs, whose clock is shaped differently): a bit or two from the last. */
+    unsigned run_a = 0, best_a = 0;
+    int run_n = 0, best_n = 0;
     int start = la_start(c);
     for (int i = start; i < c->n; i++) {
         uint64_t v = c->s[i];
@@ -934,8 +939,13 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
              * the simulated capture stretches the same). */
             int tt = c->freq > 0 ? (int)((int64_t)(i - start) * ZX_FREQ / c->freq) : clk ? t : -1;
             cur = (la_cycle_t){ .addr = (uint16_t)addr_of(v), .sample = i, .t = tt };
+            run_n = best_n = 0;
         }
         if (in && act) {
+            unsigned a = addr_of(v);
+            if (run_n && a == run_a) run_n++;
+            else { run_a = a; run_n = 1; }
+            if (run_n > best_n) { best_n = run_n; best_a = run_a; }
             /* /M1 and /RFSH by most of the cycle: on a real board /RFSH
              * falls a sample or so before the fetch's /MREQ rises. */
             n_act++;
@@ -954,6 +964,7 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
         else kind = saw_m1 ? LA_INTACK : saw_wr ? LA_OUT : saw_rd ? LA_IN : -1;
         if (kind < 0) continue;
         cur.kind = (uint8_t)kind;
+        if (best_n) cur.addr = (uint16_t)best_a;
         cur.data = (uint8_t)(kind == LA_WRITE || kind == LA_OUT ? wdata : kind == LA_REFRESH ? 0 : rdata);
         if (n == cap) cy = realloc(cy, (size_t)(cap *= 2) * sizeof(la_cycle_t));
         cy[n++] = cur;
@@ -1642,6 +1653,8 @@ typedef struct {
      * the /INT in the capture): those written or read while it fetched. */
     int c_have, c_bad, c_bad_win, c_good, c_good_win;
     bool in_reset;                                  /* /RESET low all through: taken while it was held */
+    int clk_pct;                                    /* CLK rises seen, % of 3.5 MHz (-1 not known) */
+    int clk_stopped;                                /* a later capture: CLK stuck (1 low, 2 high), the CPU stopped */
     /* The keyboard (port FE reads): how many, which half rows were read
      * (bit r: A8+r low), and per line KB0-KB4 the half rows it read low on
      * (a key down; a working board on the bench has none). */
@@ -1652,6 +1665,7 @@ typedef struct {
 static void ev_init(ev_t *e) {
     memset(e, 0, sizeof(*e));
     e->pramt = e->pramt_ref = e->test_addr = -1;
+    e->clk_pct = -1;
 }
 
 /* Another stage's evidence added to E (--la-all). */
@@ -1671,6 +1685,8 @@ static void ev_merge(ev_t *e, const ev_t *f) {
     if (e->test_addr < 0 && f->test_addr >= 0) { e->test_addr = f->test_addr; e->test_got = f->test_got; memcpy(e->test_seq, f->test_seq, sizeof(e->test_seq)); }
     e->c_have += f->c_have; e->c_bad += f->c_bad; e->c_bad_win += f->c_bad_win; e->c_good += f->c_good; e->c_good_win += f->c_good_win;
     e->in_reset |= f->in_reset;
+    if (f->clk_pct >= 0 && (e->clk_pct < 0 || f->clk_pct < e->clk_pct)) e->clk_pct = f->clk_pct;
+    if (!e->clk_stopped) e->clk_stopped = f->clk_stopped;
 }
 
 /* Where in the ULA's frame a sample is: in its screen fetch (the first 128
@@ -1823,6 +1839,12 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
     contention_ev(e, d, cy, n);
     free(cy);
     e->in_reset = (d->have >> LA_RESET & 1) && line_state(d, LA_RESET) == 1;
+    if ((d->have >> LA_CLK & 1) && d->freq > 0 && line_state(d, LA_CLK) < 0) {
+        int from = la_start(d), rises = 0;
+        for (int i = from + 1; i < d->n; i++) rises += !lo(d->s[i], LA_CLK) && lo(d->s[i - 1], LA_CLK);
+        double want = (double)(d->n - from) * ZX_FREQ / d->freq;
+        if (want > 1000) e->clk_pct = (int)(100.0 * rises / want + 0.5);
+    }
     /* Lines any running Z80 changes all the time. */
     static const int busy[] = { LA_MREQ, LA_RD, LA_WR, LA_M1, LA_RFSH, LA_CLK };
     for (int s = 0; r && s < LA_NSIG; s++) {
@@ -2004,6 +2026,24 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
         printf("  %d. No clock: CLK (%s's pin 6) is stuck %s. It comes from %s (the ULA, from the 14 MHz crystal): the ULA, the\n"
                "     crystal, or a short on the line. Nothing runs without it.\n", ++n, cpu, e->stuck[LA_CLK] == 1 ? "low" : "high",
                ula ? ula : "ULA");
+    if (!e->stuck[LA_CLK] && e->clk_pct >= 0 && e->clk_pct < 30)
+        printf("  %d. The CPU's clock is wrong: the analyser sees only %d%% of CLK's pulses (a working ULA's: about 90%%),\n"
+               "     so they are too narrow or too weak, from %s (the ULA). A CPU on a clock like that misreads and\n"
+               "     miswrites: what follows may all come from it.\n", ++n, e->clk_pct, ula ? ula : "the ULA");
+    if (e->clk_stopped)
+        printf("  %d. Later the clock stopped: CLK stuck %s, so the CPU stopped. It comes from %s (the ULA): a ULA that\n"
+               "     fails as it warms up does this.\n", ++n, e->clk_stopped == 1 ? "low" : "high", ula ? ula : "the ULA");
+    if (!e->stuck[LA_CLK] && ((e->clk_pct >= 0 && e->clk_pct < 30) || e->clk_stopped)) {
+        unsigned all = ev_mask(e, AR_ROM) | ev_mask(e, AR_LRAM) | ev_mask(e, AR_URAM);
+        if (all) {
+            bits_text(all, bits, sizeof(bits));
+            printf("     What the bus shows on that clock (look at it again once the clock is right): bits %s read wrong\n"
+                   "     (ROM %d, lower RAM %d, upper RAM %d reads)", bits, e->nbad[AR_ROM], e->nbad[AR_LRAM], e->nbad[AR_URAM]);
+            if (ev_pramt_bad(e)) printf("; the RAM test stopped at %04X", e->pramt + 1);
+            printf(".\n");
+        }
+        goto done;
+    }
     if (nstuck >= 8 && e->stuck[LA_CLK]) {
         printf("     So the CPU isn't running (%d of the lines a running Z80 changes never change): that follows from the clock.\n",
                nstuck - 1);
@@ -2211,7 +2251,11 @@ static int diagnose(const la_cli_t *o) {
         if (o->replay) {
             got = la_read(path, &d, err, sizeof(err));
             if (!got) instead = la_read(ipath, &d, err, sizeof(err));
-            if (!got && !instead) { printf("  Not in the folder (%s): the diagnosis stops here\n", path); break; }
+            if (!got && !instead) {
+                if (fail_stage) printf("  Not in the folder (that run stopped at the first fault): the rest is from the stages before\n");
+                else printf("  Not in the folder (%s): the diagnosis stops here\n", path);
+                break;
+            }
         } else if (o->simulate) {
             int arm = boot ? 0 : 2000;
             got = record_sim(m, o->faults, o->nfaults, pre * 2, post * 2, st->addr, arm, &d, err, sizeof(err));
@@ -2284,6 +2328,7 @@ static int diagnose(const la_cli_t *o) {
         if (got) compare(got ? path : ipath, &d, board_desc(&ref, bn, sizeof(bn)), &r, 8, o->refresh, &sco);
         gather(&se, &d, &r);
         if (instead) where_text(&d, where, sizeof(where));
+        int clk_st = d.have >> LA_CLK & 1 ? line_state(&d, LA_CLK) : -1;
         la_screen = true;
         la_free(&d);
         la_free(&r);
@@ -2294,6 +2339,10 @@ static int diagnose(const la_cli_t *o) {
             printf("  OK: the same as a working one%s\n",
                    se.pramt == 0xFFFF ? " (the RAM test passed all 48K)" : se.pramt == 0x7FFF ? " (the RAM test passed 16K)" : "");
             continue;
+        }
+        if (instead && clk_st > 0) {
+            printf("  CLK is stuck %s in it: the clock stopped\n", clk_st == 1 ? "low" : "high");
+            if (fail_stage && !e.stuck[LA_CLK]) e.clk_stopped = clk_st;
         }
         if (fail_stage) {               /* --la-all: a later stage that's wrong too */
             if (!instead) ev_merge(&e, &se);

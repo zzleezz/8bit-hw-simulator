@@ -27,6 +27,13 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser: a bus cycle's address is now the one held longest in
+  the cycle, not the one at /MREQ's fall, which with some ULAs (their
+  clock shaped differently) was still changing: a faulty-looking ROM and
+  a stage that seemed to go astray on a real board were only that.
+  `--la-diagnose` also tells a CPU clock the analyser can hardly see (its
+  pulses too narrow, from the ULA) and one that stops later, and then
+  gives the rest as what the bus shows on that clock.
 - Logic analyser, `--la-diagnose`: the ULA's timing with the CPU
   (contention). When every wrong byte of the lower RAM was written or read
   while the ULA fetched the screen (placed from /INT in the capture), and
