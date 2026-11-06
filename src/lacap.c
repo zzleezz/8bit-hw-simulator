@@ -888,6 +888,13 @@ static bool rom_wrong(const la_capture_t *c, const la_cycle_t *y) {
 /* The command line                                                          */
 /* ------------------------------------------------------------------------ */
 
+/* An access the ULA can hold the CPU up for: 4000-7FFF, or an even port. */
+static bool ula_contended(const la_cycle_t *x) {
+    if (x->kind == LA_REFRESH || x->kind == LA_INTACK) return false;
+    if (x->kind == LA_IN || x->kind == LA_OUT) return !(x->addr & 1) || (x->addr >= 0x4000 && x->addr < 0x8000);
+    return x->addr >= 0x4000 && x->addr < 0x8000;
+}
+
 /* RAM reads that don't give back what was written there earlier in the
  * same capture: a fault in the RAM (or its buffers, the multiplexers),
  * whatever the machine was doing. Prints up to SHOW of them. */
@@ -1052,22 +1059,34 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
     /* Timing, after taking out a steady difference of the clocks (the real
      * Spectrum's crystal against the analyser's): what's left is a real
      * difference in when things happen. */
-    double scale = 1;
-    int last = k > 0 ? k - 1 : 0;
-    if (ca[ia + last].t >= 0 && cb[ib + last].t - tb > 1000)
-        scale = (double)(ca[ia + last].t - ta) / (cb[ib + last].t - tb);
-    for (int j = 0; j < k && timing < 0; j++) {
-        const la_cycle_t *x = &ca[ia + j], *y = &cb[ib + j];
-        if (x->t >= 0 && y->t >= 0 && fabs((x->t - ta) - scale * (y->t - tb)) > 1.5) timing = j;
+    /* Gap by gap: the T states from one cycle to the next. Next to an
+     * access the ULA can hold up (4000-7FFF, an even port) the gaps differ
+     * on any two boots: the reset doesn't reset the ULA, so where in its
+     * frame the CPU is differs. Elsewhere a gap that differs is a real
+     * difference. The clocks: the sum of those other gaps. */
+    long long sa = 0, sb = 0;
+    int held = 0;
+    for (int j = 1; j < k; j++) {
+        const la_cycle_t *x0 = &ca[ia + j - 1], *x = &ca[ia + j], *y0 = &cb[ib + j - 1], *y = &cb[ib + j];
+        if (x->t < 0 || x0->t < 0 || y->t < 0 || y0->t < 0) continue;
+        int ga = x->t - x0->t, gb = y->t - y0->t;
+        if (ula_contended(x0) || ula_contended(x)) { if (abs(ga - gb) >= 2) held++; continue; }
+        sa += ga; sb += gb;
+        if (timing < 0 && abs(ga - gb) >= 2) timing = j;
     }
-    if (scale != 1)
-        printf("Clocks: A runs %+.0f ppm against B (%d T against %d T over the cycles that match)\n",
-               (1 / scale - 1) * 1e6, ca[ia + last].t - ta, cb[ib + last].t - tb);
+    if (sb > 1000 && sa != sb) {
+        double ppm = ((double)sa / sb - 1) * 1e6;
+        if (fabs(ppm) < 5000)
+            printf("Clocks: A runs %+.0f ppm against B (%lld T against %lld T away from the ULA's RAM)\n", -ppm, sa, sb);
+    }
     if (timing >= 0)
-        printf("Timing: from cycle %d the T states differ (A T %d, B T %d from the first fetch)\n", timing,
-               ca[ia + timing].t - ta, cb[ib + timing].t - tb);
+        printf("Timing: cycle %d comes %d T after the one before in A, %d T in B\n", timing,
+               ca[ia + timing].t - ca[ia + timing - 1].t, cb[ib + timing].t - cb[ib + timing - 1].t);
     else if (k > 0)
-        printf("Timing: the same, within a T state\n");
+        printf("Timing: the same, within a T state%s\n", held ? "," : "");
+    if (held)
+        printf("  but for %d waits next to 4000-7FFF or a port, which the ULA holds the CPU up for where it is in its\n"
+               "  frame: that differs on every reset (the ULA isn't reset), so they aren't a fault\n", held);
     if (soft) printf("%d port reads / interrupt acknowledges read differently (ports, the floating bus)\n", soft);
     int rc = 0;
     bool end = ia + k >= na || ib + k >= nb;
