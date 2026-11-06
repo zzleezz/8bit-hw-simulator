@@ -551,6 +551,7 @@ static void rec_step(board_t *b, void *ctx) {
     bool reset = v >> LA_RESET & 1;
     bool fire;
     if (r->trig_addr == -2) fire = r->after_reset && r->step - r->reset_step >= r->arm_step;
+    else if (r->trig_addr == -3) fire = r->step >= r->arm_step;     /* from power on, /RESET or not */
     else if (r->trig_addr < 0) fire = reset && !r->reset_prev;
     else {
         /* As the analyser's pattern trigger: the address lines alone,
@@ -891,14 +892,29 @@ static inline unsigned data_of(uint64_t v) { return (unsigned)(v >> LA_D0 & 0xFF
  * (an RC): the Z80 is running milliseconds before the analyser's input
  * sees it high. So: the last fetch from 0000 before the rise, if any. */
 static int la_start(const la_capture_t *c) {
-    if (!(c->have >> LA_RESET & 1)) return 0;
+    /* Fired as soon as it was armed (a capture at once), the master board
+     * fills its samples before the trigger with 0 (its channels: A0-A15,
+     * /RESET), up to about the trigger (the slave's are real): the bus
+     * starts after them. Only a run that ends near the trigger, with the
+     * slave's lines showing the CPU running in it (held in reset, the
+     * master's lines can be 0 too, but the bus is still then). */
+    uint64_t mm = 0;
+    for (int k = 0; k < 24; k++) if (chan_map[k] >= 0) mm |= 1ull << chan_map[k];
+    mm &= c->have;
+    int z = 0;
+    while (mm && z < c->n && !(c->s[z] & mm)) z++;
+    if (z >= c->n || c->pre < 100 || z < c->pre / 2 || z > c->pre + 50) z = 0;
+    int busy = 0;
+    for (int i = 1; i < z && (c->have >> LA_MREQ & 1); i++) busy += lo(c->s[i], LA_MREQ) && !lo(c->s[i - 1], LA_MREQ);
+    if (busy < 8) z = 0;
+    if (!(c->have >> LA_RESET & 1)) return z;
     int r = 0;
-    for (int i = 1; i < c->n && !r; i++)
+    for (int i = z + 1; i < c->n && !r; i++)      /* not the fill's end */
         if (!lo(c->s[i], LA_RESET) && lo(c->s[i - 1], LA_RESET)) r = i;
-    if (!r) return 0;
+    if (!r) return z;
     bool m1 = c->have >> LA_M1 & 1;
     int best = r;
-    for (int i = 1; i < r; i++)
+    for (int i = z + 1; i < r; i++)
         if (lo(c->s[i], LA_MREQ) && !lo(c->s[i - 1], LA_MREQ) && addr_of(c->s[i]) == 0 &&
             (!m1 || lo(c->s[i], LA_M1)))
             best = i;
@@ -1671,6 +1687,13 @@ typedef struct {
      * (a key down; a working board on the bench has none). */
     int kb_n, kb_low[5], kb_all;                    /* kb_all: reads with all five lines low at once */
     unsigned kb_rows, kb_rows_low[5];
+    /* Left running, before the boot (the idle capture, no reset). */
+    int idle;                                       /* 1: there was one */
+    int slow_ms;                                    /* its slow capture's length (0: none) */
+    int rst_pulses;                                 /* /RESET going low in it */
+    int int_n, int_ref;                             /* /INT going low in it; in a working one's */
+    int held[LA_NSIG];                              /* 1: low all through, where a working one's isn't */
+    char idle_where[200];                           /* where the CPU was */
 } ev_t;
 
 static void ev_init(ev_t *e) {
@@ -1698,6 +1721,12 @@ static void ev_merge(ev_t *e, const ev_t *f) {
     e->c_have += f->c_have; e->c_bad += f->c_bad; e->c_bad_win += f->c_bad_win; e->c_good += f->c_good; e->c_good_win += f->c_good_win;
     e->in_reset |= f->in_reset;
     for (int k = 0; k < 14; k++) e->rom_abit[k] += f->rom_abit[k];
+    if (f->idle) {
+        e->idle = 1;
+        e->slow_ms = f->slow_ms; e->rst_pulses = f->rst_pulses; e->int_n = f->int_n; e->int_ref = f->int_ref;
+        memcpy(e->held, f->held, sizeof(e->held));
+        memcpy(e->idle_where, f->idle_where, sizeof(e->idle_where));
+    }
     for (int ar = 0; ar < AR_N; ar++) {
         if (!e->late_n[ar] && f->late_n[ar]) { e->late_addr[ar] = f->late_addr[ar]; e->late_seen[ar] = f->late_seen[ar]; e->late_wrote[ar] = f->late_wrote[ar]; }
         e->late_n[ar] += f->late_n[ar];
@@ -1776,11 +1805,18 @@ static unsigned ev_mask(const ev_t *e, int ar) {
 
 static bool ev_pramt_bad(const ev_t *e) { return e->pramt >= 0 && e->pramt_ref >= 0 && e->pramt != e->pramt_ref; }
 
+/* The frame interrupt, left running: not as often as a working one's. */
+static bool int_wrong(const ev_t *e) {
+    return e->slow_ms && e->int_ref >= 2 && !e->held[LA_INT] && abs(e->int_n - e->int_ref) > 1;
+}
+
 static bool ev_any(const ev_t *e) {
     for (int s = 0; s < LA_NSIG; s++) if (e->stuck[s]) return true;
     for (int k = 0; k < 5; k++) if (e->kb_low[k]) return true;
     if (e->kb_all) return true;
     for (int ar = 0; ar < AR_N; ar++) if (e->late_n[ar]) return true;
+    if (e->rst_pulses || int_wrong(e)) return true;
+    for (int k = 0; k < LA_NSIG; k++) if (e->held[k]) return true;
     return e->nbad[0] || e->nbad[1] || e->nbad[2] || ev_pramt_bad(e);
 }
 
@@ -2026,9 +2062,26 @@ static int z80_pin(int s) {
     if (s >= LA_D0 && s <= LA_D7) return d[s - LA_D0];
     switch (s) {
     case LA_MREQ: return 19; case LA_RD: return 21; case LA_WR: return 22; case LA_M1: return 27; case LA_RFSH: return 28;
-    case LA_CLK: return 6;
+    case LA_CLK: return 6; case LA_INT: return 16; case LA_NMI: return 17; case LA_HALT: return 18;
+    case LA_WAIT: return 24; case LA_BUSRQ: return 25; case LA_RESET: return 26;
     default: return 0;
     }
+}
+
+/* The pin of part REF on the signal's line (0: none). */
+static int pin_on(const char *ref, int sig) {
+    if (!vboard || !ref) return 0;
+    int net[LA_NSIG];
+    find_nets(vboard, net, NULL);
+    if (net[sig] < 0) return 0;
+    sim_t *s = &vboard->sim;
+    int root = s->nets[net[sig]].root;
+    for (int i = 0; i < s->nparts; i++) {
+        if (strcmp(s->parts[i].ref, ref)) continue;
+        for (int j = 0; j < s->parts[i].npins; j++)
+            if (s->pins[s->parts[i].first_pin + j].root == root) return s->pins[s->parts[i].first_pin + j].number;
+    }
+    return 0;
 }
 
 static const char *bits_way(const ev_t *e, int ar, int bit) {
@@ -2083,7 +2136,8 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
     if (!rom) rom = "the ROM";
     int n = 0;
     char buf[400], bits[64], res[200];
-    if (e->in_reset)
+    bool idle_st = !strcmp(stage, "idle");
+    if (e->in_reset && !idle_st)
         printf("\nNote: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET\n"
                "is stuck low), when the CPU drives nothing; what it shows isn't the boot.\n");
     printf("\nWhat to look at, most likely first:\n");
@@ -2091,6 +2145,21 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
     int nstuck = 0, nctl = 0;
     for (int s = 0; s < LA_NSIG; s++)
         if (e->stuck[s]) { nstuck++; nctl += s == LA_MREQ || s == LA_RD || s == LA_WR || s == LA_M1 || s == LA_RFSH; }
+    if (e->rst_pulses) {
+        printf("  %d. /RESET goes low %d time%s in %d ms, left running with nobody at the button: the CPU keeps\n"
+               "     restarting (a working one's stays high). Something pulls /RESET low now and then: the CPU (%s pin 26:\n"
+               "     a faulty Z80 can short its input), the reset circuit (its capacitor and resistor), the button, or the\n"
+               "     5 V supply dipping. Pull the CPU and watch pin 26's socket hole: it should stay at 5 V.\n", ++n,
+               e->rst_pulses, e->rst_pulses == 1 ? "" : "s", e->slow_ms, cpu);
+        goto done;
+    }
+    if (e->in_reset && idle_st && !e->stuck[LA_CLK]) {
+        printf("  %d. /RESET is low all through, left running with nobody at the button, so the CPU never starts.\n"
+               "     Something holds /RESET low: the CPU (%s pin 26: a faulty Z80 can short its input), the reset\n"
+               "     circuit (its capacitor and resistor) or the button. Pull the CPU and measure pin 26's socket hole:\n"
+               "     it should rise to 5 V.\n", ++n, cpu);
+        goto done;
+    }
     if (e->in_reset && !e->stuck[LA_CLK]) {
         printf("  %d. /RESET is low all through, so the CPU never starts. If the reset button wasn't held then (it asks\n"
                "     once more when it sees this), something holds /RESET low: the CPU (%s pin 26: a faulty Z80 can\n"
@@ -2125,6 +2194,14 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
                nstuck - 1);
         goto done;
     }
+    if (e->held[LA_WAIT] || e->held[LA_BUSRQ]) {
+        int sg = e->held[LA_WAIT] ? LA_WAIT : LA_BUSRQ;
+        printf("  %d. %s (%s pin %d) is low all through: the CPU %s. It's the CPU's input, from the\n"
+               "     edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.\n",
+               ++n, la_signal_name(sg), cpu, z80_pin(sg),
+               sg == LA_WAIT ? "waits for ever in its bus cycle" : "hands the bus over and stops");
+        goto done;
+    }
     if (nstuck >= 8) {
         printf("  %d. The CPU isn't running: %d of the lines a running Z80 changes all the time never change. Check what it\n"
                "     needs: its clock (pin 6), /RESET (pin 26) high, /WAIT (24) and /BUSRQ (25) high, 5 V on pin 11, 0 V on\n"
@@ -2138,6 +2215,24 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
                "     broken. It's %s's pin %d; every chip on the line is a suspect, and the line's tracks.\n",
                ++n, la_signal_name(s), e->stuck[s] == 1 ? "low" : "high", e->stuck[s] == 1 ? "0 V (or another line)" : "5 V (or another line)",
                cpu, z80_pin(s));
+    }
+    /* Left running: the frame interrupt (the ULA's, every 20 ms) and HALT. */
+    {
+        int ip = pin_on(ula, LA_INT);
+        char up[48];
+        if (ip) snprintf(up, sizeof(up), "%s pin %d", ula ? ula : "the ULA", ip);
+        else snprintf(up, sizeof(up), "%s", ula ? ula : "the ULA");
+        if (e->held[LA_INT])
+            printf("  %d. /INT (%s pin 16) is low all through, left running: a working one's goes low for 32 T every 20 ms.\n"
+                   "     It comes from the ULA (%s): the ULA, or a short to 0 V on the line.\n", ++n, cpu, up);
+        else if (int_wrong(e) && !e->int_n)
+            printf("  %d. No frame interrupt: /INT (%s pin 16) never goes low in %d ms, left running; a working one's does\n"
+                   "     %d times (every 20 ms). It comes from the ULA (%s): the ULA, or the line broken. Without it\n"
+                   "     the keyboard isn't read.\n", ++n, cpu, e->slow_ms, e->int_ref, up);
+        else if (int_wrong(e))
+            printf("  %d. The frame interrupt: /INT goes low %d times in %d ms, left running, a working one's %d (every 20 ms).\n"
+                   "     It comes from the ULA (%s): its timing, or something else pulling the line.\n", ++n,
+                   e->int_n, e->slow_ms, e->int_ref, up);
     }
     /* The keyboard: a line low on every half row is no key (nobody holds
      * a whole column down): the line or the ULA's input. Else the keys. */
@@ -2311,8 +2406,16 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
         printf("  %d. %d keyboard read%s (port FE) gave all five lines low at once: not keys, the read itself. The ULA\n"
                "     (%s) answers it: its port read, or its data pins D0-D4, or its timing with the CPU.\n", ++n, e->kb_all,
                e->kb_all == 1 ? "" : "s", ula ? ula : "the ULA");
+    if (e->held[LA_HALT]) {
+        bool above = n > 0;
+        printf("  %d. Left running, the CPU halts (/HALT, %s pin 18, low all through): it ran into a HALT%s. So it\n"
+               "     went astray before that%s.\n", ++n, cpu, e->slow_ms && !e->int_n ? " with no interrupt to wake it" : "",
+               above ? ", from what's above" : ": the boot's stages show where");
+    }
     if (!n) {
-        if (missing)
+        if (idle_st)
+            printf("  No one part shows: left running, the CPU was %s.\n", where && where[0] ? where : "somewhere else");
+        else if (missing)
             printf("  No one part shows in the captures: %s never came. When it should have, the CPU was %s.\n"
                    "  So it went astray after the stage before passed: the captures are in the folder, and the log has them.\n",
                    stage, where && where[0] ? where : "somewhere else");
@@ -2337,6 +2440,155 @@ done:
 #include <sys/stat.h>
 #define mkdir1(p) mkdir(p, 0777)
 #endif
+
+/* Before the boot: the Spectrum left running, no reset: a capture at once
+ * (on A0 high, else low, which always comes), at 14 MHz (the bus) and at
+ * 2 MHz (49 ms: /RESET and the frame interrupt, every 20 ms). With /RESET
+ * broken the boot's stages can't trigger; this can. */
+#define IDLE_SLOW 2000000
+#define IDLE_MS 2000            /* the simulation: idle in BASIC from 1.8 s after power on */
+static bool record_idle(const machine_t *m, const char *const *faults, int nfaults, la_capture_t *fast, la_capture_t *slow,
+                        char *err, int errlen) {
+    la_capture_t c;
+    int k = ZX_FREQ * ZX_STEPS_PER_CYCLE / IDLE_SLOW;      /* 14 bus steps a sample */
+    if (!record_sim(m, faults, nfaults, 1000 * k, 97000 * k, -3, IDLE_MS, &c, err, errlen)) return false;
+    *fast = c;                  /* as the analyser's 1000 + 97000 at 14 MHz */
+    fast->pre = c.pre < 2000 ? c.pre : 2000;
+    fast->n = fast->pre + 194000 < c.n - (c.pre - fast->pre) ? fast->pre + 194000 : c.n - (c.pre - fast->pre);
+    fast->trig_addr = -1;
+    fast->s = malloc((size_t)fast->n * sizeof(uint64_t));
+    memcpy(fast->s, c.s + (c.pre - fast->pre), (size_t)fast->n * sizeof(uint64_t));
+    *slow = c;
+    slow->n = c.n / k;
+    slow->pre = c.pre / k;
+    slow->freq = c.freq / k;
+    slow->trig_addr = -1;
+    slow->s = malloc((size_t)slow->n * sizeof(uint64_t));
+    for (int i = 0; i < slow->n; i++) slow->s[i] = c.s[(size_t)i * k];
+    la_free(&c);
+    return true;
+}
+
+static bool low_all(const la_capture_t *c, int sg) {
+    if (!(c->have >> sg & 1) || c->n < 2) return false;
+    for (int i = 0; i < c->n; i++) if (!lo(c->s[i], sg)) return false;
+    return true;
+}
+
+static int falls(const la_capture_t *c, int sg) {
+    int k = 0;
+    if (!(c->have >> sg & 1)) return 0;
+    for (int i = 1; i < c->n; i++) k += lo(c->s[i], sg) && !lo(c->s[i - 1], sg);
+    return k;
+}
+
+/* The slow capture D against a working one's R. */
+static void slow_ev(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
+    e->slow_ms = d->freq > 0 ? (int)(1000.0 * d->n / d->freq + 0.5) : 0;
+    static const int ctl[] = { LA_RESET, LA_WAIT, LA_BUSRQ, LA_INT, LA_HALT };
+    for (int k = 0; k < 5; k++)
+        if ((r->have >> ctl[k] & 1) && low_all(d, ctl[k]) && !low_all(r, ctl[k])) e->held[ctl[k]] = 1;
+    if (e->held[LA_RESET]) e->in_reset = true;
+    else e->rst_pulses = falls(d, LA_RESET);
+    if ((d->have >> LA_INT & 1) && (r->have >> LA_INT & 1)) { e->int_n = falls(d, LA_INT); e->int_ref = falls(r, LA_INT); }
+    else e->int_ref = 0;
+}
+
+/* Not running: the boot's stages can't be taken. */
+static bool idle_dead(const ev_t *e) {
+    int nstuck = 0;
+    for (int k = 0; k < LA_NSIG; k++) nstuck += e->stuck[k] != 0;
+    return e->in_reset || e->rst_pulses || e->stuck[LA_CLK] || (e->clk_pct >= 0 && e->clk_pct < 30) ||
+           e->held[LA_WAIT] || e->held[LA_BUSRQ] || nstuck >= 8;
+}
+
+/* 0: as a working one, 1: something wrong, 2: not running, -1: none. */
+static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev_t *ie) {
+    char fpath[1024], spath[1024], err[512];
+    snprintf(fpath, sizeof(fpath), "%s/idle.lac", dir);
+    snprintf(spath, sizeof(spath), "%s/idle-slow.lac", dir);
+    ev_init(ie);
+    printf("\nFirst, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)\n");
+    la_capture_t f, sl;
+    bool have_slow = false;
+    if (o->replay) {
+        if (!la_read(fpath, &f, err, sizeof(err))) {
+            printf("  Not in the folder (taken before there was this stage): on to the boot\n");
+            return -1;
+        }
+        have_slow = la_read(spath, &sl, err, sizeof(err));
+    } else if (o->simulate) {
+        if (!record_idle(m, o->faults, o->nfaults, &f, &sl, err, sizeof(err))) { la_err(err); return -1; }
+        have_slow = true;
+        if (!la_write(fpath, &f, err, sizeof(err)) || !la_write(spath, &sl, err, sizeof(err))) la_err(err);
+    } else {
+        la_cli_t q = *o;
+        q.diagnose = NULL;
+        bool reuse = false;
+        if (la_read(fpath, &f, err, sizeof(err))) {
+            have_slow = la_read(spath, &sl, err, sizeof(err));
+            reuse = want_enter("idle.lac is in the folder from before: press Enter to use it, or type n, Enter to capture it again\n");
+            if (!reuse) { la_free(&f); if (have_slow) la_free(&sl); have_slow = false; }
+        }
+        for (int t = 0; !reuse; t++) {
+            if (t == 0 && !want_enter("Leave the Spectrum switched on and running, don't touch the reset button or the keys, and press Enter\n"))
+                return -1;
+            if (!capture_now(&q, 0, fpath, &f, err, sizeof(err))) {
+                la_err(err);
+                printf("  Couldn't capture it: on to the boot\n");
+                return -1;
+            }
+            printf("Now the same for 49 ms, slower (the frame interrupt is every 20 ms)\n");
+            q.freq = IDLE_SLOW;
+            have_slow = capture_now(&q, 0, spath, &sl, err, sizeof(err));
+            q.freq = o->freq;
+            if (!have_slow) { la_err(err); printf("  (without it: not the frame interrupt)\n"); }
+            if (!la_write(fpath, &f, err, sizeof(err))) la_err(err);
+            if (have_slow && !la_write(spath, &sl, err, sizeof(err))) la_err(err);
+            bool rlow = (f.have >> LA_RESET & 1) && low_all(&f, LA_RESET) && (!have_slow || low_all(&sl, LA_RESET));
+            if (t == 0 && rlow &&
+                want_enter("/RESET was low all through: was the reset button held? Let go of it and press Enter to take it again\n"
+                           "(or type n, Enter to go on with this one)\n")) {
+                la_free(&f);
+                if (have_slow) la_free(&sl);
+                have_slow = false;
+                continue;
+            }
+            break;
+        }
+    }
+    la_capture_t rf, rs;
+    if (!record_idle(m, NULL, 0, &rf, &rs, err, sizeof(err))) {
+        la_err(err);
+        la_free(&f);
+        if (have_slow) la_free(&sl);
+        return -1;
+    }
+    gather(ie, &f, &rf);
+    where_text(&f, ie->idle_where, sizeof(ie->idle_where));
+    if (have_slow) slow_ev(ie, &sl, &rs);
+    ie->idle = 1;
+    la_free(&f); la_free(&rf); la_free(&rs);
+    if (have_slow) la_free(&sl);
+    /* What it shows. */
+    if (ie->stuck[LA_CLK]) printf("  CLK: stuck %s\n", ie->stuck[LA_CLK] == 1 ? "low" : "high");
+    else if (ie->clk_pct >= 0) printf("  CLK: running (the analyser sees %d%% of its pulses)\n", ie->clk_pct);
+    if (ie->in_reset) printf("  /RESET: low all through\n");
+    else if (ie->rst_pulses) printf("  /RESET: goes low %d time%s in %d ms\n", ie->rst_pulses, ie->rst_pulses == 1 ? "" : "s", ie->slow_ms);
+    else printf("  /RESET: high\n");
+    if (ie->held[LA_INT]) printf("  /INT: low all through\n");
+    else if (ie->slow_ms) printf("  /INT: low %d time%s in %d ms (a working one's: %d, every 20 ms)\n", ie->int_n, ie->int_n == 1 ? "" : "s",
+                                 ie->slow_ms, ie->int_ref);
+    for (int k = 0; k < LA_NSIG; k++)
+        if (ie->held[k] && k != LA_RESET && k != LA_INT) printf("  %s: low all through\n", la_signal_name(k));
+    printf("  The CPU: %s\n", ie->idle_where);
+    bool dead = idle_dead(ie), bad = dead || ev_any(ie);
+    if (!bad && (strstr(ie->idle_where, "astray") || strstr(ie->idle_where, "not running"))) bad = true;
+    if (!bad) { printf("  OK: the same as a working one\n"); return 0; }
+    if (dead) { printf("  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)\n"); return 2; }
+    printf("  FAULT: something's wrong (below); the boot's stages next show more\n");
+    return 1;
+}
 
 #define STOP_MSG "  Couldn't capture it: the diagnosis goes on what the stages before show\n"
 static int diagnose(const la_cli_t *o) {
@@ -2368,7 +2620,10 @@ static int diagnose(const la_cli_t *o) {
     const char *fail_stage = NULL;
     bool missing = false;
     int passed = 0;
-    for (int i = 0; i < DIAG_NSTAGES; i++) {
+    ev_t ie;
+    int idle = idle_stage(o, m, dir, &ie);
+    if (idle == 2) { e = ie; fail_stage = "idle"; snprintf(where, sizeof(where), "%s", ie.idle_where); }
+    for (int i = 0; i < DIAG_NSTAGES && idle != 2; i++) {
         const la_stage_t *st = stage_named(diag_plan[i].stage);
         int pre = diag_plan[i].pre, post = diag_plan[i].post;
         bool boot = st->addr != 0x0038;
@@ -2498,7 +2753,12 @@ static int diagnose(const la_cli_t *o) {
         printf("  (--la-all: capturing the rest as well)\n");
     }
     printf("\n");
+    if (idle == 1) {
+        if (!fail_stage) { e = ie; fail_stage = "idle"; snprintf(where, sizeof(where), "%s", ie.idle_where); }
+        else ev_merge(&e, &ie);
+    }
     if (!fail_stage) {
+        if (idle == 0) printf("Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.\n");
         if (passed == DIAG_NSTAGES) {
             vboard = board_create(m);
             const char *u = ref_of("ULA");
@@ -2517,8 +2777,13 @@ static int diagnose(const la_cli_t *o) {
         }
         return 0;
     }
-    printf("The boot goes wrong at %s (%d stage%s before it %s good).\n", fail_stage, passed, passed == 1 ? "" : "s",
-           passed == 1 ? "is" : "are");
+    if (!strcmp(fail_stage, "idle") && idle == 2)
+        printf("Left running, it isn't working, so the boot's stages weren't taken.\n");
+    else if (!strcmp(fail_stage, "idle"))
+        printf("The boot's %d stages are the same as a working one's, but left running it isn't.\n", passed);
+    else
+        printf("The boot goes wrong at %s (%d stage%s before it %s good).\n", fail_stage, passed, passed == 1 ? "" : "s",
+               passed == 1 ? "is" : "are");
     verdict(&e, m, fail_stage, missing, &co, where);
     printf("\nThe captures and the whole comparison: %s (diagnosis.txt)\n", dir);
     return 2;

@@ -123,7 +123,10 @@
  *       The boards plugged in: port, USB serial number, firmware (stock, or
  *       the zx firmware of la-firmware, whose trigger ignores glitches).
  *   --la-diagnose DIR [--board B] [--la-ports MASTER,OTHER] [--la-all] [--la-replay | --la-simulate --fault SPEC...]
- *       Diagnose a Spectrum: capture the boot stage by stage (reset,
+ *       Diagnose a Spectrum: first left running, no reset (idle.lac,
+ *       idle-slow.lac: the clock, /RESET, /WAIT, /BUSRQ, the frame
+ *       interrupt, where the CPU is; works with /RESET broken, and when
+ *       the CPU isn't running ends it there), then the boot stage by stage (reset,
  *       ramcheck, ramdone, copyright, main, interrupt; a reset each, you're
  *       asked), compare each with the simulated working board B, stop at
  *       the first that's wrong and say what to look at: a stuck line, a

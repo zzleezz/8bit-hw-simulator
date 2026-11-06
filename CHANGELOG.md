@@ -27,6 +27,15 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser, `--la-diagnose`: a first stage, idle, before any reset:
+  the Spectrum left running, captured at once at 14 MHz and for 49 ms at
+  2 MHz. It needs no reset, so it works when /RESET is broken: /RESET low
+  or pulsing, no clock, /WAIT or /BUSRQ held, /INT held low, missing or
+  wrong, the CPU halted or astray. When the CPU isn't running at all the
+  boot's stages are skipped. Taken on a real working Issue 2 at the
+  copyright screen: the same as the simulated one. A capture taken at once
+  no longer starts with a fake fetch from 0000 (the master board zero-fills
+  its samples before the trigger).
 - Logic analyser, `--la-diagnose`, from real faulty CPUs, logic and RAM:
   an address line the ROM sees otherwise than the edge connector (its
   wrong reads are its own bytes from the address with that bit the other
