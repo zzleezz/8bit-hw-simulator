@@ -1135,13 +1135,33 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
     }
     int ta = ca[ia].t, tb = cb[ib].t;
     printf("A: %s (%d cycles%s)\nB: %s (%d cycles%s)\n", an, na - ia, from, bn, nb - ib, from);
-    int k = 0, soft = 0, timing = -1, ndiff = 0, diffs[8], area[4] = { 0 };
+    int k = 0, soft = 0, timing = -1, ndiff = 0, diffs[8], area[4] = { 0 }, moved = 0;
+    /* On a frame interrupt: the ROM's routine, 0038 to its RET at 0052 and
+     * the two reads of the address it goes back to. After that each goes
+     * back to what it was doing when the interrupt came. */
+    int lim_a = na, lim_b = nb;
+    bool routine = false;
+    if (align == 0x0038) {
+        for (int j = ia; j < na; j++) if (ca[j].kind == LA_FETCH && ca[j].addr == 0x0052) { lim_a = j + 1; break; }
+        for (int j = ib; j < nb; j++) if (cb[j].kind == LA_FETCH && cb[j].addr == 0x0052) { lim_b = j + 1; break; }
+        /* the RET's two reads (and the refresh between) */
+        for (int n = 0; n < 2 && lim_a < na; lim_a++) if (ca[lim_a].kind == LA_READ) n++;
+        for (int n = 0; n < 2 && lim_b < nb; lim_b++) if (cb[lim_b].kind == LA_READ) n++;
+        routine = lim_a < na && lim_b < nb;
+        if (routine) { na = lim_a; nb = lim_b; }
+    }
     for (; ia + k < na && ib + k < nb; k++) {
         /* The same bus cycle (kind and address) is the CPU doing the same;
          * the data can differ under that (a fault in what is read, or a
          * counter, a pushed address). The first cycle that isn't the same
          * ends it. */
         const la_cycle_t *x = &ca[ia + k], *y = &cb[ib + k];
+        /* A read or write of RAM at another address is the state too (the
+         * stack pointer where it was interrupted): what the CPU does is the
+         * code it runs, and a fault on the address lines moves the ROM's
+         * fetches as well. */
+        if (x->kind == y->kind && x->addr != y->addr && (x->kind == LA_READ || x->kind == LA_WRITE) &&
+            x->addr >= 0x4000 && y->addr >= 0x4000) { moved++; continue; }
         if (x->kind != y->kind || x->addr != y->addr) break;
         if (x->kind == LA_REFRESH || x->data == y->data) continue;
         if (x->kind == LA_IN || x->kind == LA_INTACK) { soft++; continue; }   /* a port or the floating bus */
@@ -1183,6 +1203,12 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
     if (soft) printf("%d port reads / interrupt acknowledges read differently (ports, the floating bus)\n", soft);
     int rc = 0;
     bool end = ia + k >= na || ib + k >= nb;
+    /* A frame interrupt in one and not the other: the ULA makes them, and
+     * the reset doesn't reset it, so when they come differs every boot. */
+    bool irq = !end && (ca[ia + k].kind == LA_INTACK) != (cb[ib + k].kind == LA_INTACK);
+    if (moved) printf("%d RAM reads and writes are at other addresses (the stack pointer where it was: the state)\n", moved);
+    if (routine && end)
+        printf("The interrupt routine (0038-0052, %d cycles): after its RET each goes back to what it was doing\n", k);
     if (end && !ndiff) printf("The same for all %d cycles both have\n", k);
     else if (end) printf("The CPU does the same for all %d cycles both have\n", k);
     else printf("The CPU does the same for %d cycles\n", k);
@@ -1210,9 +1236,20 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
     int rba = ram_readback(ca + ia, na - ia, 0), rbb = ram_readback(cb + ib, nb - ib, 0);
     if (rba) { printf("%s: %d RAM reads don't give back what was written there:\n", an, rba); ram_readback(ca + ia, na - ia, 5); rc = 2; }
     if (rbb) { printf("%s: %d RAM reads don't give back what was written there:\n", bn, rbb); ram_readback(cb + ib, nb - ib, 5); rc = 2; }
-    if (ndiff && !area[0] && end && !rba && !rbb)
+    if (ndiff && !area[0] && (end || irq) && !rba && !rbb)
         printf("Only RAM data differ (counters, the stack's pushed registers): the state the machines were in, not a fault\n");
-    if (!end) {
+    if (irq) {
+        printf("\nFrom cycle %d %s takes a frame interrupt and %s doesn't yet: the ULA makes them 50 times a second,\n"
+               "and the reset doesn't reset it, so when they come differs on every reset. Not a fault; compared up to there:\n",
+               k, ca[ia + k].kind == LA_INTACK ? "A" : "B", ca[ia + k].kind == LA_INTACK ? "B" : "A");
+        printf("  %-6s %-9s %-16s   %-9s %s\n", "cycle", "A T", "A", "B T", "B");
+        for (int j = k - 2 < 0 ? 0 : k - 2; j <= k + 1 && ia + j < na && ib + j < nb; j++) {
+            char tx[32], ty[32];
+            cycle_text(&ca[ia + j], tx, sizeof(tx));
+            cycle_text(&cb[ib + j], ty, sizeof(ty));
+            printf("%s %-6d %-9d %-16s   %-9d %s\n", j == k ? ">" : " ", j, ca[ia + j].t - ta, tx, cb[ib + j].t - tb, ty);
+        }
+    } else if (!end) {
         rc = 2;
         printf("\nThe first difference in what the CPU does, cycle %d:\n", k);
         printf("  %-6s %-9s %-16s   %-9s %s\n", "cycle", "A T", "A", "B T", "B");
