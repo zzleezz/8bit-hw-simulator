@@ -260,9 +260,19 @@ static bool la_build(la_capture_t *c, rawchan_t *ch, int nch, char *err, int err
     for (int i = 0; i < LA_NSIG; i++) c->chan[i] = -1;
     int from[LA_NSIG];
     int n = -1;
-    for (int k = 0; k < nch; k++) {
-        int s = sig_by_name(ch[k].name);
-        if (s < 0 && ch[k].number >= 0 && ch[k].number < 48) s = chan_map[ch[k].number];
+    /* Named channels first; the map then gives only channels that have no
+     * name, and only signals no name has given (a channel named something
+     * else, /MTR say, is left out). */
+    int sig[256];
+    for (int k = 0; k < nch && k < 256; k++) sig[k] = sig_by_name(ch[k].name);
+    for (int pass = 0; pass < 2; pass++)
+    for (int k = 0; k < nch && k < 256; k++) {
+        int s = sig[k];
+        if (pass == 1) {
+            if (s >= 0 || ch[k].name[0] || ch[k].number < 0 || ch[k].number >= 48) continue;
+            s = chan_map[ch[k].number];
+            if (s >= 0 && c->chan[s] >= 0) continue;
+        } else if (s < 0) continue;
         if (s < 0 || !ch[k].v) continue;
         if (c->chan[s] >= 0) {
             fprintf(stderr, "channels %d and %d are both %s: %d used\n", c->chan[s] + 1, ch[k].number + 1,
