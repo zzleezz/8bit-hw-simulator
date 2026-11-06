@@ -80,6 +80,10 @@ static void sp_sleep(int ms) { Sleep((DWORD)ms); }
 static volatile LONG lp_stop;
 static BOOL WINAPI on_ctrl(DWORD type) {
     if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT) { lp_stop = 1; return TRUE; }
+    /* The window closed: Windows ends the program when this returns (5 s
+     * at most), so wait while the capture stops the boards, or they stay
+     * armed and won't answer the next time. */
+    if (type == CTRL_CLOSE_EVENT) { lp_stop = 1; Sleep(3000); return TRUE; }
     return FALSE;
 }
 static void catch_ctrl_c(bool on) { lp_stop = 0; SetConsoleCtrlHandler(on_ctrl, on ? TRUE : FALSE); }
@@ -272,9 +276,20 @@ static bool hello(sp_t *s, lp_info_t *info, const char *port, char *err, int err
     memset(info, 0, sizeof(*info));
     if (!send_packet(s, 0, NULL, 0)) { snprintf(err, errlen, "%s: can't write", port); return false; }
     char line[128];
-    if (!read_line(s, info->version, sizeof(info->version), 3000)) {
-        snprintf(err, errlen, "%s: no answer (is it a LogicAnalyzer board, and not busy capturing?)", port);
-        return false;
+    if (!read_line(s, info->version, sizeof(info->version), 1500)) {
+        /* Still armed from a capture nobody stopped (the window closed, the
+         * program killed): it only listens for the stop byte, which it
+         * looks for once a second. Stop it, throw away what it sends, ask
+         * again. */
+        trace("%s: no answer, stopping a capture it may still be armed for\n", port);
+        uint8_t ff = 0xFF, junk[4096];
+        sp_write(s, &ff, 1);
+        sp_sleep(1500);
+        while (sp_read(s, junk, sizeof(junk), 200) > 0) {}
+        if (!send_packet(s, 0, NULL, 0) || !read_line(s, info->version, sizeof(info->version), 3000)) {
+            snprintf(err, errlen, "%s: no answer (is it a LogicAnalyzer board? unplug it and plug it in again)", port);
+            return false;
+        }
     }
     int major = 0, minor = 0;
     const char *v = strrchr(info->version, 'V');
