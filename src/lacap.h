@@ -72,9 +72,16 @@ bool la_record(struct board *b, int pre, int post, la_capture_t *c, char *err, i
  * Returns how many (*out malloc'ed). */
 int la_cycles(const la_capture_t *c, la_cycle_t **out);
 
-/* The command line: --la-info, --la-cycles, --la-record, --la-compare. */
+/* The command line: --la-info, --la-cycles, --la-record, --la-compare,
+ * --la-devices, --la-capture (from the analyser itself: lapico.h). */
 typedef struct {
     const char *info, *cycles, *record, *compare, *against, *map;
+    bool devices;               /* --la-devices: list the boards */
+    const char *capture;        /* --la-capture FILE */
+    const char *ports;          /* --la-ports MASTER,OTHER (ports or serial numbers) */
+    const char *trigger;        /* --la-trigger reset | addr=XXXX | raw:T,B,C,V */
+    int freq;                   /* --la-freq HZ */
+    int timeout;                /* --la-timeout S */
     const struct machine *machine;
     const char *const *faults; int nfaults;
     int count;                  /* --la-count: cycles to list / context */

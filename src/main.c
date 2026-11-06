@@ -110,7 +110,23 @@
  *       from FILE2, or from the simulated board (Issue 3B unless --board).
  *   --la-map FILE
  *       The channel map: lines "CHANNEL NAME" (1-48), used for channels
- *       without a signal's name. The default is Jim's interface, rev 3.2. */
+ *       without a signal's name. The default is Jim's interface (as the
+ *       channel names in Jim's video have it, checked on a real one).
+ *
+ *   Capturing from the analyser itself (lapico.h; close the LogicAnalyzer
+ *   program first, a port can only be open in one program):
+ *   --la-devices
+ *       The boards plugged in: port, USB serial number, firmware.
+ *   --la-capture FILE [--la-ports MASTER,OTHER] [--la-trigger T]
+ *           [--la-freq HZ] [--la-pre N] [--la-post N] [--la-timeout S] [--board B]
+ *       Capture, save FILE (.lac or .csv), print what --la-info does; with
+ *       --board, compare it with that simulated board as well. The ports
+ *       are COM ports or the boards' serial numbers, the master (the board
+ *       with channels 1-24) first. T: reset (the default: A15 going high,
+ *       which the ROM's RAM test does about 110 T after a reset: hold the
+ *       reset button, let go once armed), addr=XXXX (the address bus),
+ *       raw:TYPE,BASE,COUNT,VALUE. 14285714 Hz, 1000 before, 97000 after,
+ *       60 s unless given. */
 #include "sokol_headers.h"
 #include "atlas.h"
 #include "probe_db.h"
@@ -666,6 +682,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--la-pre") && i + 1 < argc) args.la.pre = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--la-post") && i + 1 < argc) args.la.post = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--la-refresh")) args.la.refresh = true;
+        else if (!strcmp(argv[i], "--la-devices")) args.la.devices = true;
+        else if (!strcmp(argv[i], "--la-capture") && i + 1 < argc) args.la.capture = argv[++i];
+        else if (!strcmp(argv[i], "--la-ports") && i + 1 < argc) args.la.ports = argv[++i];
+        else if (!strcmp(argv[i], "--la-trigger") && i + 1 < argc) args.la.trigger = argv[++i];
+        else if (!strcmp(argv[i], "--la-freq") && i + 1 < argc) args.la.freq = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--la-timeout") && i + 1 < argc) args.la.timeout = atoi(argv[++i]);
         else if (argv[i][0] == '-') { fprintf(stderr, "unknown option %s\n", argv[i]); return 1; }
         else {
             /* Cartridges go in before power on, the rest is loaded once the
@@ -698,7 +720,7 @@ int main(int argc, char **argv) {
     }
     if (args.atlas_report || args.atlas_png) return atlas_report(args.atlas_path, args.atlas_png);
     if (args.healthy_sheet) return healthy_cli(args.healthy_sheet);
-    if (args.la.info || args.la.cycles || args.la.record || args.la.compare) {
+    if (args.la.info || args.la.cycles || args.la.record || args.la.compare || args.la.devices || args.la.capture) {
         args.la.machine = args.machine;
         args.la.faults = args.faults;
         args.la.nfaults = args.nfaults;

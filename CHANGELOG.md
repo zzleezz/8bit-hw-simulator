@@ -14,6 +14,10 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   as the analyser would (`--la-record`), and compare a capture with the
   simulated board bus cycle by bus cycle from reset (`--la-compare`). See
   README, "Logic analyser captures".
+- Logic analyser: capture from the analyser itself over USB, without the
+  LogicAnalyzer program (`--la-devices`, `--la-capture`; Windows and
+  Linux). The channel map is now the real one (Jim's video), checked on a
+  real Issue 2 that matches the simulated one for every bus cycle.
 - Diagnose by probing: the bench procedure always starts with reset, then
   the clock, at the CPU (C64 and Spectrum), even after picking the screen.
   Before, it skipped them when the faults left all showed the same there.

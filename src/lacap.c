@@ -4,6 +4,7 @@
 #include "lacap.h"
 #include "board.h"
 #include "zx48.h"
+#include "lapico.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <math.h>
@@ -48,18 +49,19 @@ static const struct { int sig; const char *nets; } sig_nets[] = {
 
 const char *la_signal_name(int sig) { return sig >= 0 && sig < LA_NSIG ? sig_names[sig] : "?"; }
 
-/* Jim's interface, rev 3.2 (liveboxandy/ZX-Spectrum-Logic-Analyser-Interface),
- * channels 1-48 (board A 1-24, board B 25-48): read from the schematic's
- * header pins, NOT yet checked on a real one. -1: nothing (the NC pin A4,
- * the spare channels 6, 7 and 26 on J3). */
+/* Jim's interface, channels 1-48 (the master board 1-24, the other 25-48),
+ * as the channel names in Jim's video have them; checked on a real one
+ * (2026-11-06: an Issue 2, every bus cycle read right). -1: not a signal
+ * here (18, 19, 47 unused; 20-24, named /MTR /DWR /DRD /OE2 /OE1 in the
+ * video, aren't on the edge connector). The schematic, read before the
+ * kit was built, had a different order: it was wrong. */
 static int chan_map[48] = {
-    -1, LA_VIDEO, LA_Y, LA_V, LA_U, -1, -1, LA_RESET,
-    LA_A0, LA_A0 + 1, LA_A0 + 2, LA_A0 + 3,
     LA_A15, LA_A0 + 14, LA_A0 + 13, LA_A0 + 12, LA_A0 + 11, LA_A0 + 10, LA_A0 + 9, LA_A0 + 8,
-    LA_A0 + 7, LA_A0 + 6, LA_A0 + 5, LA_A0 + 4,
-    LA_CLK, -1, LA_BUSACK, LA_ROMCS, LA_RFSH, LA_WAIT, LA_BUSRQ, LA_IORQ,
-    LA_MREQ, LA_HALT, LA_NMI, LA_IORQGE, LA_M1, LA_WR, LA_RD,
-    LA_D7, LA_D0 + 6, LA_D0 + 5, LA_D0 + 4, LA_D0 + 3, LA_D0 + 2, LA_D0 + 1, LA_D0, LA_INT,
+    LA_A0 + 7, LA_A0 + 6, LA_A0 + 5, LA_A0 + 4, LA_A0 + 3, LA_A0 + 2, LA_A0 + 1, LA_A0,
+    LA_RESET, -1, -1, -1, -1, -1, -1, -1,
+    LA_M1, LA_WR, LA_RD, LA_D7, LA_D0 + 6, LA_D0 + 5, LA_D0 + 4, LA_D0 + 3,
+    LA_D0 + 2, LA_D0 + 1, LA_D0, LA_INT, LA_IORQGE, LA_NMI, LA_HALT, LA_MREQ,
+    LA_IORQ, LA_BUSRQ, LA_WAIT, LA_RFSH, LA_ROMCS, LA_BUSACK, -1, LA_CLK,
 };
 
 /* A name with only its letters and digits, in capitals ("~{MREQ}" -> "MREQ"). */
@@ -778,7 +780,121 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
 }
 
 /* A capture of the simulated board, healthy or with the faults. */
-static bool record_board(const la_cli_t *o, la_capture_t *c, char *err, int errlen) {
+/* Samples (at the simulation's 28 MHz) to record to cover capture A, and a
+ * little more: 0 if A's rate isn't known. */
+static int sim_length(const la_capture_t *a) {
+    if (a->freq <= 0) return 0;
+    return (int)((double)(a->n - a->pre) * (ZX_FREQ * ZX_STEPS_PER_CYCLE) / a->freq) + 4000;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Capturing from the analyser itself                                        */
+/* ------------------------------------------------------------------------ */
+
+static void list_devices(void) {
+    lp_port_t p[LP_MAXDEV * 2];
+    int n = lp_find(p, LP_MAXDEV * 2);
+    if (!n) { printf("No LogicAnalyzer boards found (USB 1209:3020)\n"); return; }
+    for (int i = 0; i < n; i++) {
+        lp_info_t info;
+        char err[256];
+        printf("%-8s serial %-18s ", p[i].port, p[i].serial[0] ? p[i].serial : "?");
+        if (lp_info(p[i].port, &info, err, sizeof(err)))
+            printf("%s, %d channels, up to %d Hz, %d byte buffer\n", info.version, info.channels, info.max_freq, info.buffer);
+        else
+            printf("%s\n", err);
+    }
+}
+
+/* --la-ports "A,B": each a port (COM12) or a board's USB serial number. */
+static int pick_ports(const char *list, char ports[][64], int max, char *err, int errlen) {
+    lp_port_t p[LP_MAXDEV * 2];
+    int found = lp_find(p, LP_MAXDEV * 2);
+    if (!list) {
+        if (found == 1) { snprintf(ports[0], 64, "%s", p[0].port); return 1; }
+        int n = snprintf(err, errlen, found ? "%d boards: say which is the master with --la-ports MASTER,OTHER (a port or a serial number):" :
+                         "no LogicAnalyzer boards found", found);
+        for (int i = 0; i < found && n < errlen; i++) n += snprintf(err + n, errlen - n, " %s=%s", p[i].port, p[i].serial);
+        return 0;
+    }
+    int n = 0;
+    for (const char *s = list; *s && n < max; ) {
+        size_t len = strcspn(s, ",");
+        char w[64];
+        snprintf(w, sizeof(w), "%.*s", (int)len, s);
+        snprintf(ports[n], 64, "%s", w);
+        for (int i = 0; i < found; i++)
+            if (!strcasecmp(p[i].serial, w)) snprintf(ports[n], 64, "%s", p[i].port);
+        n++;
+        s += len + (s[len] == ',');
+    }
+    return n;
+}
+
+/* --la-trigger: reset (A15 high: the RAM test's first write, about 110 T
+ * after the reset), addr=XXXX (all 16 address lines), raw:TYPE,BASE,COUNT,VALUE. */
+static bool pick_trigger(const char *t, lp_capture_req_t *q, char *err, int errlen) {
+    if (!t || !strcasecmp(t, "reset")) {
+        int ch = -1;
+        for (int k = 0; k < 48; k++) if (chan_map[k] == LA_A15) ch = k;
+        if (ch < 0 || ch >= 5) { snprintf(err, errlen, "the reset trigger needs A15 on channel 1-5"); return false; }
+        q->trig_type = LP_FAST; q->trig_base = ch; q->trig_count = 1; q->trig_value = 1;
+        return true;
+    }
+    unsigned a, ty, base, count, value;
+    if (sscanf(t, "addr=%x", &a) == 1) {
+        q->trig_type = LP_COMPLEX; q->trig_base = 0; q->trig_count = 16; q->trig_value = 0;
+        for (int k = 0; k < 16; k++) {
+            int s = chan_map[k];
+            if (s < LA_A0 || s > LA_A15) { snprintf(err, errlen, "an address trigger needs A0-A15 on channels 1-16"); return false; }
+            q->trig_value |= (a >> (s - LA_A0) & 1u) << k;
+        }
+        return true;
+    }
+    if (sscanf(t, "raw:%u,%u,%u,%u", &ty, &base, &count, &value) == 4) {
+        q->trig_type = (int)ty; q->trig_base = (int)base; q->trig_count = (int)count; q->trig_value = value;
+        return true;
+    }
+    snprintf(err, errlen, "--la-trigger %s: reset, addr=XXXX or raw:TYPE,BASE,COUNT,VALUE", t);
+    return false;
+}
+
+static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errlen) {
+    char ports[LP_MAXDEV][64];
+    lp_capture_req_t q = { 0 };
+    q.ndev = pick_ports(o->ports, ports, LP_MAXDEV, err, errlen);
+    if (!q.ndev) return false;
+    for (int d = 0; d < q.ndev; d++) q.port[d] = ports[d];
+    for (int k = 0; k < 24 * q.ndev && k < 48; k++) if (chan_map[k] >= 0) q.chan[q.nchan++] = k;
+    q.freq = o->freq > 0 ? o->freq : 14285714;
+    q.pre = o->pre > 0 ? o->pre : 1000;
+    q.post = o->post > 0 ? o->post : 97000;
+    q.timeout = o->timeout;
+    if (!pick_trigger(o->trigger, &q, err, errlen)) return false;
+    if (!o->trigger || !strcasecmp(o->trigger, "reset"))
+        printf("Trigger: the Spectrum's reset. Hold its reset button down now, and let go once it says Armed.\n");
+    printf("Capturing %d channels from %s%s%s at %d Hz, %d samples before the trigger and %d after\n", q.nchan,
+           ports[0], q.ndev > 1 ? " (master) and " : "", q.ndev > 1 ? ports[1] : "", q.freq, q.pre, q.post);
+    fflush(stdout);
+    uint8_t *v[LP_MAXDEV * 24] = { 0 };
+    int n = 0, pre = 0;
+    if (!lp_capture(&q, v, &n, &pre, err, errlen)) return false;
+    rawchan_t ch[LP_MAXDEV * 24];
+    for (int k = 0; k < q.nchan; k++) {
+        ch[k].number = q.chan[k];
+        snprintf(ch[k].name, sizeof(ch[k].name), "%s", la_signal_name(chan_map[q.chan[k]]));
+        ch[k].v = v[k];
+        ch[k].n = n;
+    }
+    memset(c, 0, sizeof(*c));
+    c->freq = q.freq;
+    c->pre = pre;
+    bool ok = la_build(c, ch, q.nchan, err, errlen);
+    for (int k = 0; k < q.nchan; k++) free(v[k]);
+    return ok;
+}
+
+static bool record_board(const la_cli_t *o, int post, la_capture_t *c, char *err, int errlen) {
     board_t *b = board_create(o->machine ? o->machine : &machine_zx48);
     for (int i = 0; i < o->nfaults; i++)
         if (!board_apply_fault_spec(b, o->faults[i])) {
@@ -786,7 +902,7 @@ static bool record_board(const la_cli_t *o, la_capture_t *c, char *err, int errl
             board_destroy(b);
             return false;
         }
-    bool ok = la_record(b, o->pre > 0 ? o->pre : 512, o->post > 0 ? o->post : 32000, c, err, errlen);
+    bool ok = la_record(b, o->pre > 0 ? o->pre : 512, post > 0 ? post : o->post > 0 ? o->post : 32000, c, err, errlen);
     board_destroy(b);
     return ok;
 }
@@ -803,8 +919,26 @@ int la_cli(const la_cli_t *o) {
     if (o->map && !la_load_map(o->map, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
     int count = o->count > 0 ? o->count : 20;
     la_capture_t c;
+    if (o->devices) { list_devices(); return 0; }
+    if (o->capture) {
+        if (!capture_real(o, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
+        if (!la_write(o->capture, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); la_free(&c); return 1; }
+        printf("Saved %s\n\n", o->capture);
+        print_info(o->capture, &c, count);
+        int rc = 0;
+        if (o->machine) {               /* --board: compare with the simulated one */
+            la_capture_t b;
+            char bn[300];
+            printf("\n");
+            if (!record_board(o, sim_length(&c), &b, err, sizeof(err))) { fprintf(stderr, "%s\n", err); la_free(&c); return 1; }
+            rc = compare(o->capture, &c, board_desc(o, bn, sizeof(bn)), &b, count < 8 ? count : 8, o->refresh);
+            la_free(&b);
+        }
+        la_free(&c);
+        return rc;
+    }
     if (o->record) {
-        if (!record_board(o, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
+        if (!record_board(o, 0, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); return 1; }
         if (!la_write(o->record, &c, err, sizeof(err))) { fprintf(stderr, "%s\n", err); la_free(&c); return 1; }
         char d[300];
         printf("%s: %s, %d samples (%d before /RESET went high) at %.0f MHz\n", o->record,
@@ -833,7 +967,7 @@ int la_cli(const la_cli_t *o) {
         la_capture_t b;
         if (!la_read(o->compare, &c, err, sizeof(err))) { fprintf(stderr, "%s: %s\n", o->compare, err); return 1; }
         char bn[300];
-        bool ok = o->against ? la_read(o->against, &b, err, sizeof(err)) : record_board(o, &b, err, sizeof(err));
+        bool ok = o->against ? la_read(o->against, &b, err, sizeof(err)) : record_board(o, sim_length(&c), &b, err, sizeof(err));
         if (!ok) { fprintf(stderr, "%s: %s\n", o->against ? o->against : "recording", err); la_free(&c); return 1; }
         int rc = compare(o->compare, &c, o->against ? o->against : board_desc(o, bn, sizeof(bn)), &b,
                          o->count > 0 ? o->count : 8, o->refresh);
