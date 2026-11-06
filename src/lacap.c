@@ -831,17 +831,13 @@ static int pick_ports(const char *list, char ports[][64], int max, char *err, in
     return n;
 }
 
-/* --la-trigger: reset (A15 high: the RAM test's first write, about 110 T
- * after the reset), addr=XXXX (all 16 address lines), raw:TYPE,BASE,COUNT,VALUE. */
+/* --la-trigger: reset (the address FFFF: the RAM test's first write, about
+ * 110 T after the reset), addr=XXXX (all 16 address lines),
+ * raw:TYPE,BASE,COUNT,VALUE. Not A15 alone: while the reset is held the
+ * Z80's address lines float, and A15 and A14 drift high (live1.lac). */
 static bool pick_trigger(const char *t, lp_capture_req_t *q, char *err, int errlen) {
-    if (!t || !strcasecmp(t, "reset")) {
-        int ch = -1;
-        for (int k = 0; k < 48; k++) if (chan_map[k] == LA_A15) ch = k;
-        if (ch < 0 || ch >= 5) { snprintf(err, errlen, "the reset trigger needs A15 on channel 1-5"); return false; }
-        q->trig_type = LP_FAST; q->trig_base = ch; q->trig_count = 1; q->trig_value = 1;
-        return true;
-    }
     unsigned a, ty, base, count, value;
+    if (!t || !strcasecmp(t, "reset")) t = "addr=FFFF";
     if (sscanf(t, "addr=%x", &a) == 1) {
         q->trig_type = LP_COMPLEX; q->trig_base = 0; q->trig_count = 16; q->trig_value = 0;
         for (int k = 0; k < 16; k++) {

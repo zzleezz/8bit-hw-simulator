@@ -122,9 +122,9 @@
  *       Capture, save FILE (.lac or .csv), print what --la-info does; with
  *       --board, compare it with that simulated board as well. The ports
  *       are COM ports or the boards' serial numbers, the master (the board
- *       with channels 1-24) first. T: reset (the default: A15 going high,
- *       which the ROM's RAM test does about 110 T after a reset: hold the
- *       reset button, let go once armed), addr=XXXX (the address bus),
+ *       with channels 1-24) first. T: reset (the default: the address
+ *       FFFF, the ROM's RAM test's first write, about 110 T after a reset:
+ *       hold the reset button, let go once armed), addr=XXXX (the address bus),
  *       raw:TYPE,BASE,COUNT,VALUE. 14285714 Hz, 1000 before, 97000 after,
  *       60 s unless given. */
 #include "sokol_headers.h"
