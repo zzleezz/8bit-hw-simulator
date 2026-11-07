@@ -14,6 +14,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   **Save as** keeps a run in a folder of your choosing; its questions now
   say Continue and No (not "press Enter", "type n"). `diagnose.bat` asks
   before it replaces a board's earlier diagnosis.
+- The logic analyser window is easier to follow at the bench: a row of
+  stage boxes (blue now, green OK, red wrong, click for the stage's
+  text); a big red ARMED with "LET GO OF RESET" while it waits for the
+  Spectrum, TRIGGERED once captured; green Start and Continue, red Stop.
+  The setup is hidden during a run, and **New diagnosis** clears the
+  results and the outlines on the board.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

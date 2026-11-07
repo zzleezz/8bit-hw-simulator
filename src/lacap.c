@@ -7,12 +7,17 @@
 #include "lapico.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 /* Everything printed goes to the --la-log file as well. */
 static FILE *la_logf;
 static bool la_screen = true;           /* false: to the log alone */
 void (*la_text_hook)(const char *text);
 bool (*la_ask_hook)(const char *prompt);
+void (*la_status_hook)(int kind, int stage, int state);
+static void la_status(int kind, int stage, int state) {
+    if (la_status_hook) la_status_hook(kind, stage, state);
+}
 static int la_out(const char *fmt, ...) {
     va_list a;
     int n = 0;
@@ -32,7 +37,30 @@ static int la_out(const char *fmt, ...) {
     fflush(stdout);
     return n;
 }
-static int quiet_out(const char *fmt, ...) { (void)fmt; return 0; }
+/* What lapico.c prints as it captures: "Armed..." and "Triggered..." told
+ * to the window as well (pico_quiet: told, not printed). */
+static void pico_note(const char *t) {
+    if (!strncmp(t, "Armed", 5)) la_status(LA_EV_ARMED, 0, 0);
+    else if (!strncmp(t, "Triggered", 9)) la_status(LA_EV_TRIGGERED, 0, 0);
+}
+static int pico_out(const char *fmt, ...) {
+    char buf[1024];
+    va_list a;
+    va_start(a, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, a);
+    va_end(a);
+    pico_note(buf);
+    return la_out("%s", buf);
+}
+static int pico_quiet(const char *fmt, ...) {
+    char buf[1024];
+    va_list a;
+    va_start(a, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, a);
+    va_end(a);
+    pico_note(buf);
+    return 0;
+}
 static void la_err(const char *msg) {
     if (la_text_hook) { la_text_hook(msg); la_text_hook("\n"); }
     else fprintf(stderr, "%s\n", msg);
@@ -1496,7 +1524,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
         printf("(armed for the reset first, then again by itself %.1f ms after it)\n", st->ms);
     printf("Capturing %d channels from %s%s%s at %d Hz, %d samples before the trigger and %d after\n", q.nchan,
            ports[0], q.ndev > 1 ? " (master) and " : "", q.ndev > 1 ? ports[1] : "", q.freq, q.pre, q.post);
-    lp_printf = la_out;
+    lp_printf = pico_out;
     int tries = o->tries > 0 ? o->tries : 5;
     bool boot = st && st->addr != 0x0038;
     /* A stage after the reset: armed on the reset first (FFFF, the RAM
@@ -1569,9 +1597,9 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
             if (wait < 50) { snprintf(err, errlen, "the reset came in %.0f ms too late to arm for %s", -wait, st->name); return false; }
             q.timeout = 3;
         }
-        if (timed) lp_printf = quiet_out;  /* not "Armed" again: the button is let go already */
+        if (timed) lp_printf = pico_quiet;  /* not "Armed" again: the button is let go already */
         bool got = lp_capture(&q, v, &n, &pre, err, errlen);
-        lp_printf = la_out;
+        lp_printf = pico_out;
         if (got && timed) printf("Got %s\n", st->name);
         q.start_at = 0;
         if (!got && timed && strstr(err, "no trigger") && st != &at_stage) {
@@ -2787,7 +2815,11 @@ static int diagnose_run(const la_cli_t *o) {
     bool missing = false;
     int passed = 0;
     ev_t ie;
+    la_status(LA_EV_STAGE, 0, LA_ST_RUN);
     int idle = idle_stage(o, m, dir, &ie);
+    la_status(LA_EV_STAGE, 0, idle == 0 ? LA_ST_OK : idle > 0 ? LA_ST_FAULT : LA_ST_SKIP);
+    if (idle == 2)
+        for (int i = 1; i <= DIAG_NSTAGES; i++) la_status(LA_EV_STAGE, i, LA_ST_SKIP);
     if (idle == 2) { e = ie; fail_stage = "idle"; snprintf(where, sizeof(where), "%s", ie.idle_where); }
     for (int i = 0; i < DIAG_NSTAGES && idle != 2; i++) {
         const la_stage_t *st = stage_named(diag_plan[i].stage);
@@ -2799,11 +2831,13 @@ static int diagnose_run(const la_cli_t *o) {
         snprintf(path, sizeof(path), "%s/%s.lac", dir, st->name);
         snprintf(ipath, sizeof(ipath), "%s/%s-instead.lac", dir, st->name);
         printf("\n%d of %d, %s: %s\n", i + 1, DIAG_NSTAGES, st->name, st->what);
+        la_status(LA_EV_STAGE, i + 1, LA_ST_RUN);
         double at = i == 0 ? 0 : st->ms + 5;    /* when it's past due */
         if (o->replay) {
             got = la_read(path, &d, err, sizeof(err));
             if (!got) instead = la_read(ipath, &d, err, sizeof(err));
             if (!got && !instead) {
+                la_status(LA_EV_STAGE, i + 1, LA_ST_SKIP);
                 if (fail_stage) printf("  Not in the folder (that run stopped at the first fault): the rest is from the stages before\n");
                 else printf("  Not in the folder (%s): the diagnosis stops here\n", path);
                 break;
@@ -2878,6 +2912,7 @@ static int diagnose_run(const la_cli_t *o) {
         la_free(&d);
         la_free(&r);
         bool bad = instead || sco.rc == 2 || ev_any(&se);
+        la_status(LA_EV_STAGE, i + 1, !bad ? LA_ST_OK : instead ? LA_ST_NEVER : LA_ST_FAULT);
         if (!bad) {
             if (!fail_stage) passed++;
             else ev_merge(&e, &se);     /* --la-all: what a later stage shows as well */

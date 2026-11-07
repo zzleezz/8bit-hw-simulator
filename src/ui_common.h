@@ -76,6 +76,9 @@ static const struct nk_color role_color[] = {
     [ROLE_OTHER] = { 235, 235, 225, 255 },
 };
 
+/* The interface font, three times the size (NULL before the window is up). */
+const struct nk_user_font *ui_big_font(void);
+
 static inline float text_width(struct nk_context *ctx, const char *txt) {
     const struct nk_user_font *f = ctx->style.font;
     return f->width(f->userdata, f->height, txt, (int)strlen(txt));

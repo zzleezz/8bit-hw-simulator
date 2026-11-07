@@ -25,6 +25,10 @@
 #include <stdio.h>
 
 #define MAX_MARKS 48
+#define NSTAGES 7                   /* idle, then the boot's six */
+
+static const char *const stage_label[NSTAGES] = { "Idle", "Reset", "RAM test", "RAM done", "Copyright", "Main loop",
+                                                  "Interrupt" };
 
 enum { MODE_ANALYSER, MODE_REPLAY, MODE_SIMULATE };
 
@@ -62,7 +66,19 @@ static struct {
     char mark_ref[MAX_MARKS][16];
     int mark_level[MAX_MARKS], nmarks;
     char summary[400];
-} L = { .all = true, .answer = -1 };
+
+    /* How far it is: each stage's state (LA_ST_...) and where its text
+     * starts; the analyser's sign (0 none, 1 armed, 2 triggered) and what
+     * to do now. */
+    bool has_run;                   /* a run started: the setup is hidden till "New diagnosis" */
+    int stage_st[NSTAGES];
+    size_t stage_off[NSTAGES];
+    int cur_stage;
+    int sign, arms;
+    bool expect_release;            /* the last question had the reset button held */
+    char doing[200];
+    long jump;                      /* a stage's box clicked: the text offset to show (-1 none) */
+} L = { .all = true, .answer = -1, .jump = -1 };
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void init_sync(void) {
@@ -126,12 +142,40 @@ static bool ask_hook(const char *prompt) {
     while (k && (L.prompt[k - 1] == '\n' || L.prompt[k - 1] == ' ')) L.prompt[--k] = 0;
     L.answer = -1;
     L.asking = true;
+    L.sign = 0;
+    L.arms = 0;
+    L.doing[0] = 0;
+    L.expect_release = strstr(L.prompt, "Hold the") || strstr(L.prompt, "hold the") || strstr(L.prompt, "hold it");
     while (L.answer < 0 && !L.stop) pthread_cond_wait(&L.cv, &L.mu);
     bool go = L.answer == 1 && !L.stop;
     L.asking = false;
     pthread_mutex_unlock(&L.mu);
     text_hook(go ? "  [continued]\n" : "  [no]\n");
     return go;
+}
+
+static void status_hook(int kind, int stage, int state) {
+    pthread_mutex_lock(&L.mu);
+    if (kind == LA_EV_STAGE && stage >= 0 && stage < NSTAGES) {
+        L.stage_st[stage] = state;
+        if (state == LA_ST_RUN) {
+            L.stage_off[stage] = L.len;
+            L.cur_stage = stage;
+            L.sign = 0;
+            L.arms = 0;
+            L.expect_release = false;
+            L.doing[0] = 0;
+        }
+    } else if (kind == LA_EV_ARMED) {
+        L.sign = 1;
+        if (++L.arms == 1 && L.expect_release) snprintf(L.doing, sizeof(L.doing), "LET GO OF RESET");
+        else if (L.cur_stage == 0) snprintf(L.doing, sizeof(L.doing), "Waiting for the Spectrum (left running: don't touch it)");
+        else snprintf(L.doing, sizeof(L.doing), "Waiting for %s", stage_label[L.cur_stage]);
+    } else if (kind == LA_EV_TRIGGERED) {
+        L.sign = 2;
+        snprintf(L.doing, sizeof(L.doing), "Reading the samples, then comparing with a working board");
+    }
+    pthread_mutex_unlock(&L.mu);
 }
 
 /* Is REF a part of board B? */
@@ -224,10 +268,16 @@ static void *worker(void *arg) {
     }
     la_text_hook = text_hook;
     la_ask_hook = ask_hook;
+    la_status_hook = status_hook;
     int rc = la_cli(&o);
     la_text_hook = NULL;
     la_ask_hook = NULL;
+    la_status_hook = NULL;
     pthread_mutex_lock(&L.mu);
+    for (int k = 0; k < NSTAGES; k++)
+        if (L.stage_st[k] == LA_ST_RUN) L.stage_st[k] = LA_ST_NONE;    /* stopped in it */
+    L.sign = 0;
+    L.doing[0] = 0;
     L.rc = rc;
     snprintf(L.rc_text, sizeof(L.rc_text), "%s",
              L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: the verdict is below." :
@@ -246,23 +296,37 @@ static bool is_zx48(const machine_t *m) {
            m == &machine_zx48i6a;
 }
 
-static void start(const machine_t *m) {
-    pthread_once(&once, init_sync);
-    if (atomic_load(&L.running)) return;
-    if (L.started_once) pthread_join(L.th, NULL);
+/* Everything a run left: its text, verdict, outlines, stages. */
+static void clear_results(void) {
     pthread_mutex_lock(&L.mu);
     L.len = 0;
     if (L.text) L.text[0] = 0;
     L.shown_len = 0;
-    L.stop = false;
     L.asking = false;
     L.answer = -1;
     L.rc_text[0] = 0;
     L.nmarks = 0;
     L.summary[0] = 0;
+    L.saved[0] = 0;
+    memset(L.stage_st, 0, sizeof(L.stage_st));
+    memset(L.stage_off, 0, sizeof(L.stage_off));
+    L.cur_stage = 0;
+    L.sign = L.arms = 0;
+    L.doing[0] = 0;
+    L.jump = -1;
+    pthread_mutex_unlock(&L.mu);
+}
+
+static void start(const machine_t *m) {
+    pthread_once(&once, init_sync);
+    if (atomic_load(&L.running)) return;
+    if (L.started_once) pthread_join(L.th, NULL);
+    clear_results();
+    pthread_mutex_lock(&L.mu);
+    L.stop = false;
     L.m = m;
     L.run_mode = L.mode;
-    L.saved[0] = 0;
+    L.has_run = true;
     pthread_mutex_unlock(&L.mu);
     atomic_store(&L.running, true);
     if (pthread_create(&L.th, NULL, worker, NULL) != 0) {
@@ -306,6 +370,30 @@ void la_window_open_test(const char *spec) {
         if (!c) return;
         snprintf(L.fault, sizeof(L.fault), "%.*s", (int)(c - spec - 9), spec + 9);
         snprintf(L.folder, sizeof(L.folder), "%s", c + 1);
+    } else if (!strncmp(spec, "demo:", 5)) {
+        /* How it looks with the analyser, for screenshots: "demo:ask",
+         * "demo:armed", "demo:triggered". */
+        L.has_run = true;
+        L.mode = L.run_mode = MODE_ANALYSER;
+        L.stage_st[0] = LA_ST_OK;
+        L.stage_st[1] = LA_ST_OK;
+        L.stage_st[2] = LA_ST_RUN;
+        L.cur_stage = 2;
+        text_put("First, idle: what it does left running\n  OK: the same as a working one\n\n1 of 6, reset: ...\n"
+                 "  OK: the same as a working one\n\n2 of 6, ramcheck: the RAM test reading back\n");
+        atomic_store(&L.running, true);
+        if (!strcmp(spec + 5, "ask")) {
+            L.asking = true;
+            snprintf(L.prompt, sizeof(L.prompt),
+                     "Hold the Spectrum's reset button down, then press Continue (keep holding the button)");
+        } else if (!strcmp(spec + 5, "armed")) {
+            L.sign = 1;
+            snprintf(L.doing, sizeof(L.doing), "LET GO OF RESET");
+        } else {
+            L.sign = 2;
+            snprintf(L.doing, sizeof(L.doing), "Reading the samples, then comparing with a working board");
+        }
+        return;
     } else return;
     L.start_pending = true;
 }
@@ -415,6 +503,77 @@ static void field(struct nk_context *ctx, const char *label, char *buf, int len,
     nk_layout_row_end(ctx);
 }
 
+/* A button in a color of its own (the one to press now). */
+static bool color_button(struct nk_context *ctx, const char *label, struct nk_color bg, struct nk_color fg) {
+    struct nk_style_button *b = &ctx->style.button;
+    struct nk_color hov = nk_rgb(bg.r + (255 - bg.r) / 5, bg.g + (255 - bg.g) / 5, bg.b + (255 - bg.b) / 5);
+    nk_style_push_style_item(ctx, &b->normal, nk_style_item_color(bg));
+    nk_style_push_style_item(ctx, &b->hover, nk_style_item_color(hov));
+    nk_style_push_style_item(ctx, &b->active, nk_style_item_color(hov));
+    nk_style_push_color(ctx, &b->text_normal, fg);
+    nk_style_push_color(ctx, &b->text_hover, fg);
+    nk_style_push_color(ctx, &b->text_active, fg);
+    nk_style_push_color(ctx, &b->border_color, hov);
+    bool r = nk_button_label(ctx, label);
+    nk_style_pop_color(ctx); nk_style_pop_color(ctx); nk_style_pop_color(ctx); nk_style_pop_color(ctx);
+    nk_style_pop_style_item(ctx); nk_style_pop_style_item(ctx); nk_style_pop_style_item(ctx);
+    return r;
+}
+
+#define COL_GO   nk_rgb(30, 150, 60)
+#define COL_STOP nk_rgb(190, 40, 35)
+
+/* Text in the big font (or the usual one), centered in R. */
+static void big_text(struct nk_command_buffer *cv, struct nk_context *ctx, struct nk_rect r, const char *t,
+                     struct nk_color c) {
+    const struct nk_user_font *f = ui_big_font();
+    if (!f) f = ctx->style.font;
+    float w = f->width(f->userdata, f->height, t, (int)strlen(t));
+    nk_draw_text(cv, nk_rect(r.x + (r.w - w) / 2, r.y + (r.h - f->height) / 2, w + 2, f->height), t, (int)strlen(t), f,
+                 nk_rgba(0, 0, 0, 0), c);
+}
+
+/* The stages as boxes along the window: grey to come, blue now, green
+ * OK, red wrong, dark crossed out skipped. A click shows its text. */
+static void stage_strip(struct nk_context *ctx, const int *st, int cur, bool running) {
+    static int frame;
+    frame++;
+    nk_layout_row_dynamic(ctx, 44, NSTAGES);
+    for (int k = 0; k < NSTAGES; k++) {
+        bool clicked = nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT);
+        if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "Show this stage's text below");
+        struct nk_rect r;
+        if (!nk_widget(&r, ctx)) continue;
+        struct nk_command_buffer *cv = nk_window_get_canvas(ctx);
+        struct nk_color fill, fg = nk_rgb(255, 255, 255);
+        const char *what = "";
+        switch (st[k]) {
+        case LA_ST_RUN: {
+            float pulse = 0.5f + 0.5f * sinf(frame * 0.12f);
+            fill = nk_rgb(30 + (int)(40 * pulse), 90 + (int)(50 * pulse), 200 + (int)(40 * pulse));
+            what = running ? "now" : "";
+            break;
+        }
+        case LA_ST_OK: fill = nk_rgb(35, 140, 60); what = "OK"; break;
+        case LA_ST_FAULT: fill = nk_rgb(200, 45, 40); what = "WRONG"; break;
+        case LA_ST_NEVER: fill = nk_rgb(200, 45, 40); what = "never came"; break;
+        case LA_ST_SKIP: fill = nk_rgb(45, 45, 48); fg = nk_rgb(120, 120, 120); what = "skipped"; break;
+        default: fill = nk_rgb(75, 75, 80); fg = nk_rgb(170, 170, 170); what = ""; break;
+        }
+        (void)cur;
+        nk_fill_rect(cv, r, 4, fill);
+        if (st[k] == LA_ST_SKIP) nk_stroke_line(cv, r.x + 4, r.y + r.h - 4, r.x + r.w - 4, r.y + 4, 1.5f, nk_rgb(110, 110, 110));
+        float fh = ctx->style.font->height;
+        text_centered(cv, ctx, nk_rect(r.x, r.y + 4, r.w, fh + 2), stage_label[k], fg);
+        if (what[0]) text_centered(cv, ctx, nk_rect(r.x, r.y + r.h - fh - 6, r.w, fh + 2), what, fg);
+        if (clicked) {
+            pthread_mutex_lock(&L.mu);
+            if (st[k] != LA_ST_NONE) L.jump = (long)L.stage_off[k];
+            pthread_mutex_unlock(&L.mu);
+        }
+    }
+}
+
 void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *machine) {
     if (!L.open) return;
     pthread_once(&once, init_sync);
@@ -441,108 +600,146 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
     if (L.start_pending && zx) { L.start_pending = false; start(machine); }
     bool running = atomic_load(&L.running);
 
-    nk_layout_row_dynamic(ctx, 52, 1);
-    char head[300];
-    if (zx)
-        snprintf(head, sizeof(head), "The %s on the bench: its boot captured stage by stage over the edge connector "
-                 "(Jim's interface, two LogicAnalyzer boards) and compared with the simulated one.", machine->board_name);
-    else snprintf(head, sizeof(head), "For a ZX Spectrum: put one on the bench (the analyser reads its edge connector).");
-    nk_label_colored_wrap(ctx, head, zx ? COL_TEXT : COL_FAULT);
-
-    /* What to diagnose. */
-    nk_layout_row_dynamic(ctx, 22, 1);
-    static const char *const modes[] = { "The real Spectrum (analyser)", "Again, from the folder's captures",
-                                         "The simulated board, with a fault" };
-    static const char *const tips[] = {
-        "Capture from the two LogicAnalyzer boards over USB: the Spectrum left running first, then its boot "
-        "(you hold its reset button when asked)",
-        "Diagnose the captures a run took before (in the folder below) again, without the analyser",
-        "The simulated board with the fault below as the one under test: to see what the diagnosis says of it" };
-    for (int k = 0; k < 3; k++) {
-        if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tips[k]);
-        nk_layout_row_dynamic(ctx, 22, 1);
-        if (nk_option_label(ctx, modes[k], L.mode == k) && !running) L.mode = k;
-    }
-    if (L.mode == MODE_REPLAY)
-        field(ctx, "Folder", L.folder, sizeof(L.folder), 70, cw,
-              "A folder of captures a run took and saved (diagnosis-NAME)");
-    if (L.mode == MODE_ANALYSER) {
-        nk_layout_row_begin(ctx, NK_STATIC, 26, 3);
-        nk_layout_row_push(ctx, 70);
-        nk_label(ctx, "Ports", NK_TEXT_LEFT);
-        nk_layout_row_push(ctx, 220);
-        if (nk_widget_is_hovered(ctx))
-            nk_tooltip(ctx, "MASTER,OTHER: the board nearest the Spectrum first (a COM port or a serial number); "
-                            "empty with one board");
-        nk_flags ev = nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, L.ports, sizeof(L.ports), nk_filter_default);
-        if (ev & NK_EDIT_ACTIVE) L.typing = true;
-        nk_layout_row_push(ctx, 120);
-        if (nk_button_label(ctx, "Find boards")) {
-            lp_port_t p[8];
-            int n = lp_find(p, 8), m = 0;
-            m += snprintf(L.boards, sizeof(L.boards), n ? "Found:" : "No LogicAnalyzer boards found (plugged in?)");
-            for (int i = 0; i < n && m < (int)sizeof(L.boards); i++)
-                m += snprintf(L.boards + m, sizeof(L.boards) - m, " %s (serial %s)", p[i].port, p[i].serial);
-            if (n == 2 && !L.ports[0]) snprintf(L.ports, sizeof(L.ports), "%s,%s", p[0].port, p[1].port);
-        }
-        nk_layout_row_end(ctx);
-        if (L.boards[0]) {
-            nk_layout_row_dynamic(ctx, 20, 1);
-            nk_label_colored(ctx, L.boards, NK_TEXT_LEFT, COL_DIMTEXT);
-        }
-    } else if (L.mode == MODE_SIMULATE)
-        field(ctx, "Fault", L.fault, sizeof(L.fault), 70, cw,
-              "As --fault: IC26:removed, IC2.26:gnd, IC12:data0=1... (empty: the working board)");
-    nk_layout_row_dynamic(ctx, 24, 1);
-    nk_bool all = L.all;
-    if (nk_widget_is_hovered(ctx))
-        nk_tooltip(ctx, "After a stage that's wrong, capture the later ones too: more to go on (one that never comes "
-                        "ends it)");
-    if (nk_checkbox_label(ctx, "After a wrong stage, take the rest too", &all) && !running) L.all = all;
-
-    nk_layout_row_dynamic(ctx, 28, 4);
-    if (!running) {
-        if (zx && L.folder[0] && nk_button_label(ctx, "Start")) start(machine);
-    } else if (nk_button_label(ctx, "Stop")) {
-        pthread_mutex_lock(&L.mu);
-        L.stop = true;
-        pthread_cond_broadcast(&L.cv);
-        pthread_mutex_unlock(&L.mu);
-    }
-    if (nk_button_label(ctx, "Close")) L.open = false;
-    if (!running && L.nmarks) {
-        if (nk_widget_is_hovered(ctx))
-            nk_tooltip(ctx, "Close the window to see the board: the outlines stay (open it again from Diagnose)");
-        if (nk_button_label(ctx, "Show the board")) L.open = false;
-        if (nk_button_label(ctx, "Clear outlines")) L.nmarks = 0;
-    }
-
-    /* Its question, with the answers. */
     pthread_mutex_lock(&L.mu);
     bool asking = L.asking;
-    char prompt[600];
+    char prompt[600], doing[200];
     snprintf(prompt, sizeof(prompt), "%s", L.prompt);
+    snprintf(doing, sizeof(doing), "%s", L.doing);
+    int st[NSTAGES];
+    memcpy(st, L.stage_st, sizeof(st));
+    int cur = L.cur_stage, sign = L.sign;
     bool stopping = L.stop && running;
     pthread_mutex_unlock(&L.mu);
+
+    if (!L.has_run) {
+        /* ---- the setup: what to diagnose, and Start */
+        if (!zx) {
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_label_colored(ctx, "Put a ZX Spectrum on the bench first (the analyser reads its edge connector)",
+                             NK_TEXT_LEFT, COL_FAULT);
+        }
+        static const char *const modes[] = { "The real Spectrum (analyser)", "Again, from the folder's captures",
+                                             "The simulated board, with a fault" };
+        static const char *const tips[] = {
+            "Capture from the two LogicAnalyzer boards over USB: the Spectrum left running first, then its boot "
+            "(you hold its reset button when asked)",
+            "Diagnose the captures a run took and saved before (the folder below) again, without the analyser",
+            "The simulated board with the fault below as the one under test: to see what the diagnosis says of it" };
+        for (int k = 0; k < 3; k++) {
+            nk_layout_row_dynamic(ctx, 22, 1);
+            if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tips[k]);
+            if (nk_option_label(ctx, modes[k], L.mode == k)) L.mode = k;
+        }
+        if (L.mode == MODE_REPLAY)
+            field(ctx, "Folder", L.folder, sizeof(L.folder), 70, cw,
+                  "A folder of captures a run took and saved (diagnosis-NAME)");
+        if (L.mode == MODE_ANALYSER) {
+            nk_layout_row_begin(ctx, NK_STATIC, 26, 3);
+            nk_layout_row_push(ctx, 70);
+            nk_label(ctx, "Ports", NK_TEXT_LEFT);
+            nk_layout_row_push(ctx, 220);
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "MASTER,OTHER: the board nearest the Spectrum first (a COM port or a serial number); "
+                                "empty with one board");
+            nk_flags ev = nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, L.ports, sizeof(L.ports), nk_filter_default);
+            if (ev & NK_EDIT_ACTIVE) L.typing = true;
+            nk_layout_row_push(ctx, 120);
+            if (nk_button_label(ctx, "Find boards")) {
+                lp_port_t p[8];
+                int n = lp_find(p, 8), m = 0;
+                m += snprintf(L.boards, sizeof(L.boards), n ? "Found:" : "No LogicAnalyzer boards found (plugged in?)");
+                for (int i = 0; i < n && m < (int)sizeof(L.boards); i++)
+                    m += snprintf(L.boards + m, sizeof(L.boards) - m, " %s (serial %s)", p[i].port, p[i].serial);
+                if (n == 2 && !L.ports[0]) snprintf(L.ports, sizeof(L.ports), "%s,%s", p[0].port, p[1].port);
+            }
+            nk_layout_row_end(ctx);
+            if (L.boards[0]) {
+                nk_layout_row_dynamic(ctx, 20, 1);
+                nk_label_colored(ctx, L.boards, NK_TEXT_LEFT, COL_DIMTEXT);
+            }
+        } else if (L.mode == MODE_SIMULATE)
+            field(ctx, "Fault", L.fault, sizeof(L.fault), 70, cw,
+                  "As --fault: IC26:removed, IC2.26:gnd, IC12:data0=1... (empty: the working board)");
+        nk_layout_row_dynamic(ctx, 24, 1);
+        nk_bool all = L.all;
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "After a stage that's wrong, capture the later ones too: more to go on (one that never comes "
+                            "ends it)");
+        if (nk_checkbox_label(ctx, "After a wrong stage, take the rest too", &all)) L.all = all;
+        nk_layout_row_dynamic(ctx, 8, 1);
+        nk_spacing(ctx, 1);
+        nk_layout_row_static(ctx, 34, 160, 2);
+        if (zx && (L.mode != MODE_REPLAY || L.folder[0])) {
+            if (color_button(ctx, "Start", COL_GO, nk_rgb(255, 255, 255))) start(machine);
+        } else nk_spacing(ctx, 1);
+        if (nk_button_label(ctx, "Close")) L.open = false;
+        nk_end(ctx);
+        return;
+    }
+
+    /* ---- a run: the stages, what to do now, its text */
+    stage_strip(ctx, st, cur, running);
+
     if (asking) {
+        nk_layout_row_dynamic(ctx, 6, 1);
+        nk_spacing(ctx, 1);
         nk_layout_row_dynamic(ctx, 40, 1);
         nk_label_colored_wrap(ctx, prompt, COL_HOVER);
-        nk_layout_row_static(ctx, 30, 220, 2);
-        if (nk_button_label(ctx, "Continue (Enter)")) answer(1);
+        nk_layout_row_static(ctx, 36, 180, 3);
+        if (color_button(ctx, "Continue (Enter)", COL_GO, nk_rgb(255, 255, 255))) answer(1);
         if (nk_button_label(ctx, "No")) answer(0);
+        if (color_button(ctx, "Stop", COL_STOP, nk_rgb(255, 255, 255))) {
+            pthread_mutex_lock(&L.mu);
+            L.stop = true;
+            pthread_cond_broadcast(&L.cv);
+            pthread_mutex_unlock(&L.mu);
+        }
         if (nk_input_is_key_pressed(&ctx->input, NK_KEY_ENTER) && !L.typing) answer(1);
     } else if (running) {
-        nk_layout_row_dynamic(ctx, 22, 1);
-        nk_label_colored(ctx, stopping ? "Stopping: at its next question, or when this capture or simulation ends..."
-                                       : "Running...", NK_TEXT_LEFT, COL_PULSE);
-    } else if (L.rc_text[0]) {
+        if (sign) {
+            /* ARMED (waiting) or TRIGGERED, big, and what to do now. */
+            nk_layout_row_dynamic(ctx, 70, 1);
+            struct nk_rect b;
+            if (nk_widget(&b, ctx)) {
+                struct nk_command_buffer *cv = nk_window_get_canvas(ctx);
+                struct nk_color fill = sign == 1 ? nk_rgb(200, 20, 20) : nk_rgb(240, 170, 0);
+                nk_fill_rect(cv, b, 6, fill);
+                nk_stroke_rect(cv, b, 6, 3, sign == 1 ? nk_rgb(255, 90, 80) : nk_rgb(255, 220, 120));
+                big_text(cv, ctx, b, sign == 1 ? "ARMED" : "TRIGGERED", sign == 1 ? nk_rgb(255, 255, 255) : nk_rgb(20, 20, 20));
+            }
+            nk_layout_row_dynamic(ctx, 48, 1);
+            if (nk_widget(&b, ctx) && doing[0]) {
+                struct nk_command_buffer *cv = nk_window_get_canvas(ctx);
+                bool shout = strlen(doing) <= 20;
+                if (shout) big_text(cv, ctx, b, doing, ink(COL_HOVER));
+                else text_centered(cv, ctx, b, doing, ink(COL_HOVER));
+            }
+        } else {
+            nk_layout_row_dynamic(ctx, 6, 1);
+            nk_spacing(ctx, 1);
+            char t[200];
+            snprintf(t, sizeof(t), "%s: %s", stage_label[cur],
+                     stopping ? "stopping, at its next question or when this capture or simulation ends..."
+                              : L.run_mode == MODE_ANALYSER ? "working..." : "simulating and comparing...");
+            nk_layout_row_dynamic(ctx, 22, 1);
+            nk_label_colored(ctx, t, NK_TEXT_LEFT, COL_PULSE);
+        }
+        nk_layout_row_static(ctx, 34, 160, 1);
+        if (!stopping && color_button(ctx, "Stop", COL_STOP, nk_rgb(255, 255, 255))) {
+            pthread_mutex_lock(&L.mu);
+            L.stop = true;
+            pthread_cond_broadcast(&L.cv);
+            pthread_mutex_unlock(&L.mu);
+        }
+    } else {
+        /* Done: the verdict, saving it, starting again. */
         nk_layout_row_dynamic(ctx, 22, 1);
         nk_label_colored(ctx, L.rc_text, NK_TEXT_LEFT, L.rc == 0 ? COL_TRACE : COL_FAULT);
         if (L.summary[0]) {
-            char s[480];
-            snprintf(s, sizeof(s), "Outlined on the board: %s", L.summary);
+            char t[480];
+            snprintf(t, sizeof(t), "Outlined on the board: %s", L.summary);
             nk_layout_row_dynamic(ctx, 40, 1);
-            nk_label_colored_wrap(ctx, s, COL_FAULT);
+            nk_label_colored_wrap(ctx, t, COL_FAULT);
         }
         if (L.run_mode != MODE_REPLAY) {
             /* Kept only if saved: the next run starts with an empty folder. */
@@ -562,9 +759,22 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             nk_label_colored(ctx, L.saved[0] ? L.saved : "Not saved: the next run starts afresh (Save keeps this one)",
                              NK_TEXT_LEFT, !strncmp(L.saved, "Saved", 5) ? COL_TRACE : COL_DIMTEXT);
         }
+        nk_layout_row_static(ctx, 34, 160, 3);
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "Clear these results and the outlines on the board, and choose what to diagnose next");
+        if (color_button(ctx, "New diagnosis", COL_GO, nk_rgb(255, 255, 255))) {
+            clear_results();
+            L.has_run = false;
+        }
+        if (L.nmarks) {
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "Close the window to see the board: the outlines stay (open it again from Diagnose)");
+            if (nk_button_label(ctx, "Show the board")) L.open = false;
+        }
+        if (nk_button_label(ctx, "Close")) L.open = false;
     }
 
-    /* What it printed, the newest at the bottom. */
+    /* What it printed, the newest at the bottom (or a clicked stage's). */
     struct nk_rect region = nk_window_get_content_region(ctx);
     float list_h = region.y + region.h - (ctx->current->layout->at_y + ctx->current->layout->row.height) -
                    ctx->style.window.spacing.y - 4;
@@ -575,11 +785,13 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         pthread_mutex_lock(&L.mu);
         const char *t = L.text ? L.text : "";
         size_t tl = L.len;
-        int lines = 0;
-        float lh = 16;
+        long jump = L.jump;
+        L.jump = -1;
+        float y = 0, jump_y = -1, lh = 16, gap = ctx->style.window.spacing.y;
         for (const char *line = t; line < t + tl; ) {
             const char *end = memchr(line, '\n', (size_t)(t + tl - line));
             size_t len = end ? (size_t)(end - line) : (size_t)(t + tl - line);
+            if (jump >= 0 && jump_y < 0 && line - t >= jump) jump_y = y;
             char buf[512];
             snprintf(buf, sizeof(buf), "%.*s", (int)(len < sizeof(buf) - 1 ? len : sizeof(buf) - 1), line);
             const struct nk_user_font *f = ctx->style.font;
@@ -595,14 +807,15 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             else if (buf[0] == ' ' && buf[1] == ' ' && isdigit((unsigned char)buf[2])) c = COL_PULSE;
             if (rows > 1) nk_label_colored_wrap(ctx, buf, ink(c));
             else nk_label_colored(ctx, buf, NK_TEXT_LEFT, ink(c));
-            lines += rows;
+            y += lh * rows + gap;
             if (!end) break;
             line = end + 1;
         }
         bool more = tl != L.shown_len;
         L.shown_len = tl;
         pthread_mutex_unlock(&L.mu);
-        if (more) sy = (nk_uint)(lines * (lh + ctx->style.window.spacing.y) + 100);   /* down to the newest */
+        if (jump_y >= 0) sy = (nk_uint)(jump_y > 4 ? jump_y - 4 : 0);
+        else if (more) sy = (nk_uint)(y + 100);   /* down to the newest */
         nk_group_end(ctx);
     }
     nk_end(ctx);

@@ -435,10 +435,13 @@ ULAs, Z80s, 74LS157 multiplexers and 4116 RAM chips.
 
 In the window: **Diagnose** > **Diagnose with the logic analyser...** (with
 a Spectrum on the bench). Press **Find boards** (the board nearest the
-Spectrum is the master, first), **Start**, and answer its questions with
-the buttons (hold the reset button, let go when it says Armed). The text
-comes into the window as it goes; at the end the chips to look at are
-outlined on the board, the first ones thick. Every run captures afresh
+Spectrum is the master, first), then the green **Start**, and answer its
+questions with the buttons (green **Continue**, red **Stop**). A row of
+boxes shows the stages (blue: now, green: OK, red: wrong; click one for
+its text). When it's waiting for the Spectrum it shows a big red
+**ARMED** and what to do (LET GO OF RESET), then **TRIGGERED** once it
+has captured. At the end the chips to look at are outlined on the board,
+the first ones thick; **New diagnosis** clears it all for the next board. Every run captures afresh
 into `last-diagnosis`; to keep one, type the board's name after
 `diagnosis-` under **Save as** and press **Save**. The same window
 diagnoses a saved folder of captures again, or the simulated board with a

@@ -3272,9 +3272,34 @@ static void make_vertical_font(void) {
     U.vfont = atlas.default_font;
 }
 
+/* The interface font three times the size, for the logic analyser
+ * window's ARMED and TRIGGERED (ui_big_font). */
+static struct nk_font *big_font;
+static void make_big_font(void) {
+    static struct nk_font_atlas atlas;
+    nk_font_atlas_init_default(&atlas);
+    nk_font_atlas_begin(&atlas);
+    struct nk_font *f = nk_font_atlas_add_default(&atlas, 39.0f, NULL);
+    int w = 0, h = 0;
+    const void *px = nk_font_atlas_bake(&atlas, &w, &h, NK_FONT_ATLAS_RGBA32);
+    if (!f || !px || w <= 0 || h <= 0) return;
+    sg_image img = sg_make_image(&(sg_image_desc){
+        .width = w, .height = h, .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .data.mip_levels[0] = { .ptr = px, .size = 4 * (size_t)w * h } });
+    sg_sampler smp = sg_make_sampler(&(sg_sampler_desc){ .min_filter = SG_FILTER_LINEAR, .mag_filter = SG_FILTER_LINEAR,
+                                                         .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE });
+    snk_image_t si = snk_make_image(&(snk_image_desc_t){
+        .texture_view = sg_make_view(&(sg_view_desc){ .texture = { .image = img } }), .sampler = smp });
+    nk_font_atlas_end(&atlas, snk_nkhandle(si), NULL);
+    nk_font_atlas_cleanup(&atlas);
+    big_font = f;
+}
+const struct nk_user_font *ui_big_font(void) { return big_font ? &big_font->handle : NULL; }
+
 void ui_init(board_t *b, const char *prg, const char *scope_pin) {
     U.trigger = true;
     make_vertical_font();
+    make_big_font();
     U.timebase = 1;
     U.last_zx = &machine_zx48;
     U.last_c64 = &machine_c64;

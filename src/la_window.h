@@ -13,7 +13,9 @@
 void la_window_open(void);
 bool la_window_is_open(void);
 /* For tests and screenshots (--la-window): open it and start at once,
- * SPEC "replay:FOLDER" or "simulate:FAULT|FOLDER" (FAULT may be empty). */
+ * SPEC "replay:FOLDER" or "simulate:FAULT|FOLDER" (FAULT may be empty);
+ * "demo:ask", "demo:armed", "demo:triggered" show how a run on the
+ * analyser looks, without one; anything else only opens it. */
 void la_window_open_test(const char *spec);
 void la_window_close(void);
 /* The window on the screen, so the board below ignores the mouse. */
