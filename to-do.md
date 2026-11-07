@@ -876,6 +876,16 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       held ("/RESET low all through", asked again: right), but that try's
       verdict ("/RESET is low all through, the CPU never starts") was left
       as item 1 although the second try was taken. Only the try used counts.
+      Happened again on diagnosis-i3-test5 (Issue 3B): the user saw /RESET
+      fine on the scope; the verdict said /RESET never works. HIGH PRIORITY:
+      it hides the real fault.
+- [ ] i3-test5's reset stage: fetches of 0000 every 2 T (02, 02, F3, F3):
+      the reset bouncing, not the ROM; it said "A read 02 at 0000: the ROM
+      holds F3". Same bounce rule as above.
+- [ ] i3-test5's real fault (replayed with a good reset.lac in its place):
+      the RAM test reads 4004 wrong (00 for 02), bits D0-D4 D6 D7 wrong
+      over the lower RAM: the shared parts, IC3/IC4 (MUX), IC1 (ULA), R1-R8;
+      the screen (stripes, white border) agrees with IC1. Check at the bench.
 - [ ] The clock rule before the CPU's: i1-test4 said "No clock" first, but
       the bus shows a dead Z80 (A0-A15 low, /RD and /WR low together, /M1
       and /HALT low, /BUSACK low with /BUSRQ high, as newtest1). The CPU's
