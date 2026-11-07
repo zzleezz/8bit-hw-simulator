@@ -795,6 +795,7 @@ int main(int argc, char **argv) {
         args.la.nfaults = args.nfaults;
         args.la.atlas = args.atlas_path;
         args.la.carts = args.carts;
+        la_set_options(args.options, args.noptions);
         return la_cli(&args.la);
     }
     if (args.merge_repairs || args.export_repairs || args.list_repairs || args.reread_repairs || args.repair_gaps) {

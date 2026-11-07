@@ -427,9 +427,25 @@ static void clear_results(void) {
     pthread_mutex_unlock(&L.mu);
 }
 
+/* The bench board's options, as "ID=VALUE", taken when a run starts. */
+static struct board *bench_board;
+void la_window_board(struct board *b) { bench_board = b; }
+static char opt_s[8][64];
+static const char *opt_p[8];
+
 static void start(const machine_t *m) {
     pthread_once(&once, init_sync);
     if (atomic_load(&L.running)) return;
+    int no = 0;
+    if (bench_board && bench_board->m == m)
+        for (int o = 0; o < m->noptions && no < 8; o++) {
+            int v = m->get_option(bench_board, o);
+            if (v < 0 || v >= m->options[o].nvalues) continue;
+            snprintf(opt_s[no], sizeof(opt_s[0]), "%s=%s", m->options[o].id, m->options[o].value_ids[v]);
+            opt_p[no] = opt_s[no];
+            no++;
+        }
+    la_set_options(opt_p, no);
     if (L.started_once) pthread_join(L.th, NULL);
     clear_results();
     pthread_mutex_lock(&L.mu);

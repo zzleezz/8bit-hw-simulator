@@ -8,6 +8,8 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+## V1.2 (2026-11-07)
+
 - Logic analyser diagnosis: no more "it's in the folder from before: use
   it?" at every stage. A run always captures afresh (the folder's earlier
   captures go first). In the window it works in `last-diagnosis`, and
@@ -75,6 +77,10 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   running, an address line that never changes while the ROM runs is a
   note, not a stuck line; the stack found in the ROM (the RAM test failed
   at its start) is named.
+- Logic analyser diagnosis: the board's options (Controls: RAM 16K, chips
+  fitted) are used for the working board it compares with, in the window
+  and with --option on the command line. A 16K board used to fail at the
+  upper RAM, compared with a 48K one. The header says "(RAM 16K)".
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

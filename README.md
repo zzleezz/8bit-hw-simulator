@@ -503,7 +503,8 @@ From the command line:
   `diagnosis.txt` (every comparison) go in DIR, replacing the ones from an
   earlier run there. `--la-screen PICTURE` adds the screen;
   `--la-check [N]` then checks its faults (N, 24 unless given) against
-  the captures.
+  the captures. `--option ram=16k` for a 16K board (the window takes the
+  board's options from the Controls): it is compared with a working 16K.
 - `--la-devices` lists the boards; `--la-capture FILE --la-trigger STAGE`
   takes one capture; `--la-info`, `--la-cycles`, `--la-compare FILE`
   read and compare captures (`.lac` or CSV, as the LogicAnalyzer program

@@ -8,6 +8,8 @@
 #include "atlas.h"
 #include "filedialog.h"
 #include <ctype.h>
+#include <strings.h>
+static struct board *la_new_board(const struct machine *m);
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -879,7 +881,7 @@ static const struct { uint16_t addr; bool read; const char *what; } milestones[]
 static const char *board_desc(const la_cli_t *o, char *out, int len);
 
 static int timeline(const la_cli_t *o) {
-    board_t *b = board_create(o->machine ? o->machine : &machine_zx48);
+    board_t *b = la_new_board(o->machine ? o->machine : &machine_zx48);
     for (int i = 0; i < o->nfaults; i++)
         if (!board_apply_fault_spec(b, o->faults[i])) { fprintf(stderr, "bad fault spec: %s\n", o->faults[i]); board_destroy(b); return 1; }
     if (!board_is_zx48(b)) { fprintf(stderr, "the timeline is for the Spectrum\n"); board_destroy(b); return 1; }
@@ -1518,6 +1520,54 @@ static void list_devices(void) {
     }
 }
 
+/* The board's options (Controls: RAM 16K, chips fitted...), "ID=VALUE" as
+ * --option takes them: every simulated board the diagnosis makes has them,
+ * so a 16K board is compared with a working 16K one. */
+static char la_opt[8][64];
+static int la_nopt;
+
+void la_set_options(const char *const *opts, int n) {
+    la_nopt = 0;
+    for (int i = 0; i < n && la_nopt < 8; i++)
+        if (opts[i] && opts[i][0]) snprintf(la_opt[la_nopt++], sizeof(la_opt[0]), "%s", opts[i]);
+}
+
+static bool la_apply_option(board_t *b, const char *spec) {
+    const machine_t *m = b->m;
+    size_t n = strcspn(spec, "=");
+    for (int o = 0; spec[n] && o < m->noptions; o++) {
+        if (strlen(m->options[o].id) != n || strncmp(m->options[o].id, spec, n)) continue;
+        for (int v = 0; v < m->options[o].nvalues; v++)
+            if (!strcasecmp(m->options[o].value_ids[v], spec + n + 1)) {
+                if (m->get_option(b, o) != v) m->set_option(b, o, v);
+                return true;
+            }
+    }
+    return false;
+}
+
+static board_t *la_new_board(const machine_t *m) {
+    board_t *b = board_create(m);
+    for (int i = 0; b && i < la_nopt; i++) la_apply_option(b, la_opt[i]);
+    return b;
+}
+
+/* "(RAM 16K)": the options not at their default, for the header. */
+static void options_text(const machine_t *m, char *out, int len) {
+    out[0] = 0;
+    board_t *b = la_new_board(m);
+    if (!b) return;
+    int k = 0;
+    for (int o = 0; o < m->noptions; o++) {
+        int v = m->get_option(b, o);
+        if (v > 0 && v < m->options[o].nvalues)
+            k += snprintf(out + k, (size_t)(len - k), "%s%s %s", k ? ", " : " (", m->options[o].name, m->options[o].values[v]);
+        if (k >= len - 2) break;
+    }
+    if (k) snprintf(out + k, (size_t)(len - k), ")");
+    board_destroy(b);
+}
+
 /* Which board is the master, by its USB serial number (the COM ports
  * change from PC to PC): la-boards.txt beside the program. */
 static void boards_file(char *out, int len) {
@@ -1851,7 +1901,7 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
 }
 
 static bool record_board(const la_cli_t *o, int post, int trig_addr, la_capture_t *c, char *err, int errlen) {
-    board_t *b = board_create(o->machine ? o->machine : &machine_zx48);
+    board_t *b = la_new_board(o->machine ? o->machine : &machine_zx48);
     for (int i = 0; i < o->nfaults; i++)
         if (!board_apply_fault_spec(b, o->faults[i])) {
             snprintf(err, errlen, "bad fault spec: %s", o->faults[i]);
@@ -2282,7 +2332,7 @@ static void where_text(const la_capture_t *c, char *out, int len) {
  * power on). */
 static bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int pre, int post, int trig, int arm_ms,
                        la_capture_t *c, char *err, int errlen) {
-    board_t *b = board_create(m);
+    board_t *b = la_new_board(m);
     for (int i = 0; i < nfaults; i++)
         if (!board_apply_fault_spec(b, faults[i])) {
             snprintf(err, errlen, "bad fault spec: %s", faults[i]);
@@ -2515,7 +2565,7 @@ static void mux_for_addr(const char *bank, const char *chips, int k, char *out, 
 
 /* What it points at, most likely first. */
 static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, const cmp_out_t *co, const char *where) {
-    vboard = board_create(m);
+    vboard = la_new_board(m);
     const char *cpu = ref_of("CPU"), *rom = ref_of("ROM"), *ula = ref_of("ULA");
     if (!cpu) cpu = "the CPU";
     if (!rom) rom = "the ROM";
@@ -3109,7 +3159,7 @@ static const char *const parts_heads[] = { "What to look at", "From the screen, 
                                            "From the check, what to look at" };
 
 int la_text_parts(const struct machine *m, const char *text, char (*ref)[16], int *level, int max) {
-    board_t *b = board_create(m);
+    board_t *b = la_new_board(m);
     if (!b) return 0;
     int n = 0, sec = 0, first_sec = -1, item = 0, kind = 0;
     bool in = false, note = false, taken = false;
@@ -3220,7 +3270,7 @@ static int screen_part(const la_cli_t *o, const machine_t *m, const char *bus_te
     bool healthy = r.groups[0].healthy;
     int nf = 0, np = 0;
     spart_t sp[96];
-    vboard = board_create(m);
+    vboard = la_new_board(m);
     const char *ula = ref_of("ULA");
     for (int g = 0; g < r.ngroups; g++) {
         const atlas_group_t *gr = &r.groups[g];
@@ -3346,7 +3396,7 @@ static void multi_step(board_t *b, void *ctx) {
  * for all, as the simulation goes the same way every time. GOT[s]: stage s
  * came. False if SPEC can't be put on the board. */
 static bool record_stages(const machine_t *m, const char *spec, const la_capture_t *d, int n, la_capture_t *out, bool *got) {
-    board_t *b = board_create(m);
+    board_t *b = la_new_board(m);
     if (spec[0] && !board_apply_fault_spec(b, spec)) { board_destroy(b); return false; }
     rec_t r[DIAG_NSTAGES + 1];
     memset(r, 0, sizeof(r));
@@ -3608,7 +3658,9 @@ static int diagnose_run(const la_cli_t *o) {
     }
     const char *how = o->replay ? "from the captures in the folder" :
                       o->simulate ? "of the simulated board" : "with the logic analyser";
-    printf("Diagnosing a %s, stage by stage, %s\n", m->board_name, how);
+    char opts_txt[160];
+    options_text(m, opts_txt, sizeof(opts_txt));
+    printf("Diagnosing a %s%s, stage by stage, %s\n", m->board_name, opts_txt, how);
     if (o->simulate) {
         printf("The board under test: the simulated %s", m->board_name);
         for (int i = 0; i < o->nfaults; i++) printf("%s%s", i ? " " : ", with ", o->faults[i]);
@@ -3764,19 +3816,22 @@ static int diagnose_run(const la_cli_t *o) {
     if (!fail_stage) {
         if (idle == 0) printf("Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.\n");
         if (passed == DIAG_NSTAGES) {
-            vboard = board_create(m);
+            vboard = la_new_board(m);
             const char *u = ref_of("ULA");
             char ula[32];
             snprintf(ula, sizeof(ula), "the ULA (%s)", u ? u : "IC1");
             board_destroy(vboard);
             vboard = NULL;
+            char bname[240], otx[160];
+            options_text(m, otx, sizeof(otx));
+            snprintf(bname, sizeof(bname), "%s%s", m->board_name, otx);
             if (o->screen)
                 printf("All %d stages are the same as a working %s: the CPU, the ROM and the start of BASIC are good, and\n"
                        "the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so\n"
                    "bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some\n"
                    "patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.\n"
                        "A wrong picture is then the ULA's video side: %s reads the screen\n"
-                       "over its own lines to the lower RAM, which the edge connector doesn't show.\n", passed, m->board_name, ula);
+                       "over its own lines to the lower RAM, which the edge connector doesn't show.\n", passed, bname, ula);
             else
             printf("All %d stages are the same as a working %s: the CPU, the ROM and the start of BASIC are good, and\n"
                    "the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so\n"
@@ -3788,7 +3843,7 @@ static int diagnose_run(const la_cli_t *o) {
                    "address and data lines to the lower RAM, which the edge connector doesn't show. Diagnose a\n"
                    "screenshot of it: the atlas has the ULA's outputs shorted and its pins bridged, though not every\n"
                    "fault inside the chip.\n",
-                   passed, m->board_name, ula);
+                   passed, bname, ula);
         }
         if (o->screen && screen_part(o, m, vtext, true) > 0) return 2;
         return 0;

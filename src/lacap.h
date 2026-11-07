@@ -121,6 +121,9 @@ int la_check(const la_cli_t *o);
  * la_boards_remember saves which is the master. */
 int la_boards(lp_port_t *p, int max, bool *known);
 bool la_boards_remember(const char *master, const char *slave);
+/* The board's options ("ram=16k", as --option), for every simulated board
+ * the diagnosis makes: set before la_cli. */
+void la_set_options(const char *const *opts, int n);
 int la_cli(const la_cli_t *o);
 /* The parts a diagnosis's text names, as the window outlines them: in the
  * items under "What to look at" and "From the screen, what to look at"

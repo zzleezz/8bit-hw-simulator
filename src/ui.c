@@ -2955,6 +2955,7 @@ void ui_frame(void) {
     probe_action_t pa;
     probe_window(ctx, nk_rect(0, 0, bw, H), U.b, bench_machine(), &pa);
     if (pa.show_pin >= 0) show_pin(pa.show_pin);
+    la_window_board(U.b);
     la_window(ctx, nk_rect(0, 0, bw, H), M());
     fault_menu(ctx);
     /* Start the statistics over (the drawing above read this frame's). */

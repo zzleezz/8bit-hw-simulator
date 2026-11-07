@@ -1,3 +1,28 @@
+######## real diagnosis-16k-i3b
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 84% of its pulses)
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 0038-162C (and the frame interrupt)
+  OK: the same as a working one
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  OK: the same as a working one
+2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  OK: the same as a working one
+3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  OK: the same as a working one (the RAM test passed 16K)
+4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+  OK: the same as a working one
+5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+  OK: the same as a working one
+6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  OK: the same as a working one
+Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2 (RAM 16K): the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-bad-ula-i3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 69% of its pulses)

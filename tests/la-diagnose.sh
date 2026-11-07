@@ -47,7 +47,8 @@ job() {
     kind=$1; f=$2
     if [ "$kind" = real ]; then
         n=real_$f
-        out=$("$EXE" --la-diagnose "$OUT/$n" --la-replay --la-all --board issue2 2>&1)
+        case $f in *16k*) opt="--option ram=16k";; *) opt=;; esac   # a 16K board, by its folder name
+        out=$("$EXE" --la-diagnose "$OUT/$n" --la-replay --la-all --board issue2 $opt 2>&1)
     elif [ "$kind" = screen ]; then
         n=screen_$(echo "$f" | tr ':.=@' '____')
         mkdir -p "$OUT/$n"
