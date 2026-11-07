@@ -827,9 +827,16 @@ Tonight (the user away, no manual tests):
       (item 1's thick orange, the rest thin yellow). Checked by screenshot
       (--la-window): log4 replayed (IC2 IC4 IC5 D2 IC26 outlined), the
       simulated IC2.26:gnd (IC2).
-- [ ] The GUI with the real analyser: its questions (the button
-      presses) are untested on the bench: run it once (the user).
-- [ ] 4. Merge logic-analyser into main and push.
+- [ ] The GUI with the real analyser (the user, at the bench): the
+      ARMED / LET GO OF RESET / TRIGGERED signs come from lapico's
+      "Armed" and "Triggered" (only shown with --la-window demo:... so
+      far), the stage boxes, Save as, New diagnosis; diagnose.bat's
+      "replace it?" question.
+- [x] 4. Merge logic-analyser into main and push (2026-11-07).
+- [x] No "in the folder from before: use it?" questions: a run captures
+      afresh (into last-diagnosis in the window), Save as keeps it.
+- [x] The window at the bench: stage boxes, ARMED / TRIGGERED, green
+      Start and Continue, red Stop, New diagnosis.
 Later, needs the user at the bench:
 - [ ] The idle stage on real faults: edge connector /WAIT to 0 V, then
       /BUSRQ to 0 V (both inputs with pull-ups: safe), the reset button
@@ -839,12 +846,15 @@ Later, needs the user at the bench:
       Make the screenshot matcher a last step of the same diagnosis.
 - [ ] More RAM tests (the user has more), more Z80s.
 Later, software:
-- [ ] Simulated IC4.9:gnd (lower RAM multiplexer) passes all six stages:
-      find out why the RAM test misses it.
-- [ ] The frame interrupt's ULA pin: /INT reaches the CPU through a
-      resistor, so only the ULA chip is named, not its pin.
-- [ ] Other Spectrum issues (1, 3B, 4A/4B, 6A): the diagnosis works from
-      each board's netlist but is tested on the Issue 2 only.
+- [x] Simulated IC4.9:gnd passes all six stages: rightly, IC4's third
+      section (pins 9-11) isn't connected on the Issue 2. Not a fault.
+- [x] The frame interrupt's ULA pin: now "IC1 pin 12, through R26" (and
+      R26 open named as a cause); R26:removed added to the regression.
+- [x] Other Spectrum issues: the working board and /RESET, /INT, /RD
+      faults simulated on the Issue 1, 3B, 4B and 6A: right, but the
+      working 16K Issue 1 failed ramdone (the RAM test's read of 8000,
+      no RAM there). Fixed: a read-back the working board gets wrong too
+      is no RAM, not a fault. Not on real boards yet (only the Issue 2).
 - [ ] The CLK shape as a hint of the ULA's version (the share of pulses
       the analyser sees: 85-90% on good ULAs).
 - [ ] The idle capture's stuck lines are left out of the verdict (a faulty

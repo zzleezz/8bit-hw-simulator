@@ -35,7 +35,7 @@ done > "$OUT/jobs.txt"
 for f in healthy IC2.26:gnd IC2.24:gnd IC2.25:gnd IC2.16:gnd IC3.4:gnd IC3.7:gnd IC1:nocontention IC1.19:gnd \
          IC8:data0=0 IC17:data0=1 IC10:flip@4005 IC5:data3=0 IC2.30:gnd IC2.12:gnd IC20:removed IC3:removed \
          IC2.5:gnd IC2.34:vcc IC12:data0=1 IC15:addr3 IC6:addr2 IC6:removed IC5:removed IC2.21:vcc IC2.22:gnd \
-         IC25:removed IC2:removed IC1:removed IC13:data0=0; do
+         IC25:removed IC2:removed IC1:removed IC13:data0=0 R26:removed; do
     echo "sim $f"
 done >> "$OUT/jobs.txt"
 

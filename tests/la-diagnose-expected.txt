@@ -1,3 +1,25 @@
+######## real diagnosis-board
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 85% of its pulses)
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 0038-0E66 (and the frame interrupt)
+  OK: the same as a working one
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  OK: the same as a working one
+2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  OK: the same as a working one
+3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  OK: the same as a working one (the RAM test passed all 48K)
+4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+  OK: the same as a working one
+5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+  OK: the same as a working one
+6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  OK: the same as a working one
+Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
+and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-cpu1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -412,6 +434,28 @@ What to look at, most likely first:
      line. What they share is the CPU (IC2) reading them (its data inputs, its timing), or the data bus
      as a whole: a chip driving it when it shouldn't (the ULA, IC1; the ROM, IC5), a short across it.
      Swap the CPU first.
+######## real diagnosis-test1
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 87% of its pulses)
+  /RESET: high
+  /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 0E4D-0E66
+  FAULT: something's wrong (below); the boot's stages next show more
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  OK: the same as a working one
+2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way (cycle 57)
+3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way (cycle 0)
+4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way (cycle 0)
+5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way (cycle 0)
+6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: it got there, but the bus shows something wrong
+The boot goes wrong at ramcheck (1 stage before it is good).
+What to look at, most likely first:
+  1. IC13, the lower RAM's bit D7 (4000-7FFF): it reads 1 where it should be 0 (29 reads, the first at 4000)
 ######## sim IC10:flip@4005
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 94% of its pulses)
@@ -666,7 +710,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 The boot goes wrong at copyright (3 stages before it are good).
 What to look at, most likely first:
   1. /INT (IC2 pin 16) is low all through, left running: a working one's goes low for 32 T every 20 ms.
-     It comes from the ULA (IC1): the ULA, or a short to 0 V on the line.
+     It comes from the ULA (IC1 pin 12, through R26): the ULA, R26 open (the line left floating), or a short to 0 V on the line.
 ######## sim IC2.21:vcc
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 100% of its pulses)
@@ -1000,6 +1044,25 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 The boot goes wrong at ramdone (2 stages before it are good).
 What to look at, most likely first:
   1. IC8, the lower RAM's bit D2 (4000-7FFF): it reads 0 where it should be 1 (5 reads, the first at 5CB2)
+######## sim R26:removed
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 97% of its pulses)
+  /RESET: high
+  /INT: low all through
+  The CPU: fetching from 0038-0324 (and the frame interrupt)
+  FAULT: something's wrong (below); the boot's stages next show more
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  OK: the same as a working one
+2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  OK: the same as a working one
+3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  OK: the same as a working one (the RAM test passed all 48K)
+4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+  It never came. When it should have, the CPU was fetching from 0038-0324 (and the frame interrupt)
+The boot goes wrong at copyright (3 stages before it are good).
+What to look at, most likely first:
+  1. /INT (IC2 pin 16) is low all through, left running: a working one's goes low for 32 T every 20 ms.
+     It comes from the ULA (IC1 pin 12, through R26): the ULA, R26 open (the line left floating), or a short to 0 V on the line.
 ######## sim healthy
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 94% of its pulses)

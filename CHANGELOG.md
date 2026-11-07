@@ -20,6 +20,11 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   Spectrum, TRIGGERED once captured; green Start and Continue, red Stop.
   The setup is hidden during a run, and **New diagnosis** clears the
   results and the outlines on the board.
+- Logic analyser diagnosis: the frame interrupt's verdict names the ULA's
+  pin through its resistor ("IC1 pin 12, through R26" on the Issue 1
+  and 2, and R26 open as a cause). A 16K Issue 1 no longer fails the RAM
+  test's end: its reads of 8000 (no RAM there, as on a working one) aren't
+  a fault. Checked, simulated, on the Issue 1, 3B, 4B and 6A.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

@@ -1085,16 +1085,33 @@ static bool ula_contended(const la_cycle_t *x) {
     return x->addr >= 0x4000 && x->addr < 0x8000;
 }
 
+/* The addresses where reads don't give back what was written (BAD[a] = 1):
+ * on a working board, where there's no RAM (8000-FFFF on a 16K one, which
+ * the ROM's RAM test writes to find where the RAM ends). */
+static void no_ram_cells(const la_cycle_t *cy, int n, unsigned char *bad) {
+    static short last[65536];
+    for (int k = 0; k < 65536; k++) last[k] = -1;
+    memset(bad, 0, 65536);
+    for (int k = 0; k < n; k++) {
+        const la_cycle_t *x = &cy[k];
+        if (x->addr < 0x4000) continue;
+        if (x->kind == LA_WRITE) last[x->addr] = (short)x->data;
+        else if ((x->kind == LA_READ || x->kind == LA_FETCH) && last[x->addr] >= 0 && last[x->addr] != x->data)
+            bad[x->addr] = 1;
+    }
+}
+
 /* RAM reads that don't give back what was written there earlier in the
  * same capture: a fault in the RAM (or its buffers, the multiplexers),
- * whatever the machine was doing. Prints up to SHOW of them. */
-static int ram_readback(const la_cycle_t *cy, int n, int show) {
+ * whatever the machine was doing; not at an address in SKIP (no RAM there:
+ * the working board's reads don't either). Prints up to SHOW of them. */
+static int ram_readback(const la_cycle_t *cy, int n, int show, const unsigned char *skip) {
     static short last[65536];
     for (int k = 0; k < 65536; k++) last[k] = -1;
     int bad = 0;
     for (int k = 0; k < n; k++) {
         const la_cycle_t *x = &cy[k];
-        if (x->addr < 0x4000) continue;
+        if (x->addr < 0x4000 || (skip && skip[x->addr])) continue;
         if (x->kind == LA_WRITE) last[x->addr] = (short)x->data;
         else if ((x->kind == LA_READ || x->kind == LA_FETCH) && last[x->addr] >= 0 && last[x->addr] != x->data) {
             if (bad < show)
@@ -1142,9 +1159,9 @@ static void print_info(const char *path, const la_capture_t *c, int count) {
     printf("\n%d bus cycles:", n);
     for (int k = 0; k < 7; k++) if (per[k]) printf(" %d %s", per[k], kind_names[k]);
     printf("\nROM reads that aren't what the ROM holds: %d\n", wrong);
-    int rb = ram_readback(cy, n, 0);
+    int rb = ram_readback(cy, n, 0, NULL);
     printf("RAM reads that don't give back what was written: %d\n", rb);
-    if (rb) ram_readback(cy, n, 5);
+    if (rb) ram_readback(cy, n, 5, NULL);
     /* The RAM test's result: the ROM keeps the top of the RAM it found
      * good in P-RAMT (5CB4); its last write here is the one that counts. */
     int lo_b = -1, hi_b = -1;
@@ -1338,9 +1355,16 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
                    rom_wrong(a, &ca[ia + j]) ? "  <- A's isn't the ROM's" : rom_wrong(b, &cb[ib + j]) ? "  <- B's isn't the ROM's" : "");
         }
     }
-    int rba = ram_readback(ca + ia, na - ia, 0), rbb = ram_readback(cb + ib, nb - ib, 0);
-    if (rba) { printf("%s: %d RAM reads don't give back what was written there:\n", an, rba); ram_readback(ca + ia, na - ia, 5); rc = 2; }
-    if (rbb) { printf("%s: %d RAM reads don't give back what was written there:\n", bn, rbb); ram_readback(cb + ib, nb - ib, 5); rc = 2; }
+    /* Where both read back wrong there's no RAM (a 16K machine's upper half). */
+    static unsigned char nra[65536], nrb[65536];
+    no_ram_cells(ca + ia, na - ia, nra);
+    no_ram_cells(cb + ib, nb - ib, nrb);
+    int both = 0;
+    for (int k = 0x4000; k < 65536; k++) both += nra[k] && nrb[k];
+    if (both) printf("%d addresses read back wrong on both: no RAM there on this machine (not a fault)\n", both);
+    int rba = ram_readback(ca + ia, na - ia, 0, nrb), rbb = ram_readback(cb + ib, nb - ib, 0, nra);
+    if (rba) { printf("%s: %d RAM reads don't give back what was written there:\n", an, rba); ram_readback(ca + ia, na - ia, 5, nrb); rc = 2; }
+    if (rbb) { printf("%s: %d RAM reads don't give back what was written there:\n", bn, rbb); ram_readback(cb + ib, nb - ib, 5, nra); rc = 2; }
     if (ndiff && !area[0] && (end || irq) && !rba && !rbb)
         printf("Only RAM data differ (counters, the stack's pushed registers): the state the machines were in, not a fault\n");
     if (irq) {
@@ -1925,6 +1949,14 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
     la_cycle_t *cy;
     int n = la_cycles(d, &cy);
     static short last[65536];
+    static unsigned char no_ram[65536];
+    memset(no_ram, 0, sizeof(no_ram));
+    if (r) {
+        la_cycle_t *cr;
+        int nr = la_cycles(r, &cr);
+        no_ram_cells(cr, nr, no_ram);
+        free(cr);
+    }
     unsigned last_fetch = 0;
     int pend_a = -1, pend_v = 0;
     for (int k = 0; k < 65536; k++) last[k] = -1;
@@ -1955,7 +1987,7 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
         /* The RAM test's read-back (11E2-11EE): a byte's first read, not 02. */
         if (x->kind == LA_READ && x->addr >= 0x4000 && last_fetch >= 0x11E2 && last_fetch <= 0x11EE && last[x->addr] < 0 &&
             x->data != 0x02 && e->rt_addr < 0) { e->rt_addr = x->addr; e->rt_got = x->data; }
-        if (x->addr < 0x4000) continue;
+        if (x->addr < 0x4000 || no_ram[x->addr]) continue;
         if (x->kind == LA_WRITE) last[x->addr] = (short)x->data;
         else if ((x->kind == LA_READ || x->kind == LA_FETCH) && last[x->addr] >= 0 && last[x->addr] != x->data) {
             ev_bits(e, x->addr, x->data, (unsigned)last[x->addr]);
@@ -2208,6 +2240,36 @@ static int pin_on(const char *ref, int sig) {
     return 0;
 }
 
+/* The same, or through a resistor in series (not a pull-up): the pin, and
+ * the resistor in VIA ("" if direct). The Issue 1 and 2's ULA drives /INT
+ * through R26. */
+static int pin_on_via(const char *ref, int sig, char *via, int vlen) {
+    via[0] = 0;
+    int pin = pin_on(ref, sig);
+    if (pin || !vboard || !ref) return pin;
+    int net[LA_NSIG];
+    find_nets(vboard, net, NULL);
+    if (net[sig] < 0) return 0;
+    sim_t *s = &vboard->sim;
+    int root = s->nets[net[sig]].root;
+    for (int i = 0; i < s->nparts; i++) {
+        const part_t *r = &s->parts[i];
+        if (r->npins != 2 || strcmp(board_part_kind_name(vboard, i), "resistor")) continue;
+        int r0 = s->pins[r->first_pin].root, r1 = s->pins[r->first_pin + 1].root;
+        int other = r0 == root ? r1 : r1 == root ? r0 : -1;
+        if (other < 0 || board_net_supply(vboard, other) != RAIL_NONE) continue;
+        for (int k = 0; k < s->nparts; k++) {
+            if (strcmp(s->parts[k].ref, ref)) continue;
+            for (int j = 0; j < s->parts[k].npins; j++)
+                if (s->pins[s->parts[k].first_pin + j].root == other) {
+                    snprintf(via, vlen, "%s", r->ref);
+                    return s->pins[s->parts[k].first_pin + j].number;
+                }
+        }
+    }
+    return 0;
+}
+
 static const char *bits_way(const ev_t *e, int ar, int bit) {
     if (!e->high[ar][bit]) return "reads 0 where it should be 1";
     if (!e->low[ar][bit]) return "reads 1 where it should be 0";
@@ -2384,17 +2446,21 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
     }
     /* Left running: the frame interrupt (the ULA's, every 20 ms) and HALT. */
     {
-        int ip = pin_on(ula, LA_INT);
-        char up[48];
-        if (ip) snprintf(up, sizeof(up), "%s pin %d", ula ? ula : "the ULA", ip);
+        char via[16], vtxt[64];
+        int ip = pin_on_via(ula, LA_INT, via, sizeof(via));
+        char up[64];
+        if (ip && via[0]) snprintf(up, sizeof(up), "%s pin %d, through %s", ula ? ula : "the ULA", ip, via);
+        else if (ip) snprintf(up, sizeof(up), "%s pin %d", ula ? ula : "the ULA", ip);
         else snprintf(up, sizeof(up), "%s", ula ? ula : "the ULA");
         if (e->held[LA_INT])
             printf("  %d. /INT (%s pin 16) is low all through, left running: a working one's goes low for 32 T every 20 ms.\n"
-                   "     It comes from the ULA (%s): the ULA, or a short to 0 V on the line.\n", ++n, cpu, up);
+                   "     It comes from the ULA (%s): the ULA, %sor a short to 0 V on the line.\n", ++n, cpu, up,
+                   via[0] ? (snprintf(vtxt, sizeof(vtxt), "%s open (the line left floating), ", via), vtxt) : "");
         else if (int_wrong(e) && !e->int_n)
             printf("  %d. No frame interrupt: /INT (%s pin 16) never goes low in %d ms, left running; a working one's does\n"
-                   "     %d times (every 20 ms). It comes from the ULA (%s): the ULA, or the line broken. Without it\n"
-                   "     the keyboard isn't read.\n", ++n, cpu, e->slow_ms, e->int_ref, up);
+                   "     %d times (every 20 ms). It comes from the ULA (%s): the ULA, %s Without it\n"
+                   "     the keyboard isn't read.\n", ++n, cpu, e->slow_ms, e->int_ref, up,
+                   via[0] ? (snprintf(vtxt, sizeof(vtxt), "%s open, or the line broken.", via), vtxt) : "or the line broken.");
         else if (int_wrong(e))
             printf("  %d. The frame interrupt: /INT goes low %d times in %d ms, left running, a working one's %d (every 20 ms).\n"
                    "     It comes from the ULA (%s): its timing, or something else pulling the line.\n", ++n,
