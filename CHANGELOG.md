@@ -69,6 +69,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   with a faulty IC22 (upper RAM, D7) booted and passed, while ZX
   Diagnostics failed it. The verdict says so and points to a full RAM
   test.
+- Logic analyser diagnosis: CLK reading stuck at the edge connector while
+  the CPU runs the ROM's code now names the ULA's weak clock output (a
+  real Issue 2: 1.4 V there, a new ULA fixed it), not "no clock". Left
+  running, an address line that never changes while the ROM runs is a
+  note, not a stuck line; the stack found in the ROM (the RAM test failed
+  at its start) is named.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

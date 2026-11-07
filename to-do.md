@@ -719,6 +719,17 @@ and will take the captures; Pico model to be agreed with Jim.
       01 and 00 only, so bits D2-D7 never hold a 1. The "All 6 stages"
       text no longer says "all of the RAM ... good": it says the ROM's test
       is weak and to run a full RAM test.
+- [x] diagnosis-issue2-has-clk-and-addr15 (2026-11-07, CONFIRMED: a bad
+      ULA, a new one fixed it): said "no clock" and "A15 stuck low". The
+      user measured CLK at the edge connector at about 1.4 V (the ULA's
+      pin 32 output, weak; the CPU still ran, clocked through the
+      transistor) and saw A15 busy just after reset, then low. Fixed: CLK
+      read stuck while the CPU fetches the ROM's own bytes (100 or more)
+      names the ULA's weak clock output first; left running with the ROM
+      running, address/data lines that never change are a note (where the
+      code runs), not stuck; writes to 0000-3FFF (its stack in the ROM, the
+      RAM test failed at 4000) count as a fault. The swapped boards still
+      read as swapped (no ROM fetches right there).
 - [ ] First test program for the cartridge idea below: the ZX Diagnostics
       ROM itself (carts/zx-diagnostics-v0.37.rom, already in the
       simulator). Captured on the real board from the Dandanator, compared

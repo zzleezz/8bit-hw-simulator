@@ -1930,6 +1930,10 @@ typedef struct {
     bool in_reset;                                  /* /RESET low all through: taken while it was held */
     int clk_pct;                                    /* CLK rises seen, % of 3.5 MHz (-1 not known) */
     int clk_stopped;                                /* a later capture: CLK stuck (1 low, 2 high), the CPU stopped */
+    int clk_edge;                                   /* CLK read stuck (1 low, 2 high) while the CPU ran the ROM right */
+    bool rom_runs;                                  /* the CPU fetched the ROM's own bytes (100 or more) */
+    int rom_writes;                                 /* writes to 0000-3FFF (the ROM: a stack there) */
+    int idle_still[LA_NSIG];                        /* left running, the ROM running: never changed (1 low, 2 high) */
     /* The keyboard (port FE reads): how many, which half rows were read
      * (bit r: A8+r low), and per line KB0-KB4 the half rows it read low on
      * (a key down; a working board on the bench has none). */
@@ -1982,6 +1986,7 @@ static void ev_merge(ev_t *e, const ev_t *f) {
     }
     if (e->rt_addr < 0) { e->rt_addr = f->rt_addr; e->rt_got = f->rt_got; }
     if (f->clk_pct >= 0 && (e->clk_pct < 0 || f->clk_pct < e->clk_pct)) e->clk_pct = f->clk_pct;
+    if (f->clk_edge) e->clk_edge = f->clk_edge;
     if (!e->clk_stopped) e->clk_stopped = f->clk_stopped;
 }
 
@@ -2199,8 +2204,22 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
             }
     }
     contention_ev(e, d, cy, n);
+    int rom_ok = 0;                     /* fetches from the ROM that are its bytes: the CPU really runs */
+    {
+        const uint8_t *rom = zx48_rom_image();
+        for (int k = 0; k < n; k++) {
+            rom_ok += cy[k].kind == LA_FETCH && cy[k].addr < 0x4000 && rom[cy[k].addr] == cy[k].data;
+            e->rom_writes += cy[k].kind == LA_WRITE && cy[k].addr < 0x4000;
+        }
+    }
     free(cy);
     e->in_reset = (d->have >> LA_RESET & 1) && line_state(d, LA_RESET) == 1 && !cpu_busy(d);
+    /* The CPU runs the ROM's code, so it has a clock, whatever the edge
+     * connector's CLK pin reads (B8 is the ULA's side of the clock, not
+     * the CPU's pin): a note, not a stopped clock. (The analyser's boards
+     * swapped read CLK stuck too, but then nothing fetches the ROM right.) */
+    bool runs_rom_ok = rom_ok >= 100;
+    e->rom_runs = runs_rom_ok;
     if ((d->have >> LA_CLK & 1) && d->freq > 0 && line_state(d, LA_CLK) < 0) {
         int from = la_start(d), rises = 0;
         for (int i = from + 1; i < d->n; i++) rises += !lo(d->s[i], LA_CLK) && lo(d->s[i - 1], LA_CLK);
@@ -2221,6 +2240,11 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
             line_changes(r, s, &cr, &hr);
             if (cd <= 20 && cr >= 1000) { e->stuck[s] = hd ? 2 : 1; e->nearly[s] = cd; }
         }
+    }
+    if (runs_rom_ok && e->stuck[LA_CLK]) {
+        e->clk_edge = e->stuck[LA_CLK];
+        e->stuck[LA_CLK] = 0;
+        e->nearly[LA_CLK] = 0;
     }
 }
 
@@ -2841,7 +2865,7 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
                above ? ", from what's above" : ": the boot's stages show where");
     }
     if (!n) {
-        if (idle_st)
+        if (idle_st && !e->clk_edge && e->rom_writes < 50)
             printf("  No one part shows: left running, the CPU was %s.\n", where && where[0] ? where : "somewhere else");
         else if (missing)
             printf("  No one part shows in the captures: %s never came. When it should have, the CPU was %s.\n"
@@ -2856,6 +2880,31 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
         }
     }
 done:
+    if (e->clk_edge && !e->stuck[LA_CLK]) {
+        printf("  %d. %s, the ULA: its clock output is weak. The edge connector's CLK (B8) is the ULA's pin 32 and reads\n"
+               "     stuck %s, though the CPU ran the ROM's code (it gets its clock through a transistor, so it runs).\n"
+               "     A working ULA's reads fine there. Measure B8 or the ULA's pin 32: a real Issue 2 had 1.4 V there,\n"
+               "     and a new ULA fixed it (the ULA drives the lower RAM as well, so that can fail with it).\n", ++n,
+               ula ? ula : "The ULA", e->clk_edge == 1 ? "low" : "high");
+    }
+    if (idle_st) {
+        char still[200] = "";
+        int ns = 0, m2 = 0;
+        for (int k = 0; k < LA_NSIG; k++)
+            if (e->idle_still[k] && m2 < (int)sizeof(still) - 20)
+                m2 += snprintf(still + m2, sizeof(still) - m2, "%s%s (always %s)", ns++ ? ", " : "", la_signal_name(k),
+                               e->idle_still[k] == 1 ? "low" : "high");
+        if (e->rom_writes >= 50)
+            printf("  %d. Left running, the CPU writes to the ROM (0000-3FFF) %d times: its stack is there. The ROM's RAM\n"
+                   "     test sets the top of RAM below the first byte that fails it, so the RAM failed it at or near its\n"
+                   "     start (4000): the lower RAM (4000-7FFF), the chips all of it shares (the ULA %s, the multiplexers),\n"
+                   "     or one chip's bit there. The boot's stages (the RAM test) name it: run them.\n", ++n, e->rom_writes,
+                   ula ? ula : "");
+        if (ns)
+            printf("  Note: left running, %s never changed. With the CPU running the ROM's code that is where it runs, not\n"
+                   "     a stuck line (a 48K whose RAM test failed the upper RAM never goes above 8000): the boot's stages\n"
+                   "     show the lines working or not.\n", still);
+    }
     board_destroy(vboard);
     vboard = NULL;
     return n;
@@ -2991,10 +3040,22 @@ static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev
     where_text(&f, ie->idle_where, sizeof(ie->idle_where));
     if (have_slow) slow_ev(ie, &sl, &rs);
     ie->idle = 1;
+    /* Left running with the CPU running the ROM's code, an address or data
+     * line that never changes is where the code runs (a 48K whose RAM test
+     * failed the upper RAM never goes above 8000), not proof of a stuck line. */
+    if (ie->rom_runs)
+        for (int k = 0; k < LA_NSIG; k++)
+            if (ie->stuck[k] && ((k >= LA_A0 && k <= LA_A15) || (k >= LA_D0 && k <= LA_D7))) {
+                ie->idle_still[k] = ie->stuck[k];
+                ie->stuck[k] = 0;
+            }
     la_free(&f); la_free(&rf); la_free(&rs);
     if (have_slow) la_free(&sl);
     /* What it shows. */
     if (ie->stuck[LA_CLK]) printf("  CLK: stuck %s\n", ie->stuck[LA_CLK] == 1 ? "low" : "high");
+    else if (ie->clk_edge)
+        printf("  CLK: reads stuck %s at the edge connector, but the CPU runs the ROM's code, so it has its clock\n",
+               ie->clk_edge == 1 ? "low" : "high");
     else if (ie->clk_pct >= 0) printf("  CLK: running (the analyser sees %d%% of its pulses)\n", ie->clk_pct);
     if (ie->in_reset) printf("  /RESET: low all through\n");
     else if (ie->rst_pulses) printf("  /RESET: goes low %d time%s in %d ms\n", ie->rst_pulses, ie->rst_pulses == 1 ? "" : "s", ie->slow_ms);
@@ -3006,6 +3067,7 @@ static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev
         if (ie->held[k] && k != LA_RESET && k != LA_INT) printf("  %s: low all through\n", la_signal_name(k));
     printf("  The CPU: %s\n", ie->idle_where);
     bool dead = idle_dead(ie), bad = dead || ev_any(ie);
+    if (!bad && ie->rom_writes >= 50) bad = true;      /* its stack in the ROM: never on a working one */
     if (!bad && (strstr(ie->idle_where, "astray") || strstr(ie->idle_where, "not running") || strstr(ie->idle_where, "not one instruction"))) bad = true;
     if (!bad) { printf("  OK: the same as a working one\n"); return 0; }
     if (dead) { printf("  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)\n"); return 2; }

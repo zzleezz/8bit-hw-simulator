@@ -488,6 +488,28 @@ What to look at, most likely first:
      IC25 (MUX), IC24 (NAND), IC26 (MUX), IC23 (OR)
      The RAM test (the ROM's own, at the switch on) stopped at 8000, in the upper RAM; a working one's goes to FFFF.
      There it read 06, wrote 05, read 05, wrote 04; a working one's reads 02, writes 01, reads 01, writes 00.
+######## real diagnosis-issue2-has-clk-and-addr15
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: reads stuck low at the edge connector, but the CPU runs the ROM's code, so it has its clock
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 0008-2244
+  FAULT: something's wrong (below); the boot's stages next show more
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  Not in the folder (reset.lac): the diagnosis stops here
+The boot's 0 stages are the same as a working one's, but left running it isn't.
+What to look at, most likely first:
+  1. IC1, the ULA: its clock output is weak. The edge connector's CLK (B8) is the ULA's pin 32 and reads
+     stuck low, though the CPU ran the ROM's code (it gets its clock through a transistor, so it runs).
+     A working ULA's reads fine there. Measure B8 or the ULA's pin 32: a real Issue 2 had 1.4 V there,
+     and a new ULA fixed it (the ULA drives the lower RAM as well, so that can fail with it).
+  2. Left running, the CPU writes to the ROM (0000-3FFF) 374 times: its stack is there. The ROM's RAM
+     test sets the top of RAM below the first byte that fails it, so the RAM failed it at or near its
+     start (4000): the lower RAM (4000-7FFF), the chips all of it shares (the ULA IC1, the multiplexers),
+     or one chip's bit there. The boot's stages (the RAM test) name it: run them.
+  Note: left running, A15 (always low) never changed. With the CPU running the ROM's code that is where it runs, not
+     a stuck line (a 48K whose RAM test failed the upper RAM never goes above 8000): the boot's stages
+     show the lines working or not.
 ######## real diagnosis-issue2-one-pulled-chip
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -638,7 +660,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0E4D-0E66
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -702,7 +724,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -742,7 +764,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -792,7 +814,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -825,7 +847,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -851,7 +873,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -1036,7 +1058,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   FAULT: it got there, but the bus shows something wrong
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
@@ -1118,7 +1140,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
-  FAULT: something's wrong (below); the boot's stages next show more
+  OK: the same as a working one
 1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
   OK: the same as a working one
 2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
