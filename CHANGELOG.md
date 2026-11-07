@@ -44,6 +44,13 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   working board 2). A minute or two on half the processors.
 - Simulated boards can be recorded on several threads at once (the step
   hook is the board's own, not one for the program).
+- Logic analyser diagnosis: working boards no longer fail the reset
+  stage. /RESET rises slowly, so the analyser can see it low all through
+  while the CPU runs: it now counts as held only when the CPU is still
+  (before, "/RESET is low all through, the CPU never starts", and a
+  needless "hold it, once more"). The reset button's bounce (the CPU
+  starting again from 0000, up to 140 times) is skipped: the stage is
+  compared from the last restart.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

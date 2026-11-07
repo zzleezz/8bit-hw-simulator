@@ -868,24 +868,22 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
 - [ ] Swapped-boards check after the idle capture: CLK dead with /WAIT and
       /BUSRQ low and nonsense on the bus -> "the boards look the wrong way
       round: press Swap", not a fault verdict. (Test: diagnosis-i2-test2.)
-- [ ] The reset stage on a working board (i2-test3): the button bounced on
-      release, the CPU started again at cycle 52 (fetch 0000) and it said
-      FAULT. A restart from 0000 soon after the reset should be taken as a
-      bounce: take that stage again, or compare from the last restart.
-- [ ] The same run: the first reset try was taken with the button still
-      held ("/RESET low all through", asked again: right), but that try's
-      verdict ("/RESET is low all through, the CPU never starts") was left
-      as item 1 although the second try was taken. Only the try used counts.
-      Happened again on diagnosis-i3-test5 (Issue 3B): the user saw /RESET
-      fine on the scope; the verdict said /RESET never works. HIGH PRIORITY:
-      it hides the real fault.
-- [ ] i3-test5's reset stage: fetches of 0000 every 2 T (02, 02, F3, F3):
-      the reset bouncing, not the ROM; it said "A read 02 at 0000: the ROM
-      holds F3". Same bounce rule as above.
-- [ ] i3-test5's real fault (replayed with a good reset.lac in its place):
-      the RAM test reads 4004 wrong (00 for 02), bits D0-D4 D6 D7 wrong
-      over the lower RAM: the shared parts, IC3/IC4 (MUX), IC1 (ULA), R1-R8;
-      the screen (stripes, white border) agrees with IC1. Check at the bench.
+- [x] The reset stage on a working board (i2-test3): the button bounced on
+      release, the CPU started again from 0000 (17 times in that capture,
+      143 in i3-test5's) and it said FAULT, or wrong ROM reads. Fixed: the
+      reset stage is compared from the last restart that leaves 300 bus
+      cycles, and its error counts skip the cycles before it.
+- [x] "/RESET is low all through, the CPU never starts" on boards whose
+      reset works (i2-test3, i3-test5; the user's scope showed it fine).
+      Not the first try's verdict left over, as first thought: /RESET rises
+      slowly (a capacitor) and the analyser saw it low for the whole 6.9 ms
+      while the CPU ran thousands of cycles. Fixed: /RESET counts as held
+      only when the CPU is still (/MREQ not going low), in the stages, the
+      idle capture and the "hold it, once more" question.
+- [ ] i3-test5's real fault (now named by its own replay, reset OK): the
+      RAM test reads 4004 wrong (00 for 02), bits D0-D4 D6 D7 wrong over
+      the lower RAM: the shared parts, IC3/IC4 (MUX), IC1 (ULA), R1-R8; the
+      screen (stripes, white border) agrees with IC1. Check at the bench.
 - [ ] The clock rule before the CPU's: i1-test4 said "No clock" first, but
       the bus shows a dead Z80 (A0-A15 low, /RD and /WR low together, /M1
       and /HALT low, /BUSACK low with /BUSRQ high, as newtest1). The CPU's

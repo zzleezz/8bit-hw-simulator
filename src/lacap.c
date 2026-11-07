@@ -1235,9 +1235,38 @@ static int at_trigger(const la_cycle_t *cy, int n, const la_capture_t *c, int ad
     return -1;
 }
 
-static int first_fetch0(const la_cycle_t *cy, int n) {
-    for (int k = 0; k < n; k++) if (cy[k].kind == LA_FETCH && cy[k].addr == 0) return k;
-    return 0;
+/* The reset's first fetch from 0000. The button bounces as it's let go
+ * (for a few ms): the CPU starts again from 0000 each time, and a working
+ * ROM never goes back there in the boot's first ms. So it's the last
+ * restart that runs the ROM's code right after it (a CPU going astray
+ * reaches 0000 too, on garbage: not a bounce) and leaves enough to compare
+ * (300 bus cycles); the restarts before it: *restarts (may be NULL). */
+#define BOUNCE_MIN_AFTER 300
+static bool runs_rom(const la_cycle_t *cy, int n, int k) {
+    const uint8_t *rom = zx48_rom_image();
+    int seen = 0, right = 0;
+    for (int j = k; j < n && seen < 20; j++) {
+        if (cy[j].kind != LA_FETCH && cy[j].kind != LA_READ) continue;
+        if (cy[j].addr >= 0x4000) continue;
+        seen++;
+        right += rom[cy[j].addr] == cy[j].data;
+    }
+    return seen >= 8 && right * 10 >= seen * 9;
+}
+static int first_fetch0_n(const la_cycle_t *cy, int n, int *restarts) {
+    int first = -1, use = -1, before = 0, k0 = 0;
+    for (int k = 0; k < n && n - k >= BOUNCE_MIN_AFTER; k++)
+        if (cy[k].kind == LA_FETCH && cy[k].addr == 0) {
+            if (first < 0) first = k;
+            if (k > first && runs_rom(cy, n, k)) { use = k; before = k0; }
+            k0++;
+        }
+    if (use < 0) {                      /* no bounce: the first one */
+        if (restarts) *restarts = 0;
+        return first < 0 ? 0 : first;
+    }
+    if (restarts) *restarts = before;
+    return use;
 }
 
 /* Without the refresh cycles (unless asked). */
@@ -1273,9 +1302,13 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
     int ia, ib;
     char from[64] = "";
     if (align < 0 || align == 0xFFFF) {
-        ia = first_fetch0(ca, na);
-        ib = first_fetch0(cb, nb);
-        if (ia || ib) snprintf(from, sizeof(from), ", from the first fetch at 0000");
+        int ra = 0, rb = 0;
+        ia = first_fetch0_n(ca, na, &ra);
+        ib = first_fetch0_n(cb, nb, &rb);
+        if (ra || rb)
+            printf("The CPU started again from 0000 %d time%s just after the reset (the reset button bouncing as\n"
+                   "it's let go): compared from the last start\n", ra + rb, ra + rb == 1 ? "" : "s");
+        if (ia || ib) snprintf(from, sizeof(from), ", from the %s fetch at 0000", ra || rb ? "last" : "first");
     } else {
         ia = at_trigger(ca, na, a, align);
         ib = at_trigger(cb, nb, b, align);
@@ -1960,6 +1993,17 @@ static int pramt_of(const la_cycle_t *cy, int n) {
 }
 
 /* A line that never changes in D from the reset (or the start) on. */
+/* The CPU is doing something in C (its /MREQ keeps going low). /RESET
+ * rises slowly (a capacitor): the Z80 runs well before the analyser sees
+ * the line high, so a /RESET that reads low all through, with the CPU
+ * busy, wasn't held. */
+static bool cpu_busy(const la_capture_t *c) {
+    if (!(c->have >> LA_MREQ & 1)) return false;
+    int k = 0;
+    for (int i = 1; i < c->n && k < 50; i++) k += lo(c->s[i], LA_MREQ) && !lo(c->s[i - 1], LA_MREQ);
+    return k >= 50;
+}
+
 static int line_state(const la_capture_t *c, int s) {
     int from = la_start(c);
     if (from >= c->n) return -1;
@@ -1981,9 +2025,16 @@ static void line_changes(const la_capture_t *c, int sg, int *changes, int *mostl
 }
 
 /* The evidence in D (the board under test) against R (a working one). */
+static int first_fetch0_n(const la_cycle_t *cy, int n, int *restarts);
 static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
     la_cycle_t *cy;
     int n = la_cycles(d, &cy);
+    /* The reset's capture: not the cycles the button's bounce cut short
+     * (before the last restart). */
+    if (n > 0 && (d->trig_addr < 0 || d->trig_addr == 0xFFFF)) {
+        int k0 = first_fetch0_n(cy, n, NULL);
+        if (k0 > 0) { memmove(cy, cy + k0, (size_t)(n - k0) * sizeof(*cy)); n -= k0; }
+    }
     static short last[65536];
     static unsigned char no_ram[65536];
     memset(no_ram, 0, sizeof(no_ram));
@@ -2061,7 +2112,7 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
     }
     contention_ev(e, d, cy, n);
     free(cy);
-    e->in_reset = (d->have >> LA_RESET & 1) && line_state(d, LA_RESET) == 1;
+    e->in_reset = (d->have >> LA_RESET & 1) && line_state(d, LA_RESET) == 1 && !cpu_busy(d);
     if ((d->have >> LA_CLK & 1) && d->freq > 0 && line_state(d, LA_CLK) < 0) {
         int from = la_start(d), rises = 0;
         for (int i = from + 1; i < d->n; i++) rises += !lo(d->s[i], LA_CLK) && lo(d->s[i - 1], LA_CLK);
@@ -2767,6 +2818,7 @@ static void slow_ev(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
     static const int ctl[] = { LA_RESET, LA_WAIT, LA_BUSRQ, LA_INT, LA_HALT };
     for (int k = 0; k < 5; k++)
         if ((r->have >> ctl[k] & 1) && low_all(d, ctl[k]) && !low_all(r, ctl[k])) e->held[ctl[k]] = 1;
+    if (e->held[LA_RESET] && cpu_busy(d)) e->held[LA_RESET] = 0;     /* the slow rise, not held */
     if (e->held[LA_RESET]) e->in_reset = true;
     else e->rst_pulses = falls(d, LA_RESET);
     if ((d->have >> LA_INT & 1) && (r->have >> LA_INT & 1)) { e->int_n = falls(d, LA_INT); e->int_ref = falls(r, LA_INT); }
@@ -3487,7 +3539,7 @@ static int diagnose_run(const la_cli_t *o) {
         if (!have_r) { la_err(err); la_free(&d); return 1; }
         /* Taken while the button was still held (the lines float then)?
          * Once more, if it's the analyser. */
-        if (got && boot && !o->replay && !o->simulate && (d.have >> LA_RESET & 1) && line_state(&d, LA_RESET) == 1 &&
+        if (got && boot && !o->replay && !o->simulate && (d.have >> LA_RESET & 1) && line_state(&d, LA_RESET) == 1 && !cpu_busy(&d) &&
             want_enter("/RESET was low all through: that was while the button was held. Once more: hold it, press Enter,\n"
                        "and let go as soon as it says Armed (or type n, Enter to go on with this one)\n")) {
             la_capture_t d2;
