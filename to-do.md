@@ -855,6 +855,48 @@ Later, needs the user at the bench:
       the good board's captures).
 - [ ] At the bench: the Screen row live (Paste after a run, Pick a type,
       the check button), and Save as keeping screen.png.
+From the first bench run on another PC (2026-11-07; folders
+diagnosis-i1-test1/-test4, diagnosis-i2-test2 (boards swapped) and
+diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
+- [ ] Master/slave: Find boards takes Windows' order, so on the other PC
+      the boards came swapped (COM4/COM5) and a working Issue 2 read as
+      "CLK stuck, /WAIT /BUSRQ low, /INT 12937 times". Remember the master
+      by its USB serial (ours: 31F0A0454251873A), show "COMx = master
+      (serial ...)", a Swap button; a new pair set up once (master plugged
+      in first). This is the to-do section 10 "Setup for anyone's boards"
+      item, never built.
+- [ ] Swapped-boards check after the idle capture: CLK dead with /WAIT and
+      /BUSRQ low and nonsense on the bus -> "the boards look the wrong way
+      round: press Swap", not a fault verdict. (Test: diagnosis-i2-test2.)
+- [ ] The reset stage on a working board (i2-test3): the button bounced on
+      release, the CPU started again at cycle 52 (fetch 0000) and it said
+      FAULT. A restart from 0000 soon after the reset should be taken as a
+      bounce: take that stage again, or compare from the last restart.
+- [ ] The same run: the first reset try was taken with the button still
+      held ("/RESET low all through", asked again: right), but that try's
+      verdict ("/RESET is low all through, the CPU never starts") was left
+      as item 1 although the second try was taken. Only the try used counts.
+- [ ] The clock rule before the CPU's: i1-test4 said "No clock" first, but
+      the bus shows a dead Z80 (A0-A15 low, /RD and /WR low together, /M1
+      and /HALT low, /BUSACK low with /BUSRQ high, as newtest1). The CPU's
+      own impossible states should name the CPU next to (or before) the
+      clock. Also: the edge connector's CLK (B8) is the ULA's /CK (pin 32),
+      not the CPU's pin 6 (that comes through the transistor), so "CLK
+      (IC2's pin 6)" in the verdict is wrong: say B8 / ULA pin 32 and that
+      the CPU's own clock can still be there.
+- [ ] Screen matcher, bars: the real i1-test4 screen (2 white and 2 black
+      bars, 64 px, white first, blue border, faint lines in the black bars)
+      matched "32 bars, 2 px wide" at 63%. The atlas has "2 of them, 64
+      pixels wide" (black first) but the matcher compares positions, so a
+      picture shifted by one bar scores nothing. Compare bars by count and
+      width, not where they start (and the inverted colours).
+- [ ] Screen wording: "it looks like LABEL" is the nearest simulated
+      picture's label, not a description of the screenshot. Describe the
+      screenshot itself first, then the nearest picture and how alike;
+      under about 80% say it's only a rough match.
+- [ ] The Issue 1 board (i1-test4, unfinished): the user to scope ULA pin
+      32, edge connector B8 (with the interface on) and CPU pin 6. First
+      real Issue 1: diagnosis only checked simulated before.
 The screen in the diagnosis (2026-11-07):
 - [x] --la-screen / the window's Screen row: matched against the atlas
       with the bus's verdict (agrees, or its own suspects when the bus
