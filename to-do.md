@@ -628,8 +628,6 @@ commit-message.txt).
       address, Claude as co-author, "An AI-generated project" at the top
       of the README); release V1.0 with the zip and the seven-board atlas;
       the issue to antirez posted.
-- [ ] Afterwards: work changed here has to be copied to ../github-upload
-      again before a new commit (or move the work into that folder).
 - [x] V1.1 released 2026-10-30 (by the user, from github-release/). The
       next one (V1.2) when enough is under "Unreleased" in CHANGELOG.md.
 
@@ -862,7 +860,8 @@ Tonight (the user away, no manual tests):
       (item 1's thick orange, the rest thin yellow). Checked by screenshot
       (--la-window): log4 replayed (IC2 IC4 IC5 D2 IC26 outlined), the
       simulated IC2.26:gnd (IC2).
-- [ ] The GUI with the real analyser (the user, at the bench): the
+- [x] The GUI with the real analyser (the user, at the bench, used on
+      real boards 2026-11-07): the
       ARMED / LET GO OF RESET / TRIGGERED signs come from lapico's
       "Armed" and "Triggered" (only shown with --la-window demo:... so
       far), the stage boxes, Save as, New diagnosis; diagnose.bat's
@@ -873,9 +872,11 @@ Tonight (the user away, no manual tests):
 - [x] The window at the bench: stage boxes, ARMED / TRIGGERED, green
       Start and Continue, red Stop, New diagnosis.
 Later, needs the user at the bench:
-- [ ] The idle stage on real faults: edge connector /WAIT to 0 V, then
-      /BUSRQ to 0 V (both inputs with pull-ups: safe), the reset button
-      held through the idle capture. A real board whose /RESET is broken.
+- [x] The idle stage on real faults: edge connector /WAIT to 0 V, then
+      /BUSRQ to 0 V (done 2026-11-07: diagnosis-issue2-wait and
+      diagnosis-issue2-busreq, both named right).
+- [ ] Still to try: the reset button held through the idle capture, and a
+      real board whose /RESET is broken.
 - [ ] Screenshots of the video-side ULA faults (i2-ula2, mc-3): they pass
       every stage (the edge connector can't see the ULA's own RAM reads).
       The matcher is now part of the same diagnosis (below): try it on them.
@@ -888,8 +889,9 @@ Later, needs the user at the bench:
       the bus, and the check's ranking on real faults (so far tested on
       test1 = IC13 with a simulated screen, and the real bad-ula.png on
       the good board's captures).
-- [ ] At the bench: the Screen row live (Paste after a run, Pick a type,
-      the check button), and Save as keeping screen.png.
+- [x] At the bench: the Screen row live (Paste after a run, Pick a type,
+      the check button), and Save as keeping screen.png (used on real
+      boards 2026-11-07).
 From the first bench run on another PC (2026-11-07; folders
 diagnosis-i1-test1/-test4, diagnosis-i2-test2 (boards swapped) and
 diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
@@ -915,6 +917,9 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       ULA fixes it, put the ULA first in that verdict.
 - [ ] tests/la-diagnose.sh replays every real folder as an Issue 2: take
       the board from the folder's diagnosis.txt ("Diagnosing a ...").
+      So far only RAM 16K is passed, for a folder with "16k" in its name
+      (2026-11-07); the folders from before then don't say "(RAM 16K)" in
+      their header.
 - [x] The reset stage on a working board (i2-test3): the button bounced on
       release, the CPU started again from 0000 (17 times in that capture,
       143 in i3-test5's) and it said FAULT, or wrong ROM reads. Fixed: the
@@ -995,6 +1000,12 @@ Later, software:
       majorchip-1) count 27 and 23 dead lines (13 and 9 before). Same
       verdict; check the count's wording.
 
+- [ ] **V1.2 release page on GitHub (the user, 2026-11-08).** Tag V1.2
+      (b8d2ac1) is pushed. At github.com/zzleezz/8bit-hw-simulator/releases/new:
+      tag V1.2, title V1.2, paste github-release/release-description.txt,
+      drag in github-release/c64-hw-sim-windows.zip and fault_atlas.bin,
+      Publish release.
+
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
       power-path faults (F1, L4, L5 said "CPU running"). Rebuilt with item 1.
@@ -1007,5 +1018,7 @@ Later, software:
   scenario on the bench. The open-leg faults stay in the atlas.
 
 ## Notes
+- Work changed in c64-hw-simulator-main has to be copied to
+  ../github-upload before a new commit there.
 - Check with the user before anything that uses every core (atlas runs);
   tests run 4 at a time (JOBS=4 tests/mem-faults.sh).
