@@ -2673,13 +2673,7 @@ static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev
     } else {
         la_cli_t q = *o;
         q.diagnose = NULL;
-        bool reuse = false;
-        if (la_read(fpath, &f, err, sizeof(err))) {
-            have_slow = la_read(spath, &sl, err, sizeof(err));
-            reuse = want_enter("idle.lac is in the folder from before: press Enter to use it, or type n, Enter to capture it again\n");
-            if (!reuse) { la_free(&f); if (have_slow) la_free(&sl); have_slow = false; }
-        }
-        for (int t = 0; !reuse; t++) {
+        for (int t = 0; ; t++) {
             if (t == 0 && !want_enter("Leave the Spectrum switched on and running, don't touch the reset button or the keys, and press Enter\n"))
                 return -1;
             if (!capture_now(&q, 0, fpath, &f, err, sizeof(err))) {
@@ -2752,6 +2746,22 @@ static int diagnose_run(const la_cli_t *o) {
     const char *dir = o->diagnose;
     char path[1024], err[512], bn[300];
     mkdir1(dir);
+    /* Captured or simulated afresh: an earlier run's files in the folder go
+     * (one left over would be read as this run's by a replay). */
+    if (!o->replay) {
+        static const char *const idle_files[] = { "idle.lac", "idle-slow.lac", "diagnosis.txt" };
+        for (int i = 0; i < 3; i++) {
+            snprintf(path, sizeof(path), "%s/%s", dir, idle_files[i]);
+            remove(path);
+        }
+        for (int i = 0; i < DIAG_NSTAGES; i++) {
+            const la_stage_t *st = stage_named(diag_plan[i].stage);
+            snprintf(path, sizeof(path), "%s/%s.lac", dir, st->name);
+            remove(path);
+            snprintf(path, sizeof(path), "%s/%s-instead.lac", dir, st->name);
+            remove(path);
+        }
+    }
     if (!la_logf) {
         snprintf(path, sizeof(path), "%s/diagnosis.txt", dir);
         la_logf = fopen(path, "w");
@@ -2809,16 +2819,7 @@ static int diagnose_run(const la_cli_t *o) {
             q.trigger = st->name; q.capture = path; q.pre = pre; q.post = post; q.at = 0;
             q.timeout = boot ? 15 : 5;
             q.diagnose = NULL;
-            /* Captured on an earlier run into the same folder: use it again? */
-            la_capture_t old;
-            if (la_read(path, &old, err, sizeof(err))) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "%s.lac is in the folder from before: press Enter to use it, or type n, Enter to capture "
-                         "it again\n", st->name);
-                if (want_enter(msg)) { d = old; got = true; }
-                else la_free(&old);
-            }
-            if (!got && boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n")) {
+            if (boot && !want_enter("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n")) {
                 if (fail_stage) break;
                 return 1;
             }

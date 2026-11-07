@@ -8,6 +8,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Logic analyser diagnosis: no more "it's in the folder from before: use
+  it?" at every stage. A run always captures afresh (the folder's earlier
+  captures go first). In the window it works in `last-diagnosis`, and
+  **Save as** keeps a run in a folder of your choosing; its questions now
+  say Continue and No (not "press Enter", "type n"). `diagnose.bat` asks
+  before it replaces a board's earlier diagnosis.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

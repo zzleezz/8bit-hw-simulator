@@ -8,6 +8,9 @@
  *
  * AI-generated (Claude Code). */
 #include "la_window.h"
+#ifdef _WIN32
+#include <direct.h>
+#endif
 #include "lacap.h"
 #include "lapico.h"
 #include "zx48.h"
@@ -18,6 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <stdio.h>
 
 #define MAX_MARKS 48
 
@@ -27,7 +32,11 @@ static struct {
     bool open, reopen, typing;
     struct nk_rect bounds;
     int mode;
-    char folder[512], ports[128], fault[128];
+    char folder[700], ports[128], fault[128];
+    char base[512];                 /* where the diagnosis folders go */
+    char work[600];                 /* this run's captures (emptied at each start) */
+    char save[700], saved[900];     /* "Save the diagnosis": where to, and how it went */
+    int run_mode;
     bool all;
     bool start_pending;             /* --la-window: start on the next frame */
     char boards[400];               /* "Find boards": what was found */
@@ -63,7 +72,36 @@ static void init_sync(void) {
 
 /* ---- from the diagnosis's thread ---------------------------------------- */
 
+/* The console's "press Enter" / "type n, Enter" as this window's buttons.
+ * Returns a malloc'd copy. */
+static char *button_words(const char *t) {
+    static const char *const from[] = { "press Enter here", "type n, Enter", "press Enter", "Press Enter" };
+    static const char *const to[] = { "press Continue", "press No", "press Continue", "Press Continue" };
+    size_t n = strlen(t);
+    char *o = malloc(n * 2 + 1);
+    if (!o) return NULL;
+    size_t k = 0;
+    while (*t) {
+        int f = -1;
+        for (int i = 0; i < 4 && f < 0; i++)
+            if (!strncmp(t, from[i], strlen(from[i]))) f = i;
+        if (f >= 0) {
+            memcpy(o + k, to[f], strlen(to[f]));
+            k += strlen(to[f]);
+            t += strlen(from[f]);
+        } else o[k++] = *t++;
+    }
+    o[k] = 0;
+    return o;
+}
+
+static void text_put(const char *t);
 static void text_hook(const char *t) {
+    char *w = button_words(t);
+    text_put(w ? w : t);
+    free(w);
+}
+static void text_put(const char *t) {
     size_t n = strlen(t);
     pthread_mutex_lock(&L.mu);
     if (L.len + n + 1 > L.cap) {
@@ -81,7 +119,9 @@ static void text_hook(const char *t) {
 
 static bool ask_hook(const char *prompt) {
     pthread_mutex_lock(&L.mu);
-    snprintf(L.prompt, sizeof(L.prompt), "%s", prompt && prompt[0] ? prompt : "Continue when ready");
+    char *w = prompt && prompt[0] ? button_words(prompt) : NULL;
+    snprintf(L.prompt, sizeof(L.prompt), "%s", w ? w : prompt && prompt[0] ? prompt : "Continue when ready");
+    free(w);
     size_t k = strlen(L.prompt);
     while (k && (L.prompt[k - 1] == '\n' || L.prompt[k - 1] == ' ')) L.prompt[--k] = 0;
     L.answer = -1;
@@ -167,12 +207,13 @@ static void *worker(void *arg) {
     (void)arg;
     la_cli_t o;
     memset(&o, 0, sizeof(o));
-    static char folder[512], ports[128], fault[128];
+    static char folder[700], ports[128], fault[128];
     static const char *faults[1];
     snprintf(folder, sizeof(folder), "%s", L.folder);
     snprintf(ports, sizeof(ports), "%s", L.ports);
     snprintf(fault, sizeof(fault), "%s", L.fault);
     o.diagnose = folder;
+    if (L.mode != MODE_REPLAY) snprintf(folder, sizeof(folder), "%s", L.work);
     o.machine = L.m;
     o.all = L.all;
     if (L.mode == MODE_ANALYSER) o.ports = ports[0] ? ports : NULL;
@@ -189,8 +230,8 @@ static void *worker(void *arg) {
     pthread_mutex_lock(&L.mu);
     L.rc = rc;
     snprintf(L.rc_text, sizeof(L.rc_text), "%s",
-             L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: the verdict is above." :
-             "It stopped before a verdict (see the last lines above).");
+             L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: the verdict is below." :
+             "It stopped before a verdict (see the last lines below).");
     char *copy = L.text ? strdup(L.text) : NULL;
     pthread_mutex_unlock(&L.mu);
     if (copy) { find_marks(copy); free(copy); }
@@ -220,6 +261,8 @@ static void start(const machine_t *m) {
     L.nmarks = 0;
     L.summary[0] = 0;
     L.m = m;
+    L.run_mode = L.mode;
+    L.saved[0] = 0;
     pthread_mutex_unlock(&L.mu);
     atomic_store(&L.running, true);
     if (pthread_create(&L.th, NULL, worker, NULL) != 0) {
@@ -240,12 +283,14 @@ static void answer(int a) {
 void la_window_open(void) {
     pthread_once(&once, init_sync);
     L.open = L.reopen = true;
-    if (!L.folder[0]) {
+    if (!L.base[0]) {
         /* Next to the captures diagnose.bat takes, if that folder is here. */
         struct stat st;
-        if (!stat("../Logic Analyser", &st) && (st.st_mode & S_IFDIR))
-            snprintf(L.folder, sizeof(L.folder), "../Logic Analyser/diagnosis-board");
-        else snprintf(L.folder, sizeof(L.folder), "diagnosis-board");
+        snprintf(L.base, sizeof(L.base), "%s",
+                 !stat("../Logic Analyser", &st) && (st.st_mode & S_IFDIR) ? "../Logic Analyser" : ".");
+        snprintf(L.work, sizeof(L.work), "%s/last-diagnosis", L.base);
+        snprintf(L.folder, sizeof(L.folder), "%s", L.work);
+        snprintf(L.save, sizeof(L.save), "%s/diagnosis-", L.base);
     }
 }
 bool la_window_is_open(void) { return L.open; }
@@ -288,6 +333,75 @@ void la_window_shutdown(void) {
     if (!atomic_load(&L.running)) pthread_join(L.th, NULL);
     else pthread_detach(L.th);        /* in a capture or a simulation: it ends with the program */
     L.started_once = false;
+}
+
+static bool copy_file(const char *from, const char *to) {
+    FILE *a = fopen(from, "rb");
+    if (!a) return false;
+    FILE *b = fopen(to, "wb");
+    if (!b) { fclose(a); return false; }
+    char buf[65536];
+    size_t n;
+    bool ok = true;
+    while ((n = fread(buf, 1, sizeof(buf), a)) > 0)
+        if (fwrite(buf, 1, n, b) != n) { ok = false; break; }
+    fclose(a);
+    if (fclose(b)) ok = false;
+    return ok;
+}
+
+/* Does DIR have any files in it? */
+static bool has_files(const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) return false;
+    struct dirent *e;
+    bool any = false;
+    while (!any && (e = readdir(d)))
+        if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) any = true;
+    closedir(d);
+    return any;
+}
+
+static void save_run(void) {
+    size_t n = strlen(L.save);
+    while (n && (L.save[n - 1] == '/' || L.save[n - 1] == '\\' || L.save[n - 1] == ' ')) L.save[--n] = 0;
+    char empty[600];
+    snprintf(empty, sizeof(empty), "%s/diagnosis-", L.base);
+    if (!n || !strcmp(L.save, empty)) {
+        snprintf(L.saved, sizeof(L.saved), "Type a name for the board after diagnosis- first");
+        return;
+    }
+    if (!strcmp(L.save, L.work)) {
+        snprintf(L.saved, sizeof(L.saved), "That's the folder it works in: choose another");
+        return;
+    }
+    if (has_files(L.save)) {
+        snprintf(L.saved, sizeof(L.saved), "%s has files in it already: choose another name", L.save);
+        return;
+    }
+#ifdef _WIN32
+    _mkdir(L.save);
+#else
+    mkdir(L.save, 0777);
+#endif
+    DIR *d = opendir(L.work);
+    if (!d) { snprintf(L.saved, sizeof(L.saved), "Couldn't read %s", L.work); return; }
+    struct dirent *e;
+    int files = 0, bad = 0;
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char a[1200], b[1200];
+        snprintf(a, sizeof(a), "%s/%s", L.work, e->d_name);
+        snprintf(b, sizeof(b), "%s/%s", L.save, e->d_name);
+        if (copy_file(a, b)) files++;
+        else bad++;
+    }
+    closedir(d);
+    if (bad) snprintf(L.saved, sizeof(L.saved), "Couldn't save %d of the files to %s", bad, L.save);
+    else {
+        snprintf(L.saved, sizeof(L.saved), "Saved (%d files) to %s", files, L.save);
+        snprintf(L.folder, sizeof(L.folder), "%s", L.save);    /* to diagnose again from */
+    }
 }
 
 static void field(struct nk_context *ctx, const char *label, char *buf, int len, float lw, float cw, const char *tip) {
@@ -349,8 +463,9 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         nk_layout_row_dynamic(ctx, 22, 1);
         if (nk_option_label(ctx, modes[k], L.mode == k) && !running) L.mode = k;
     }
-    field(ctx, "Folder", L.folder, sizeof(L.folder), 70, cw,
-          "Where the captures and diagnosis.txt go (or, again, where they are)");
+    if (L.mode == MODE_REPLAY)
+        field(ctx, "Folder", L.folder, sizeof(L.folder), 70, cw,
+              "A folder of captures a run took and saved (diagnosis-NAME)");
     if (L.mode == MODE_ANALYSER) {
         nk_layout_row_begin(ctx, NK_STATIC, 26, 3);
         nk_layout_row_push(ctx, 70);
@@ -414,7 +529,6 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         nk_label_colored_wrap(ctx, prompt, COL_HOVER);
         nk_layout_row_static(ctx, 30, 220, 2);
         if (nk_button_label(ctx, "Continue (Enter)")) answer(1);
-        if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "As typing n and Enter: no");
         if (nk_button_label(ctx, "No")) answer(0);
         if (nk_input_is_key_pressed(&ctx->input, NK_KEY_ENTER) && !L.typing) answer(1);
     } else if (running) {
@@ -429,6 +543,24 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             snprintf(s, sizeof(s), "Outlined on the board: %s", L.summary);
             nk_layout_row_dynamic(ctx, 40, 1);
             nk_label_colored_wrap(ctx, s, COL_FAULT);
+        }
+        if (L.run_mode != MODE_REPLAY) {
+            /* Kept only if saved: the next run starts with an empty folder. */
+            nk_layout_row_begin(ctx, NK_STATIC, 26, 3);
+            nk_layout_row_push(ctx, 70);
+            nk_label(ctx, "Save as", NK_TEXT_LEFT);
+            nk_layout_row_push(ctx, fmaxf(120, cw - 70 - 8 - 120 - 8));
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "The folder to keep this run's captures and diagnosis.txt in: type the board's name "
+                                "after diagnosis-");
+            nk_flags ev = nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, L.save, sizeof(L.save), nk_filter_default);
+            if (ev & NK_EDIT_ACTIVE) L.typing = true;
+            nk_layout_row_push(ctx, 120);
+            if (nk_button_label(ctx, "Save")) save_run();
+            nk_layout_row_end(ctx);
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_label_colored(ctx, L.saved[0] ? L.saved : "Not saved: the next run starts afresh (Save keeps this one)",
+                             NK_TEXT_LEFT, !strncmp(L.saved, "Saved", 5) ? COL_TRACE : COL_DIMTEXT);
         }
     }
 

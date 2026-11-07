@@ -434,20 +434,23 @@ nothing on a 48K uses, are only a note. Checked on real faulty boards:
 ULAs, Z80s, 74LS157 multiplexers and 4116 RAM chips.
 
 In the window: **Diagnose** > **Diagnose with the logic analyser...** (with
-a Spectrum on the bench). Pick the folder for the captures, press **Find
-boards** (the board nearest the Spectrum is the master, first), **Start**,
-and answer its questions with the buttons (hold the reset button, let go
-when it says Armed). The text comes into the window as it goes; at the end
-the chips to look at are outlined on the board, the first ones thick.
-The same window diagnoses a folder of captures again, or the simulated
-board with a fault as the one under test.
+a Spectrum on the bench). Press **Find boards** (the board nearest the
+Spectrum is the master, first), **Start**, and answer its questions with
+the buttons (hold the reset button, let go when it says Armed). The text
+comes into the window as it goes; at the end the chips to look at are
+outlined on the board, the first ones thick. Every run captures afresh
+into `last-diagnosis`; to keep one, type the board's name after
+`diagnosis-` under **Save as** and press **Save**. The same window
+diagnoses a saved folder of captures again, or the simulated board with a
+fault as the one under test.
 
 From the command line:
 
 - `--la-diagnose DIR --board issue2 --la-ports MASTER,OTHER [--la-all]`
   as the window does (`--la-replay`: from DIR's captures again;
   `--la-simulate --fault SPEC`: the simulated board). The captures and
-  `diagnosis.txt` (every comparison) go in DIR.
+  `diagnosis.txt` (every comparison) go in DIR, replacing the ones from an
+  earlier run there.
 - `--la-devices` lists the boards; `--la-capture FILE --la-trigger STAGE`
   takes one capture; `--la-info`, `--la-cycles`, `--la-compare FILE`
   read and compare captures (`.lac` or CSV, as the LogicAnalyzer program
