@@ -107,6 +107,12 @@ int la_cli(const la_cli_t *o);
 
 /* The stages a capture can be triggered at (--la-trigger NAME): the
  * address, and what it is. NULL name ends the list. */
+/* For the GUI (la_window.c), set before la_cli(): where the text goes
+ * (else stdout and stderr), and how it asks the user to go on (else Enter
+ * on stdin): true to go on, false for no (or stopped). PROMPT is what it
+ * asked (shown already), or NULL. */
+extern void (*la_text_hook)(const char *text);
+extern bool (*la_ask_hook)(const char *prompt);
 typedef struct { const char *name; int addr; double ms; const char *what; } la_stage_t;
 extern const la_stage_t la_stages[];
 

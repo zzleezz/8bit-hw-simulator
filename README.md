@@ -407,36 +407,60 @@ Issue 3B's, the same circuit, and its faults go on the board on the
 bench. `--browse-atlas[=N]` opens the
 window at start, its Nth picture picked.
 
-### Logic analyser captures (Spectrum)
+### Diagnosing with a logic analyser (Spectrum)
 
-Work in progress, made before the real analyser was built. The analyser
-is HappyLittleDiodes' (Jim's) ZX Spectrum interface, with two of Agustin
-Gimenez Bernad's LogicAnalyzer boards (github.com/gusmanb/logicanalyzer)
-chained as one 48 channel device on the edge connector. Its program saves
-captures as `.lac` or CSV. The simulator reads both, and from the command
-line only for now:
+The analyser is HappyLittleDiodes' (Jim's) ZX Spectrum interface on the
+edge connector, with two of Agustin Gimenez Bernad's LogicAnalyzer boards
+(github.com/gusmanb/logicanalyzer, Pico 2) chained as one 48 channel
+device, each on its own USB lead. The simulator talks to the boards itself
+(no LogicAnalyzer program needed) and compares what the real Spectrum does
+with the simulated board, stage by stage:
 
-- `--la-info FILE` lists the channels, what each signal does from /RESET
-  going high (low, high or pulsing, as a logic probe), the Z80 bus cycles
-  (fetch, read, write, in, out, interrupt acknowledge, refresh) and every
-  read from 0000-3FFF that isn't what the ROM holds.
-- `--la-record FILE --board issue3b [--fault SPEC]...` records the simulated
-  board the way the analyser would: 28 MHz, triggered on /RESET going high,
-  512 samples before and 32000 after (what the analyser holds with 24
-  channels a board). The `.lac` it writes opens in the LogicAnalyzer
-  program.
-- `--la-compare FILE` compares a capture with the simulated board (or with
-  `--la-against FILE2`) bus cycle by bus cycle from the first fetch at
-  0000, and shows the first cycle that differs:
-  "fetch 0001 A7 / fetch 0001 AF", "the ROM holds AF".
+1. Idle: the Spectrum left running, no reset: the clock, /RESET (low,
+   pulsing), /WAIT and /BUSRQ held, the frame interrupt (49 ms at 2 MHz),
+   where the CPU is. It needs no reset, so it works when /RESET is broken;
+   when the CPU isn't running at all the stages below are skipped.
+2. Six stages of the boot, each after a press of the reset button: the
+   reset, the RAM test reading back, the RAM test's end, the copyright
+   message, the editor's main loop, a frame interrupt.
 
-Channels are told apart by their names in the file (`/MREQ`, `MREQ`,
-`nMREQ`, `DIN33-/MREQ`...), else by the channel map: Jim's interface,
-rev 3.2, as read from its schematic and not yet checked on a real one
-(`--la-map FILE` gives another). A capture from reset holds about 1.2 ms:
-the ROM's first 500 or so instructions. That shows the CPU, the ROM, the
-buses and the clock, but not the RAM: the ROM's RAM test only writes the
-top of the upper RAM in that time and reads it back about 0.36 s later.
+Then what to look at, most likely first, with the chips named from the
+board's netlist: a stuck line and every chip on it, a data line, the ROM,
+which RAM chip (by the bit and the bank) or a chip that answers late, a
+RAM bank's address line and its multiplexer, an address line the ROM sees
+otherwise than the connector (a weak CPU output), the ULA's clock, its
+contention timing and its keyboard lines, a dead CPU. /M1 and /RFSH, which
+nothing on a 48K uses, are only a note. Checked on real faulty boards:
+ULAs, Z80s, 74LS157 multiplexers and 4116 RAM chips.
+
+In the window: **Diagnose** > **Diagnose with the logic analyser...** (with
+a Spectrum on the bench). Pick the folder for the captures, press **Find
+boards** (the board nearest the Spectrum is the master, first), **Start**,
+and answer its questions with the buttons (hold the reset button, let go
+when it says Armed). The text comes into the window as it goes; at the end
+the chips to look at are outlined on the board, the first ones thick.
+The same window diagnoses a folder of captures again, or the simulated
+board with a fault as the one under test.
+
+From the command line:
+
+- `--la-diagnose DIR --board issue2 --la-ports MASTER,OTHER [--la-all]`
+  as the window does (`--la-replay`: from DIR's captures again;
+  `--la-simulate --fault SPEC`: the simulated board). The captures and
+  `diagnosis.txt` (every comparison) go in DIR.
+- `--la-devices` lists the boards; `--la-capture FILE --la-trigger STAGE`
+  takes one capture; `--la-info`, `--la-cycles`, `--la-compare FILE`
+  read and compare captures (`.lac` or CSV, as the LogicAnalyzer program
+  saves them); `--la-record FILE` records the simulated board as the
+  analyser would.
+- `tests/la-diagnose.sh [CAPTURES]` replays every diagnosis folder taken so
+  far and a set of simulated faults, and shows what changed against
+  `tests/la-diagnose-expected.txt`.
+
+Captures are taken at 14.285714 MHz (100 MHz / 7), 98,000 samples: 6.9 ms.
+The boards need the zx firmware (`la-firmware/`; `--la-bootsel` restarts a
+board into its USB drive mode to copy it on) for triggers that ignore
+glitches on the address lines.
 
 ## Commodore 64
 

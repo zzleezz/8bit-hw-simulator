@@ -30,4 +30,7 @@ bool ui_set_theme(const char *name);
 /* Is the system set to light windows? (sokol_impl.c: it asks the OS.) */
 bool ui_system_light(void);
 
+/* Open "Diagnose with the logic analyser" and start it (la_window.h). */
+void ui_la_window(const char *spec);
+
 #endif

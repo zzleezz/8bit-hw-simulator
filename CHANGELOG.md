@@ -13,7 +13,7 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   from the LogicAnalyzer program (`--la-info`), record the simulated board
   as the analyser would (`--la-record`), and compare a capture with the
   simulated board bus cycle by bus cycle from reset (`--la-compare`). See
-  README, "Logic analyser captures".
+  README, "Diagnosing with a logic analyser".
 - Logic analyser: capture from the analyser itself over USB, without the
   LogicAnalyzer program (`--la-devices`, `--la-capture`; Windows and
   Linux). The channel map is now the real one (Jim's video), checked on a
@@ -27,6 +27,15 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   RAM reads give back what was written, and reports the RAM test's result
   (P-RAMT). `--la-timeline` lists the boot's milestones, `--la-log` keeps a
   copy of what's printed.
+- Logic analyser in the window: **Diagnose** > **Diagnose with the logic
+  analyser...** runs the diagnosis (the real Spectrum over the analyser, a
+  folder of captures again, or the simulated board with a fault) with its
+  questions as buttons, its text in the window, and the chips the verdict
+  names outlined on the board. `--la-window` opens and starts it (tests,
+  screenshots).
+- Logic analyser: `tests/la-diagnose.sh` replays every diagnosis folder and
+  a set of simulated faults, and shows what changed against
+  `tests/la-diagnose-expected.txt` (`LA_JOBS=N` for fewer cores).
 - Logic analyser, `--la-diagnose`, from two real faulty Z80s: a CPU that
   isn't running while the idle capture shows its clock, /RESET, /WAIT and
   /BUSRQ right is named itself (or its power), and /RD with /WR both low

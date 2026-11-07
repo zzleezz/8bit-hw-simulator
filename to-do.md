@@ -816,12 +816,19 @@ on the user's real faulty boards: ULAs (contention, clock, keyboard), CPUs
 (dead, /RESET held, A11 weak, data garbage), 74LS157s (IC3 A3 alias, IC26
 holding A9), 4116s (IC7 D1, IC22 D7 late, pulled chips).
 Tonight (the user away, no manual tests):
-- [ ] 1. The regression test into the repo (tests/la/): replays every real
-      diagnosis folder and a set of simulated faults, compares with the
-      last run. The captures stay outside git (5 MB each).
-- [ ] 3. The diagnosis in the GUI: a "Diagnose with the analyser" window,
-      prompts on screen instead of "press Enter", the verdict beside the
-      board with the suspect chips highlighted.
+- [x] 1. The regression test into the repo: tests/la-diagnose.sh replays
+      every real diagnosis folder and a set of simulated faults, and
+      tests/la-compare.py shows what changed against
+      tests/la-diagnose-expected.txt. The captures stay outside git (5 MB
+      each). LA_JOBS=7 to leave half the cores free.
+- [x] 3. The diagnosis in the GUI (src/la_window.c): Diagnose > "Diagnose
+      with the logic analyser...", in a thread; the questions are buttons,
+      the text streams in, the verdict's chips are outlined on the board
+      (item 1's thick orange, the rest thin yellow). Checked by screenshot
+      (--la-window): log4 replayed (IC2 IC4 IC5 D2 IC26 outlined), the
+      simulated IC2.26:gnd (IC2).
+- [ ] The GUI with the real analyser: its questions (the button
+      presses) are untested on the bench: run it once (the user).
 - [ ] 4. Merge logic-analyser into main and push.
 Later, needs the user at the bench:
 - [ ] The idle stage on real faults: edge connector /WAIT to 0 V, then

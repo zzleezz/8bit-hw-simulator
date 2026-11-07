@@ -56,6 +56,8 @@
  *   --browse            open the file browser
  *   --diagnose PICTURE  diagnose a screenshot (as if dropped on the window)
  *   --probe             open "Diagnose by probing"
+ *   --la-window replay:FOLDER | simulate:FAULT|FOLDER
+ *                       open "Diagnose with the logic analyser" and start it
  *   --browse-atlas[=N]  open "Browse the atlas" (its Nth picture picked)
  *   --ui-stats          print the interface's frame times every second
  *
@@ -212,6 +214,7 @@ static struct {
     struct { int frame; char what[1024]; bool chars; size_t sent; } keys[16];
     int nkeys;
     bool browse;
+    const char *la_window;
     const machine_t *machine;
     const char *options[8]; int noptions;   /* --option ID=VALUE */
     /* The fault atlas (atlas.h). */
@@ -438,6 +441,7 @@ static void init(void) {
     if (args.continuity) ui_continuity(args.continuity);
     if (args.load_state) ui_load_state(args.load_state);
     if (args.browse) ui_browse();
+    if (args.la_window) ui_la_window(args.la_window);
     if (args.probe) probe_open();
     if (args.diagnose) ui_diagnose(args.diagnose);     /* after: probing takes what it shows */
     if (args.browse_atlas) ui_browse_atlas(args.browse_pick);
@@ -618,6 +622,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--bank") && i + 1 < argc) args.bank = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--socket") && i + 1 < argc) args.socket = !strcmp(argv[++i], "u4");
         else if (!strcmp(argv[i], "--browse")) args.browse = true;
+        else if (!strcmp(argv[i], "--la-window") && i + 1 < argc) args.la_window = argv[++i];
         else if ((!strcmp(argv[i], "--key") || !strcmp(argv[i], "--chars")) && i + 1 < argc && args.nkeys < 16) {
             bool chars = !strcmp(argv[i], "--chars");
             const char *a = argv[++i], *at = strrchr(a, '@');

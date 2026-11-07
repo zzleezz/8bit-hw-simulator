@@ -11,11 +11,17 @@
 /* Everything printed goes to the --la-log file as well. */
 static FILE *la_logf;
 static bool la_screen = true;           /* false: to the log alone */
+void (*la_text_hook)(const char *text);
+bool (*la_ask_hook)(const char *prompt);
 static int la_out(const char *fmt, ...) {
     va_list a;
     int n = 0;
     va_start(a, fmt);
-    if (la_screen) n = vprintf(fmt, a);
+    if (la_screen && la_text_hook) {
+        char buf[8192];
+        n = vsnprintf(buf, sizeof(buf), fmt, a);
+        la_text_hook(buf);
+    } else if (la_screen) n = vprintf(fmt, a);
     va_end(a);
     if (la_logf) {
         va_start(a, fmt);
@@ -28,10 +34,20 @@ static int la_out(const char *fmt, ...) {
 }
 static int quiet_out(const char *fmt, ...) { (void)fmt; return 0; }
 static void la_err(const char *msg) {
-    fprintf(stderr, "%s\n", msg);
+    if (la_text_hook) { la_text_hook(msg); la_text_hook("\n"); }
+    else fprintf(stderr, "%s\n", msg);
     if (la_logf) { fprintf(la_logf, "%s\n", msg); fflush(la_logf); }
 }
 #define printf la_out
+
+/* Wait for the user (Enter): true to go on, false for no / stopped. PROMPT
+ * is what was asked (printed already), or NULL. */
+static bool la_wait(const char *prompt) {
+    if (la_ask_hook) return la_ask_hook(prompt);
+    char line[64];
+    if (!fgets(line, sizeof(line), stdin)) return false;
+    return line[0] != 'n' && line[0] != 'N';
+}
 #include <ctype.h>
 #include <stdio.h>
 #include <math.h>
@@ -1498,7 +1514,11 @@ static bool capture_real(const la_cli_t *o, la_capture_t *c, char *err, int errl
             /* The stage comes once a boot: the next try needs a reset. */
             printf("Hold the Spectrum's reset button down, then press Enter here (keep holding the button)\n");
             char line[16];
-            if (!fgets(line, sizeof(line), stdin)) { snprintf(err, errlen, "no key pressed"); return false; }
+            (void)line;
+            if (!la_wait("Hold the Spectrum's reset button down, then continue (keep holding the button)")) {
+                snprintf(err, errlen, "no key pressed");
+                return false;
+            }
             printf("Let go of the reset button once it says Armed.\n");
         }
         uint8_t *v[LP_MAXDEV * 24] = { 0 };
@@ -2032,16 +2052,14 @@ static bool capture_now(const la_cli_t *o, double at_ms, const char *save, la_ca
     if (!strstr(err, "no trigger")) return false;
     printf("Again, for A0 low this time (it was never high)%s\n",
            at_ms > 0 ? ": hold the reset button down, press Enter, and let go once it says Armed" : "");
-    if (at_ms > 0) { char line[16]; if (!fgets(line, sizeof(line), stdin)) return false; }
+    if (at_ms > 0 && !la_wait("Hold the reset button down, continue, and let go once it says Armed")) return false;
     q.trigger = "raw:1,15,1,0";
     return capture_real(&q, c, err, errlen);
 }
 
 static bool want_enter(const char *msg) {
     printf("%s", msg);
-    char line[64];
-    if (!fgets(line, sizeof(line), stdin)) return false;
-    return line[0] != 'n' && line[0] != 'N';
+    return la_wait(msg);
 }
 
 static board_t *vboard;     /* the board's parts, for their references */
@@ -2722,7 +2740,14 @@ static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev
 }
 
 #define STOP_MSG "  Couldn't capture it: the diagnosis goes on what the stages before show\n"
+static int diagnose_run(const la_cli_t *o);
 static int diagnose(const la_cli_t *o) {
+    bool own = !la_logf;
+    int rc = diagnose_run(o);
+    if (own && la_logf) { fclose(la_logf); la_logf = NULL; }
+    return rc;
+}
+static int diagnose_run(const la_cli_t *o) {
     const machine_t *m = o->machine ? o->machine : &machine_zx48;
     const char *dir = o->diagnose;
     char path[1024], err[512], bn[300];

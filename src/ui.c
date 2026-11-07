@@ -17,6 +17,7 @@
 #include "atlas_browse.h"
 #include "thumbtex.h"
 #include "probe.h"
+#include "la_window.h"
 #include "filedialog.h"
 #include "healthy.h"
 #include "inspect.h"
@@ -1212,6 +1213,7 @@ static void board_input(struct nk_context *ctx, struct nk_rect area) {
     if (diagnose_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
     if (diagnose_records_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
     if (probe_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
+    if (la_window_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
     if (atlas_browse_bounds(&ir) && nk_input_is_mouse_hovering_rect(in, ir)) inside = false;
     if (U.help_open && nk_input_is_mouse_hovering_rect(in, U.help_bounds)) inside = false;
     if (U.trust_open && nk_input_is_mouse_hovering_rect(in, U.trust_bounds)) inside = false;
@@ -1673,6 +1675,14 @@ static void board_window(struct nk_context *ctx, float w, float h) {
                     nk_stroke_rect(cv, to_screen(area, b->x0 - 0.8f, b->y0 - 0.8f, b->x1 + 0.8f, b->y1 + 0.8f), 3, 3,
                                    COL_FAULT);
                 }
+        for (int i = 0; i < s->nparts; i++) {      /* the chips the analyser's verdict names */
+            int lm = la_window_mark(M(), s->parts[i].ref);
+            if (!lm) continue;
+            box_t *b = &U.box[i];
+            float g = lm == 2 ? 1.2f : 0.8f;
+            nk_stroke_rect(cv, to_screen(area, b->x0 - g, b->y0 - g, b->x1 + g, b->y1 + g), 3, lm == 2 ? 4 : 2,
+                           lm == 2 ? COL_FAULT : COL_PULSE);
+        }
         continuity_mark(cv, ctx, area);
         focus_mark(cv, ctx, area);
         probe_mark(cv, ctx, area);
@@ -2549,6 +2559,14 @@ static void controls_window(struct nk_context *ctx, float x, float y, float h) {
                 nk_tooltip(ctx, "Look through every picture the fault atlas has of this board, narrowed by what the "
                                 "screen shows (kind, colors, behavior...), and the faults behind each");
             if (nk_button_label(ctx, "Browse the atlas...")) U.want_browse = true;
+            if (board_is_zx48(U.b)) {
+                nk_layout_row_dynamic(ctx, 26, 1);
+                if (nk_widget_is_hovered(ctx))
+                    nk_tooltip(ctx, "Plug the logic analyser (Jim's interface, two LogicAnalyzer boards) into the real "
+                                    "Spectrum's edge connector: its boot captured stage by stage and compared with this "
+                                    "board, and the chips to look at outlined");
+                if (nk_button_label(ctx, "Diagnose with the logic analyser...")) la_window_open();
+            }
             nk_layout_row_dynamic(ctx, 26, 2);
             if (nk_widget_is_hovered(ctx))
                 nk_tooltip(ctx, "Pick a screenshot of the broken machine's screen (PNG, JPG or BMP, from a USB capture "
@@ -2933,6 +2951,7 @@ void ui_frame(void) {
     probe_action_t pa;
     probe_window(ctx, nk_rect(0, 0, bw, H), U.b, bench_machine(), &pa);
     if (pa.show_pin >= 0) show_pin(pa.show_pin);
+    la_window(ctx, nk_rect(0, 0, bw, H), M());
     fault_menu(ctx);
     /* Start the statistics over (the drawing above read this frame's). */
     board_stats_reset(U.b);
@@ -2961,7 +2980,7 @@ void ui_frame(void) {
         const char *top = NULL;
         for (struct nk_window *w = ctx->begin; w; w = w->next) {
             static const char *const closable[] = { "Menu", "Help", "Inspector", "Diagnose", "AtlasBrowse", "Probe",
-                                                    "RecordRepair", "RepairRecords", "LoadUnsigned" };
+                                                    "RecordRepair", "RepairRecords", "LoadUnsigned", "LogicAnalyser" };
             if (w->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED)) continue;
             for (size_t i = 0; i < sizeof(closable) / sizeof(closable[0]); i++)
                 if (!strcmp(w->name_string, closable[i])) top = closable[i];
@@ -2975,6 +2994,7 @@ void ui_frame(void) {
         else if (!strcmp(top, "RecordRepair")) diagnose_record_cancel();
         else if (!strcmp(top, "RepairRecords")) diagnose_records_close();
         else if (!strcmp(top, "LoadUnsigned")) U.trust_open = false;
+        else if (!strcmp(top, "LogicAnalyser")) la_window_close();
         else probe_close();
     }
     if (U.want_dump) {
@@ -3122,7 +3142,7 @@ static void handle_event(const sapp_event *ev) {
      * with none open it is the machine's (the Spectrum's BREAK). */
     if (ev->type == SAPP_EVENTTYPE_KEY_DOWN && ev->key_code == SAPP_KEYCODE_ESCAPE && !browser_is_open() &&
         !probe_wants_keyboard() && !U.notes_typing && !atlas_browse_wants_keyboard() && !diagnose_wants_keyboard() &&
-        (diagnose_is_open() || diagnose_recording() || diagnose_records_bounds(&(struct nk_rect){ 0 }) || atlas_browse_is_open() || probe_is_open() || U.help_open || U.menu_open ||
+        !la_window_wants_keyboard() && (la_window_is_open() || diagnose_is_open() || diagnose_recording() || diagnose_records_bounds(&(struct nk_rect){ 0 }) || atlas_browse_is_open() || probe_is_open() || U.help_open || U.menu_open ||
          inspect_current() >= 0)) {
         U.want_esc = true;
         return;
@@ -3145,6 +3165,7 @@ static void handle_event(const sapp_event *ev) {
     if (U.notes_typing) return;             /* typing notes */
     if (atlas_browse_wants_keyboard()) return;  /* typing a pin name */
     if (diagnose_wants_keyboard()) return;      /* typing a repair record's notes */
+    if (la_window_wants_keyboard()) return;     /* typing a folder or ports */
     /* Ctrl+V: the clipboard's screenshot diagnosed (no text field is being
      * typed in, and the machine has no use for it). */
     if (ev->type == SAPP_EVENTTYPE_KEY_DOWN && ev->key_code == SAPP_KEYCODE_V && !ev->key_repeat &&
@@ -3281,10 +3302,12 @@ void ui_shutdown(void) {
     diagnose_shutdown();
     atlas_browse_shutdown();
     probe_shutdown();
+    la_window_shutdown();
     thumbtex_shutdown();
 }
 
 void ui_print_stats(bool on) { ui_stats_print = on; }
+void ui_la_window(const char *spec) { la_window_open_test(spec); }
 
 /* Diagnose a screenshot at start (--diagnose). */
 void ui_diagnose(const char *path) { diagnose_picture(path); }
