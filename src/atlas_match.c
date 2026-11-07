@@ -587,6 +587,57 @@ typedef struct {
 } pal_t;
 static pal_t pals[ATLAS_NMACHINES];
 
+/* Clean vertical bars: every column of the active display one color down
+ * its height, alternating in regular runs. Their period and the narrower
+ * run's width, in thumbnail pixels: where they start and which color comes
+ * first don't count (both vary from board to board). False if the
+ * picture isn't that. */
+typedef struct { bool ok; int period, width; } bars_t;
+static bars_t clean_bars(int m, const uint8_t *img, layout_t L) {
+    bars_t b = { false, 0, 0 };
+    uint8_t colc[ATLAS_CELLS_W * 4 + 8];
+    if (L.aw > (int)sizeof(colc)) return b;
+    long same = 0;
+    for (int x = 0; x < L.aw; x++) {
+        uint32_t h[16] = { 0 };
+        for (int y = 0; y < L.ah; y++) h[img[(L.ay + y) * L.w + L.ax + x] & 15]++;
+        colc[x] = (uint8_t)argmax_u32(h, 16);
+        same += h[colc[x]];
+    }
+    if (same < 0.95 * (double)L.aw * L.ah) return b;
+    /* Light or dark: jailbars (the faint vertical lines most Spectrums'
+     * video output puts on the picture, a known weakness of it, every 4th
+     * column on a real Issue 1) snap to a dark color of their own. */
+    for (int x = 0; x < L.aw; x++) {
+        rgb_t c = pals[m].rgb[colc[x]];
+        colc[x] = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b > 100;
+    }
+    int run[64], nr = 0, len = 1;
+    for (int x = 1; x <= L.aw; x++) {
+        if (x < L.aw && colc[x] == colc[x - 1]) { len++; continue; }
+        if (nr < 64) run[nr++] = len;
+        len = 1;
+    }
+    /* The runs between the first and the last (those can be cut by the
+     * edge): at least one of each color, alike by parity. */
+    if (nr < 4 || nr > 40) return b;
+    int a = run[1], c = run[2];
+    for (int i = 1; i < nr - 1; i++) {
+        int want = (i & 1) ? a : c;
+        if (abs(run[i] - want) > 1) return b;
+    }
+    if (a < 1 || c < 1) return b;
+    b.ok = true;
+    b.period = a + c;
+    b.width = a < c ? a : c;
+    return b;
+}
+
+static bool bars_alike(bars_t x, bars_t y) {
+    return x.ok && y.ok && abs(x.period - y.period) <= 2 && abs(x.width - y.width) <= 1;
+}
+
+
 static void init_colors(void) {
     if (lut_ready) return;
     for (int i = 0; i < 256; i++) {
@@ -1718,6 +1769,9 @@ static float unwritten_likeness(const feat_t *f, float *rep, float *busy, float 
 #define UNWRITTEN_LABEL "Screen never written, the CPU never ran (matched by its kind: the RAM's power-on " \
     "pattern depends on the chips, the border is random). Simulated: "
 
+#define BARS_LABEL "Matched by its bars (how wide and how far apart; where they start and which color comes first " \
+    "vary). Simulated: "
+
 /* ------------------------------------------------------------------------ */
 /* Matching                                                                  */
 /* ------------------------------------------------------------------------ */
@@ -1936,6 +1990,7 @@ typedef struct {
     int hyp;                    /* the normalization that gave it */
     float rank;                 /* the score, moved by the likelihood (likely_k()) */
     bool by_kind;               /* the never written screen, matched by kind */
+    bool by_bars;               /* matched by its bars' period and width */
 } cand_t;
 
 typedef struct {
@@ -2038,15 +2093,17 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
         unw[k] = unwritten_likeness(uf, &rep, &busy, &vary);
     }
     free(uf);
+    bars_t *nbars = calloc((size_t)M->nnorms + 1, sizeof(bars_t));
+    for (int k = 0; k < M->nnorms; k++) nbars[k] = clean_bars(M->norms[k].machine, M->norms[k].half, layout(M->norms[k].machine));
     M->c = calloc((size_t)c->a.noutcomes, sizeof(cand_t));
     for (int i = 0; i < c->a.noutcomes; i++) {
         const atlas_outcome_t *o = &c->a.outcomes[i];
         if (!outcome_wanted(o, op)) continue;
-        cand_t best = { i, -1, { 0 }, -1, 0, false };
+        cand_t best = { i, -1, { 0 }, -1, 0, false, false };
         int om = by_family ? atlas_family(o->h.machine) : o->h.machine;
         for (int k = 0; k < M->nnorms; k++) {
             if (M->norms[k].machine != om) continue;
-            cand_t t = { i, 0, { 0 }, k, 0, false };
+            cand_t t = { i, 0, { 0 }, k, 0, false, false };
             if (o->h.t.no_signal) {
                 t.score = M->norms[k].snow;
                 for (int p = 0; p < NSC; p++) t.parts[p] = t.score;
@@ -2060,6 +2117,12 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
                         norm_features(&M->norms[k], bg, nf[k][bg]);
                     }
                     float s = score(nf[k][bg], &c->f[a][i], parts);
+                    /* The never written screen's border is random (nothing
+                     * set it: a real one's changes at every switch on). */
+                    if (c->unwritten[i]) {
+                        s += sc_weight[SC_BORDER] * (1 - parts[SC_BORDER]);
+                        parts[SC_BORDER] = 1;
+                    }
                     /* A noisy picture isn't a clean one. */
                     s *= 1 - M->norms[k].snow;
                     if (s > t.score) { t.score = s; memcpy(t.parts, parts, sizeof(parts)); }
@@ -2068,6 +2131,18 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
                 if (c->unwritten[i] && unw[k] > 0 && u > t.score) {
                     t.score = u;
                     t.by_kind = true;
+                }
+                /* Bars alike in period and width: matched by them (above
+                 * a pixel match of other pictures, below a close one), the
+                 * pixel score keeping their order. */
+                if (nbars[k].ok && c->img[0][i]) {
+                    bars_t ob = clean_bars(o->h.machine, c->img[0][i], layout(o->h.machine));
+                    float bs = (0.70f + 0.2f * t.score) * (1 - M->norms[k].snow);
+                    if (bars_alike(nbars[k], ob) && bs > t.score) {
+                        t.score = bs;
+                        t.by_bars = true;
+                        t.by_kind = false;
+                    }
                 }
             }
             if (t.score > best.score) best = t;
@@ -2081,10 +2156,10 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
         const atlas_real_t *rl = &op->reals[i];
         feat_t rf;
         if (rl->snow <= 0.5f) features(rl->machine, rl->thumb, -1, &rf);
-        cand_t best = { i, -1, { 0 }, -1, 0, false };
+        cand_t best = { i, -1, { 0 }, -1, 0, false, false };
         for (int k = 0; k < M->nnorms; k++) {
             if (atlas_family(M->norms[k].machine) != atlas_family(rl->machine)) continue;
-            cand_t t = { i, 0, { 0 }, k, 0, false };
+            cand_t t = { i, 0, { 0 }, k, 0, false, false };
             if (rl->snow > 0.5f) t.score = M->norms[k].snow;
             else {
                 if (!nf[k][rf.bg]) {
@@ -2101,6 +2176,7 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
         for (int bg = 0; bg < 16; bg++) free(nf[k][bg]);
     free(nf);
     free(unw);
+    free(nbars);
     for (int k = 0; k < M->nc; k++)
         M->c[k].rank = M->c[k].score + likely_k() * logf(outcome_weight(c, &c->a.outcomes[M->c[k].outcome]));
     cand_atlas = &c->a;
@@ -2112,8 +2188,19 @@ static bool match_picture(ctx_t *c, const char *path, const atlas_match_opts_t *
 /* A match's label: the screen's, said to be the never written one when it
  * was matched by its kind. */
 static void outcome_label(const cand_t *cd, const atlas_outcome_t *o, char *buf, int len) {
-    int n = cd->by_kind ? snprintf(buf, (size_t)len, "%s", UNWRITTEN_LABEL) : 0;
+    int n = cd->by_kind ? snprintf(buf, (size_t)len, "%s", UNWRITTEN_LABEL)
+          : cd->by_bars ? snprintf(buf, (size_t)len, "%s", BARS_LABEL) : 0;
     if (n >= 0 && n < len - 1) atlas_outcome_label(o, buf + n, len - n);
+}
+
+/* What the screenshot itself shows, as read (the same words as the
+ * atlas's labels). */
+static void describe_norm(const norm_t *bn, char *buf, int len) {
+    atlas_outcome_t tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.h.machine = bn->machine;
+    buf[0] = 0;
+    structure_label(&tmp, bn->half, buf, len);
 }
 
 static void match_free(match_t *M) {
@@ -2153,6 +2240,11 @@ int atlas_match(const atlas_match_opts_t *op) {
            "fit error %.1f dE\n\n",
            atlas_machine_id(bn->machine), bn->active.w, bn->active.h, bn->active.x, bn->active.y, bn->how, bn->gain[0],
            bn->gain[1], bn->gain[2], bn->off[0], bn->off[1], bn->off[2], bn->fit);
+    {
+        char seen[256];
+        describe_norm(bn, seen, sizeof(seen));
+        printf("the screenshot shows: %s\n\n", seen);
+    }
     if (op->debug_dir) {
         printf("scene: border RGB %.0f,%.0f,%.0f  black %.0f,%.0f,%.0f  snow %.2f", sc->border.r, sc->border.g,
                sc->border.b, sc->black.r, sc->black.g, sc->black.b, sc->snow);
@@ -2295,6 +2387,7 @@ bool atlas_match_run(const atlas_match_opts_t *op, atlas_result_t *r) {
     r->norm_snow = bn->snow;
     r->norm = malloc((size_t)BL.w * BL.h);
     memcpy(r->norm, bn->half, (size_t)BL.w * BL.h);
+    describe_norm(bn, r->seen, sizeof(r->seen));
     for (int k = 0; k < M.nrc && r->nreals < ATLAS_MAX_REALS; k++) {
         r->reals[r->nreals].index = M.rc[k].outcome;
         r->reals[r->nreals++].score = M.rc[k].score;

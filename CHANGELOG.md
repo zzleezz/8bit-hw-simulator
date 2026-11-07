@@ -8,6 +8,25 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Diagnose from screenshot: vertical bars are matched by how wide they are
+  and how far apart, not where they start or which color comes first
+  (both vary from board to board), and jailbars (the faint lines most
+  Spectrums' video puts on the picture) no longer break them up. The
+  screen of a CPU that never ran ignores the border (nothing set it: a
+  real one's changes at every switch on). A real dead Issue 1's 2 white
+  and 2 black bars went from "32 bars, 2 pixels wide" (63%) to the same
+  bars (81%), all its causes the Z80. The analyser's verdict says what
+  the screenshot shows first, then the nearest simulated screen, and
+  calls a match under 80% rough. The matcher's own test is unchanged
+  (60 screens: 36 first, 51 in the top 3).
+- Logic analyser diagnosis: a CPU whose outputs are dead or floating
+  (every address line low, /BUSACK low with /BUSRQ high) is named first,
+  before the clock: a real Issue 1 read so (its address lines at 1.2 V,
+  its clock there at the CPU) and was told "No clock".
+- Logic analyser window: the results text is laid out as paragraphs. It
+  was wrapped twice (for a terminal, then for the window), which broke
+  sentences into fragments, and only an item's first line was colored.
+
 ## V1.2 (2026-11-07)
 
 - Logic analyser diagnosis: no more "it's in the folder from before: use

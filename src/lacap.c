@@ -1960,6 +1960,7 @@ typedef struct {
     int nbad[AR_N], first[AR_N];                    /* reads with a bit wrong, the first one's address */
     int stuck[LA_NSIG];                             /* 1 low, 2 high all through, where a working one's changes */
     int nearly[LA_NSIG];                            /* of them: but for a few moments (how many changes) */
+    int lvl[LA_NSIG];                               /* the line in the capture: 1 low, 2 high all through, 0 not */
     int pramt, pramt_ref;                           /* the RAM test's result (P-RAMT), -1 not seen */
     /* Wrong ROM reads that are the ROM's byte with address bit k the
      * other way: the ROM sees A<k> otherwise than the edge connector. */
@@ -2027,6 +2028,7 @@ static void ev_merge(ev_t *e, const ev_t *f) {
         e->idle = 1;
         e->slow_ms = f->slow_ms; e->rst_pulses = f->rst_pulses; e->int_n = f->int_n; e->int_ref = f->int_ref;
         memcpy(e->held, f->held, sizeof(e->held));
+        memcpy(e->lvl, f->lvl, sizeof(e->lvl));
         memcpy(e->idle_where, f->idle_where, sizeof(e->idle_where));
     }
     for (int ar = 0; ar < AR_N; ar++) {
@@ -2276,6 +2278,8 @@ static void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r) {
         double want = (double)(d->n - from) * ZX_FREQ / d->freq;
         if (want > 1000) e->clk_pct = (int)(100.0 * rises / want + 0.5);
     }
+    for (int s2 = 0; s2 < LA_NSIG; s2++)
+        if (d->have >> s2 & 1) { int st = line_state(d, s2); e->lvl[s2] = st > 0 ? st : 0; }
     /* Lines any running Z80 changes all the time. */
     static const int busy[] = { LA_MREQ, LA_RD, LA_WR, LA_M1, LA_RFSH, LA_CLK };
     for (int s = 0; r && s < LA_NSIG; s++) {
@@ -2611,6 +2615,26 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
                "     short its input), the reset circuit (its capacitor and resistor) or the button. Pull the CPU and\n"
                "     measure pin 26's socket hole: it should rise to 5 V.\n", ++n, cpu);
         goto done;
+    }
+    /* A CPU whose outputs are dead or floating: every address line low,
+     * /BUSACK low though nothing asks for the bus (/BUSRQ high), which a
+     * working Z80 never does. A real Issue 1 read so, its address lines at
+     * about 1.2 V on a scope, its clock there at the CPU: the CPU first. */
+    {
+        bool addr_low = true;
+        for (int k = LA_A0; k <= LA_A15; k++) addr_low = addr_low && e->lvl[k] == 1;
+        if (idle_st && addr_low && e->lvl[LA_BUSACK] == 1 && e->lvl[LA_BUSRQ] == 2) {
+            printf("  %d. The CPU (%s): its outputs look dead or floating. Every address line A0-A15 reads low and\n"
+                   "     /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,\n"
+                   "     and floating lines (about 1.2 V on a scope) read as low. Check its +5 V (pin 11) and 0 V (pin 29)\n"
+                   "     first, then change the CPU.\n", ++n, cpu);
+            if (e->stuck[LA_CLK])
+                printf("  %d. CLK reads stuck %s at the edge connector. That is the ULA's side of it (%s pin 32), not the\n"
+                       "     CPU's pin 6: measure pin 6. A real Issue 1 that read like this had its clock at the CPU. If it\n"
+                       "     is missing there too: the ULA, the crystal, or what feeds the CPU's clock from it.\n", ++n,
+                       e->stuck[LA_CLK] == 1 ? "low" : "high", ula ? ula : "the ULA's");
+            goto done;
+        }
     }
     if (e->stuck[LA_CLK])
         printf("  %d. No clock: CLK (%s's pin 6) is stuck %s. It comes from %s (the ULA, from the 14 MHz crystal): the ULA, the\n"
@@ -3280,7 +3304,10 @@ static int screen_part(const la_cli_t *o, const machine_t *m, const char *bus_te
             spec_parts(&gr->causes[c], ula, sp, &np, 96, nf++);
         }
     }
-    printf("it looks like \"%s\" (%.0f%% alike)\n", r.groups[0].label, best * 100);
+    if (r.seen[0]) printf("it shows %c%s.\n  The nearest simulated screen", tolower((unsigned char)r.seen[0]), r.seen + 1);
+    else printf("the nearest simulated screen");
+    printf(" (%.0f%% alike%s): \"%s\"\n", best * 100,
+           best < 0.8f ? ", a rough match: take it as a hint" : "", r.groups[0].label);
     int rc = 1;
     if (healthy || !np) {
         printf("  A working board shows that too: the screen tells nothing more here.\n");

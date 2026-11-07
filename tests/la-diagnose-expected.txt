@@ -89,9 +89,13 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
 Left running, it isn't working, so the boot's stages weren't taken.
 What to look at, most likely first:
-  1. No clock: CLK (IC2's pin 6) is stuck low. It comes from IC1 (the ULA, from the 14 MHz crystal): the ULA, the
-     crystal, or a short on the line. Nothing runs without it.
-     So the CPU isn't running (20 of the lines a running Z80 changes never change): that follows from the clock.
+  1. The CPU (IC2): its outputs look dead or floating. Every address line A0-A15 reads low and
+     /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,
+     and floating lines (about 1.2 V on a scope) read as low. Check its +5 V (pin 11) and 0 V (pin 29)
+     first, then change the CPU.
+  2. CLK reads stuck low at the edge connector. That is the ULA's side of it (IC1 pin 32), not the
+     CPU's pin 6: measure pin 6. A real Issue 1 that read like this had its clock at the CPU. If it
+     is missing there too: the ULA, the crystal, or what feeds the CPU's clock from it.
 ######## real diagnosis-i2-cpu1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -481,9 +485,13 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
 Left running, it isn't working, so the boot's stages weren't taken.
 What to look at, most likely first:
-  1. No clock: CLK (IC2's pin 6) is stuck low. It comes from IC1 (the ULA, from the 14 MHz crystal): the ULA, the
-     crystal, or a short on the line. Nothing runs without it.
-     So the CPU isn't running (19 of the lines a running Z80 changes never change): that follows from the clock.
+  1. The CPU (IC2): its outputs look dead or floating. Every address line A0-A15 reads low and
+     /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,
+     and floating lines (about 1.2 V on a scope) read as low. Check its +5 V (pin 11) and 0 V (pin 29)
+     first, then change the CPU.
+  2. CLK reads stuck low at the edge connector. That is the ULA's side of it (IC1 pin 32), not the
+     CPU's pin 6: measure pin 6. A real Issue 1 that read like this had its clock at the CPU. If it
+     is missing there too: the ULA, the crystal, or what feeds the CPU's clock from it.
 ######## real diagnosis-issue2-busreq
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 59% of its pulses)
@@ -1112,11 +1120,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
 Left running, it isn't working, so the boot's stages weren't taken.
 What to look at, most likely first:
-  1. The CPU isn't running: 19 of the lines a running Z80 changes all the time never change. What it
-     needs is right, left running: its clock, /RESET high, /WAIT and /BUSRQ high. So it's the CPU (IC2)
-     itself, or its power: measure 5 V on pin 11 and 0 V on pin 29 at the chip's legs.
-     /RD and /WR are both low all through, which a working Z80 never does: it drives nothing right,
-     as a dead or unpowered one.
+  1. The CPU (IC2): its outputs look dead or floating. Every address line A0-A15 reads low and
+     /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,
+     and floating lines (about 1.2 V on a scope) read as low. Check its +5 V (pin 11) and 0 V (pin 29)
+     first, then change the CPU.
 ######## sim IC3.4:gnd
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 91% of its pulses)
@@ -1355,7 +1362,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 The boot goes wrong at ramcheck (1 stage before it is good).
 What to look at, most likely first:
   1. IC13, the lower RAM's bit D7 (4000-7FFF): it reads 1 where it should be 0 (30 reads, the first at 4000)
-The screen (shot.png): it looks like "Blank black screen, white border" (100% alike)
+The screen (shot.png): it shows blank black screen, white border.
+  The nearest simulated screen (100% alike): "Blank black screen, white border"
   In the atlas, that picture comes from 100 faults on 21 parts.
   It agrees with the bus: IC13 is among them (a fault there gives this picture as well).
 ######## screen IC5:removed
@@ -1381,6 +1389,7 @@ The boot goes wrong at reset (0 stages before it are good).
 What to look at, most likely first:
   1. IC5, the ROM: 16852 reads with bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 0038): the chip, or its address lines or
      select (/ROMCS)
-The screen (shot.png): it looks like "Vertical bars: 17 of them, 7 pixels wide, every 15 pixels (black border, black screen), animated" (93% alike)
+The screen (shot.png): it shows repeating pattern over 50% of the screen (black border, black screen).
+  The nearest simulated screen (93% alike): "Vertical bars: 17 of them, 7 pixels wide, every 15 pixels (black border, black screen), animated"
   In the atlas, that picture comes from 10 faults on 3 parts.
   It agrees with the bus: IC5 is among them (a fault there gives this picture as well).

@@ -936,7 +936,7 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       RAM test reads 4004 wrong (00 for 02), bits D0-D4 D6 D7 wrong over
       the lower RAM: the shared parts, IC3/IC4 (MUX), IC1 (ULA), R1-R8; the
       screen (stripes, white border) agrees with IC1. Check at the bench.
-- [ ] The clock rule before the CPU's: i1-test4 said "No clock" first, but
+- [x] (Done 2026-11-07, see the floating-bus rule.) The clock rule before the CPU's: i1-test4 said "No clock" first, but
       the bus shows a dead Z80 (A0-A15 low, /RD and /WR low together, /M1
       and /HALT low, /BUSACK low with /BUSRQ high, as newtest1). The CPU's
       own impossible states should name the CPU next to (or before) the
@@ -944,13 +944,13 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       not the CPU's pin 6 (that comes through the transistor), so "CLK
       (IC2's pin 6)" in the verdict is wrong: say B8 / ULA pin 32 and that
       the CPU's own clock can still be there.
-- [ ] Screen matcher, bars: the real i1-test4 screen (2 white and 2 black
+- [x] (Done 2026-11-07: bars matched by width and period, jailbars, border ignored for a dead CPU.) Screen matcher, bars: the real i1-test4 screen (2 white and 2 black
       bars, 64 px, white first, blue border, faint lines in the black bars)
       matched "32 bars, 2 px wide" at 63%. The atlas has "2 of them, 64
       pixels wide" (black first) but the matcher compares positions, so a
       picture shifted by one bar scores nothing. Compare bars by count and
       width, not where they start (and the inverted colours).
-- [ ] Screen wording: "it looks like LABEL" is the nearest simulated
+- [x] (Done 2026-11-07: the screenshot described first, a rough match said so.) Screen wording: "it looks like LABEL" is the nearest simulated
       picture's label, not a description of the screenshot. Describe the
       screenshot itself first, then the nearest picture and how alike;
       under about 80% say it's only a rough match.
@@ -961,7 +961,7 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       /HALT low, the Z80 has let go of the bus with nobody asking: the
       CPU, as the user suspects too. ASK the user what the fault turned out
       to be, then check the verdict against it. First real Issue 1.
-- [ ] The verdict for that pattern: all of A0-A15 "low" with /BUSACK low
+- [x] (Done 2026-11-07: the CPU first, the edge CLK second.) The verdict for that pattern: all of A0-A15 "low" with /BUSACK low
       is a floating bus (the CPU let it go), not lines stuck low: say so,
       and name the CPU first (with the clock rule above).
 The screen in the diagnosis (2026-11-07):
@@ -1000,6 +1000,12 @@ Later, software:
       majorchip-1) count 27 and 23 dead lines (13 and 9 before). Same
       verdict; check the count's wording.
 
+- [ ] (The user, 2026-11-07) The backslash problem: scripts sent inline to
+      the Bash tool lose their backslashes (a C "\n" broke the build twice
+      on 2026-11-07), and each time costs a fix-up and a rebuild. Look at
+      avoiding it for good (always a Write'd script with backslashes, or a
+      small patch tool in the scratchpad that takes old/new text from
+      files).
 - [ ] **V1.2 release page on GitHub (the user, 2026-11-08).** Tag V1.2
       (b8d2ac1) is pushed. At github.com/zzleezz/8bit-hw-simulator/releases/new:
       tag V1.2, title V1.2, paste github-release/release-description.txt,

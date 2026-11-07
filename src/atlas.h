@@ -264,6 +264,7 @@ typedef struct {
 typedef struct {
     char error[300];            /* set when it failed */
     char summary[300];          /* the picture, and how it was read */
+    char seen[256];             /* what the screenshot itself shows, in the labels' words */
     int w, h;
     uint32_t *picture;          /* the screenshot, at most 400 wide, RGBA (malloc'd) */
     int ngroups;

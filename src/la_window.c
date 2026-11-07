@@ -1094,6 +1094,89 @@ static void stage_strip(struct nk_context *ctx, const int *st, int cur, bool run
     }
 }
 
+/* How many rows TEXT takes wrapped at word breaks to AVAIL pixels, as
+ * nk_label_wrap wraps it (near enough: a row more is only a gap). */
+static int wrap_rows(const struct nk_user_font *f, const char *text, float avail) {
+    int rows = 1;
+    float x = 0, space = f->width(f->userdata, f->height, " ", 1);
+    for (const char *p = text; *p; ) {
+        while (*p == ' ') p++;
+        const char *w = p;
+        while (*p && *p != ' ') p++;
+        if (p == w) break;
+        float ww = f->width(f->userdata, f->height, w, (int)(p - w));
+        if (x > 0 && x + space + ww > avail) { rows++; x = ww; }
+        else x += (x > 0 ? space : 0) + ww;
+        while (x > avail) { rows++; x -= avail; }    /* a word wider than the row */
+    }
+    return rows;
+}
+
+static int lead_spaces(const char *l, const char *end) {
+    int n = 0;
+    while (l + n < end && l[n] == ' ') n++;
+    return n;
+}
+
+/* Does the line at L (to E) start something of its own: an item ("  2."),
+ * a verdict ("  OK", "  FAULT", "  Note"), a stage ("3 of 6,")? */
+static bool starts_new(const char *l, const char *e) {
+    int sp = lead_spaces(l, e);
+    const char *q = l + sp;
+    if (q >= e) return true;
+    if (isdigit((unsigned char)*q)) {
+        const char *d = q;
+        while (d < e && isdigit((unsigned char)*d)) d++;
+        if (d < e && (*d == '.' || !strncmp(d, " of ", 4))) return true;
+    }
+    static const char *const heads[] = { "OK", "FAULT", "Wrong too", "It never", "Not in", "Note", "Also on it",
+                                         "CLK:", "/RESET:", "/INT:", "/HALT:", "The CPU:", "In the atlas",
+                                         "It agrees", "The nearest", "From the screen" };
+    for (size_t k = 0; k < sizeof(heads) / sizeof(heads[0]); k++)
+        if (!strncmp(q, heads[k], strlen(heads[k]))) return true;
+    return false;
+}
+
+/* The paragraph from LINE (up to END) into OUT, its lines joined: a line
+ * carries on the one before when it isn't blank and doesn't start
+ * something of its own, and either is indented deeper than an item's start
+ * (its wrapped text) or the line before was a full terminal line (over 70
+ * characters) ending mid-sentence. The next paragraph's start returned. */
+static const char *para_next(const char *line, const char *end, char *out, size_t cap) {
+    size_t n = 0;
+    out[0] = 0;
+    const char *e = memchr(line, '\n', (size_t)(end - line));
+    if (!e) e = end;
+    int first_sp = lead_spaces(line, e);
+    size_t len = (size_t)(e - line);
+    if (len > cap - 1) len = cap - 1;
+    memcpy(out, line, len);
+    n = len;
+    out[n] = 0;
+    size_t prev_len = len;
+    const char *next = e < end ? e + 1 : end;
+    while (next < end && prev_len > 0) {
+        const char *ne = memchr(next, '\n', (size_t)(end - next));
+        if (!ne) ne = end;
+        if (ne == next || starts_new(next, ne)) break;
+        int sp = lead_spaces(next, ne);
+        bool deeper = sp > first_sp;
+        char last = out[n ? n - 1 : 0];
+        bool full = prev_len > 70 && last != ':' && last != '.';
+        if (!deeper && !full) break;
+        const char *q = next + sp;
+        size_t ql = (size_t)(ne - q);
+        if (n + 1 + ql >= cap) break;
+        out[n++] = ' ';
+        memcpy(out + n, q, ql);
+        n += ql;
+        out[n] = 0;
+        prev_len = (size_t)(ne - next);
+        next = ne < end ? ne + 1 : end;
+    }
+    return next;
+}
+
 void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *machine) {
     if (!L.open) return;
     pthread_once(&once, init_sync);
@@ -1348,28 +1431,26 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         long jump = L.jump;
         L.jump = -1;
         float y = 0, jump_y = -1, lh = 16, gap = ctx->style.window.spacing.y;
+        const struct nk_user_font *f = ctx->style.font;
+        float avail = nk_window_get_content_region(ctx).w - 2 * ctx->style.window.group_padding.x -
+                      ctx->style.window.scrollbar_size.x - 8;
+        static char para[8192];
         for (const char *line = t; line < t + tl; ) {
-            const char *end = memchr(line, '\n', (size_t)(t + tl - line));
-            size_t len = end ? (size_t)(end - line) : (size_t)(t + tl - line);
-            if (jump >= 0 && jump_y < 0 && line - t >= jump) jump_y = y;
-            char buf[512];
-            snprintf(buf, sizeof(buf), "%.*s", (int)(len < sizeof(buf) - 1 ? len : sizeof(buf) - 1), line);
-            const struct nk_user_font *f = ctx->style.font;
-            float avail = nk_window_get_content_region(ctx).w - 2 * ctx->style.window.group_padding.x -
-                          ctx->style.window.scrollbar_size.x - 8;
-            float tw = f->width(f->userdata, f->height, buf, (int)strlen(buf));
-            int rows = avail > 50 ? (int)(tw / avail) + 1 : 1;
-            if (rows > 6) rows = 6;
+            /* A paragraph: the text's lines are wrapped for a terminal, so
+             * the lines that carry on the one before are joined, then
+             * wrapped to the window (see para_next). */
+            const char *start = line;
+            line = para_next(line, t + tl, para, sizeof(para));
+            if (jump >= 0 && jump_y < 0 && start - t >= jump) jump_y = y;
+            int rows = avail > 50 ? wrap_rows(f, para, avail) : 1;
             nk_layout_row_dynamic(ctx, lh * rows, 1);
             struct nk_color c = COL_TEXT;
-            if (strstr(buf, "FAULT") || strstr(buf, "Wrong too") || strstr(buf, "It never")) c = COL_FAULT;
-            else if (!strncmp(buf, "  OK", 4) || !strncmp(buf, "  It agrees", 11)) c = COL_TRACE;
-            else if (buf[0] == ' ' && buf[1] == ' ' && isdigit((unsigned char)buf[2])) c = COL_PULSE;
-            if (rows > 1) nk_label_colored_wrap(ctx, buf, ink(c));
-            else nk_label_colored(ctx, buf, NK_TEXT_LEFT, ink(c));
+            if (strstr(para, "FAULT") || strstr(para, "Wrong too") || strstr(para, "It never")) c = COL_FAULT;
+            else if (!strncmp(para, "  OK", 4) || !strncmp(para, "  It agrees", 11)) c = COL_TRACE;
+            else if (para[0] == ' ' && para[1] == ' ' && isdigit((unsigned char)para[2])) c = COL_PULSE;
+            if (rows > 1) nk_label_colored_wrap(ctx, para, ink(c));
+            else nk_label_colored(ctx, para, NK_TEXT_LEFT, ink(c));
             y += lh * rows + gap;
-            if (!end) break;
-            line = end + 1;
         }
         bool more = tl != L.shown_len;
         L.shown_len = tl;
