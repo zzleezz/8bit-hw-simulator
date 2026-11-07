@@ -17,6 +17,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "lapico.h"
 
 /* The signals of the edge connector the analyser can see. */
 enum {
@@ -115,6 +116,11 @@ typedef struct {
 /* The check alone, on DIAGNOSE's captures (O->screen, O->machine): 1 it
  * names faults, 0 none fit, -1 no screen. */
 int la_check(const la_cli_t *o);
+/* The analyser's boards plugged in, the master first as remembered (by
+ * its USB serial, in la-boards.txt beside the program; *known: it was).
+ * la_boards_remember saves which is the master. */
+int la_boards(lp_port_t *p, int max, bool *known);
+bool la_boards_remember(const char *master, const char *slave);
 int la_cli(const la_cli_t *o);
 /* The parts a diagnosis's text names, as the window outlines them: in the
  * items under "What to look at" and "From the screen, what to look at"

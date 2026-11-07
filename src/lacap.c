@@ -6,6 +6,7 @@
 #include "zx48.h"
 #include "lapico.h"
 #include "atlas.h"
+#include "filedialog.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -1498,13 +1499,77 @@ static void list_devices(void) {
     }
 }
 
-/* --la-ports "A,B": each a port (COM12) or a board's USB serial number. */
+/* Which board is the master, by its USB serial number (the COM ports
+ * change from PC to PC): la-boards.txt beside the program. */
+static void boards_file(char *out, int len) {
+    char dir[1024];
+    if (filedialog_exe_dir(dir, sizeof(dir))) snprintf(out, (size_t)len, "%s/la-boards.txt", dir);
+    else snprintf(out, (size_t)len, "la-boards.txt");
+}
+
+int la_boards(lp_port_t *p, int max, bool *known) {
+    int n = 0;
+    const char *fake = getenv("LA_FAKE_BOARDS");    /* for tests: "COM4=SERIAL,COM5=SERIAL" */
+    if (fake && *fake) {
+        for (const char *s = fake; *s && n < max; ) {
+            size_t len = strcspn(s, ",");
+            char w[130];
+            snprintf(w, sizeof(w), "%.*s", (int)(len < 129 ? len : 129), s);
+            char *eq = strchr(w, '=');
+            if (eq) *eq = 0;
+            snprintf(p[n].port, sizeof(p[n].port), "%.63s", w);
+            snprintf(p[n].serial, sizeof(p[n].serial), "%.63s", eq ? eq + 1 : "");
+            n++;
+            s += len + (s[len] == ',');
+        }
+    } else n = lp_find(p, max);
+    *known = false;
+    char path[1100], line[200], master[64] = "";
+    boards_file(path, sizeof(path));
+    FILE *f = fopen(path, "r");
+    if (f) {
+        while (fgets(line, sizeof(line), f))
+            if (!strncmp(line, "master ", 7)) sscanf(line + 7, "%63s", master);
+        fclose(f);
+    }
+    for (int i = 0; master[0] && i < n; i++)
+        if (p[i].serial[0] && !strcasecmp(p[i].serial, master)) {
+            lp_port_t t = p[0]; p[0] = p[i]; p[i] = t;
+            *known = true;
+            break;
+        }
+    return n;
+}
+
+bool la_boards_remember(const char *master, const char *slave) {
+    if (!master || !master[0]) return false;
+    char path[1100];
+    boards_file(path, sizeof(path));
+    FILE *f = fopen(path, "w");
+    if (!f) return false;
+    fprintf(f, "# The logic analyser's boards, by USB serial number: the master is the one nearest\n"
+               "# the Spectrum (channels 1-24). Written by c64-hw-sim (\"Swap\" in its window).\n"
+               "master %s\nslave %s\n", master, slave && slave[0] ? slave : "?");
+    fclose(f);
+    return true;
+}
+
+/* --la-ports "A,B": each a port (COM12) or a board's USB serial number.
+ * Not given: the boards found, the master first as remembered. */
 static int pick_ports(const char *list, char ports[][64], int max, char *err, int errlen) {
     lp_port_t p[LP_MAXDEV * 2];
-    int found = lp_find(p, LP_MAXDEV * 2);
+    bool known = false;
+    int found = la_boards(p, LP_MAXDEV * 2, &known);
     if (!list) {
         if (found == 1) { snprintf(ports[0], 64, "%s", p[0].port); return 1; }
-        int n = snprintf(err, errlen, found ? "%d boards: say which is the master with --la-ports MASTER,OTHER (a port or a serial number):" :
+        if (found > 1 && known) {
+            int k = 0;
+            for (; k < found && k < max; k++) snprintf(ports[k], 64, "%.63s", p[k].port);
+            printf("The boards: %s is the master (serial %s, as remembered in la-boards.txt)\n", p[0].port, p[0].serial);
+            return k;
+        }
+        int n = snprintf(err, errlen, found ? "%d boards: say which is the master with --la-ports MASTER,OTHER (a port or a serial number),\n"
+                         "or once with Swap in the logic analyser window (remembered in la-boards.txt):" :
                          "no LogicAnalyzer boards found", found);
         for (int i = 0; i < found && n < errlen; i++) n += snprintf(err + n, errlen - n, " %s=%s", p[i].port, p[i].serial);
         return 0;

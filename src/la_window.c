@@ -47,6 +47,9 @@ static struct {
     bool all;
     bool start_pending;             /* --la-window: start on the next frame */
     char boards[400];               /* "Find boards": what was found */
+    lp_port_t bp[8];                /* the boards found, the master first */
+    int nbp;
+    bool bp_known;                  /* that order was remembered (la-boards.txt) */
 
     /* The run. */
     pthread_t th;
@@ -518,6 +521,38 @@ void la_window_set_picture(const char *path) {
     for (const char *p = path; *p; p++) if (*p == '/' || *p == '\\') nm = p + 1;
     snprintf(L.screen_msg, sizeof(L.screen_msg), "%s", nm);
     screen_again();
+}
+
+/* ---- The analyser's two boards: which is the master, Swap ---- */
+
+static void boards_rows(struct nk_context *ctx, float cw) {
+    char t[200];
+    for (int i = 0; i < 2; i++) {
+        nk_layout_row_dynamic(ctx, 20, 1);
+        snprintf(t, sizeof(t), "%s %.60s, serial %.60s", i == 0 ? "Master (nearest the Spectrum):" : "Slave:", L.bp[i].port,
+                 L.bp[i].serial[0] ? L.bp[i].serial : "?");
+        nk_label_colored(ctx, t, NK_TEXT_LEFT, i == 0 ? COL_TEXT : COL_DIMTEXT);
+    }
+    nk_layout_row_begin(ctx, NK_STATIC, 26, 2);
+    nk_layout_row_push(ctx, 90);
+    if (nk_widget_is_hovered(ctx))
+        nk_tooltip(ctx, "The other board is the master: swap them, and remember it for next time");
+    if (nk_button_label(ctx, "Swap")) {
+        lp_port_t x = L.bp[0]; L.bp[0] = L.bp[1]; L.bp[1] = x;
+        snprintf(L.ports, sizeof(L.ports), "%s,%s", L.bp[0].port, L.bp[1].port);
+        L.bp_known = la_boards_remember(L.bp[0].serial, L.bp[1].serial);
+    }
+    nk_layout_row_push(ctx, fmaxf(120, cw - 100));
+    if (L.bp_known)
+        nk_label_colored(ctx, "Remembered from before (la-boards.txt)", NK_TEXT_LEFT, nk_rgb(90, 200, 110));
+    else {
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "Not sure which is which? Unplug the slave's USB lead and press Find boards: the one left is the "
+                            "master. Wrong way round, a working Spectrum reads as CLK stuck, /WAIT and /BUSRQ low.");
+        nk_label_colored(ctx, "A guess: check it, Swap if wrong (hover for how)", NK_TEXT_LEFT,
+                         COL_FAULT);
+    }
+    nk_layout_row_end(ctx);
 }
 
 /* ---- "Pick a type...": the atlas's screens of the board, by kind ---- */
@@ -1114,18 +1149,23 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             if (ev & NK_EDIT_ACTIVE) L.typing = true;
             nk_layout_row_push(ctx, 120);
             if (nk_button_label(ctx, "Find boards")) {
-                lp_port_t p[8];
-                int n = lp_find(p, 8), m = 0;
-                m += snprintf(L.boards, sizeof(L.boards), n ? "Found:" : "No LogicAnalyzer boards found (plugged in?)");
-                for (int i = 0; i < n && m < (int)sizeof(L.boards); i++)
-                    m += snprintf(L.boards + m, sizeof(L.boards) - m, " %s (serial %s)", p[i].port, p[i].serial);
-                if (n == 2 && !L.ports[0]) snprintf(L.ports, sizeof(L.ports), "%s,%s", p[0].port, p[1].port);
+                L.nbp = la_boards(L.bp, 8, &L.bp_known);
+                L.boards[0] = 0;
+                if (!L.nbp) snprintf(L.boards, sizeof(L.boards), "No LogicAnalyzer boards found (plugged in?)");
+                else if (L.nbp == 1) snprintf(L.ports, sizeof(L.ports), "%s", L.bp[0].port);
+                else if (L.nbp == 2) snprintf(L.ports, sizeof(L.ports), "%s,%s", L.bp[0].port, L.bp[1].port);
+                else {
+                    int m = snprintf(L.boards, sizeof(L.boards), "%d boards found (two are used):", L.nbp);
+                    for (int i = 0; i < L.nbp && m < (int)sizeof(L.boards); i++)
+                        m += snprintf(L.boards + m, sizeof(L.boards) - m, " %s (serial %s)", L.bp[i].port, L.bp[i].serial);
+                }
             }
             nk_layout_row_end(ctx);
             if (L.boards[0]) {
                 nk_layout_row_dynamic(ctx, 20, 1);
                 nk_label_colored(ctx, L.boards, NK_TEXT_LEFT, COL_DIMTEXT);
             }
+            if (L.nbp == 2) boards_rows(ctx, cw);
         } else if (L.mode == MODE_SIMULATE)
             field(ctx, "Fault", L.fault, sizeof(L.fault), 70, cw,
                   "As --fault: IC26:removed, IC2.26:gnd, IC12:data0=1... (empty: the working board)");
@@ -1140,7 +1180,15 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         nk_spacing(ctx, 1);
         nk_layout_row_static(ctx, 34, 160, 2);
         if (zx && (L.mode != MODE_REPLAY || L.folder[0])) {
-            if (color_button(ctx, "Start", COL_GO, nk_rgb(255, 255, 255))) start(machine);
+            if (color_button(ctx, "Start", COL_GO, nk_rgb(255, 255, 255))) {
+            /* The boards as shown, started with: that's the order from now on. */
+            if (L.mode == MODE_ANALYSER && L.nbp == 2 && !L.bp_known) {
+                char want[200];
+                snprintf(want, sizeof(want), "%s,%s", L.bp[0].port, L.bp[1].port);
+                if (!strcmp(want, L.ports) && la_boards_remember(L.bp[0].serial, L.bp[1].serial)) L.bp_known = true;
+            }
+            start(machine);
+        }
         } else nk_spacing(ctx, 1);
         if (nk_button_label(ctx, "Close")) L.open = false;
         if (L.picking) {

@@ -702,10 +702,8 @@ and will take the captures; Pico model to be agreed with Jim.
       with both Pico 2 boards and nothing on the inputs (10 in a row).
 - [x] --la-capture with the Spectrum attached (live1.lac): the bits are on
       the right channels, all 5116 shared cycles match the simulated Issue 2.
-- [ ] Setup for anyone's boards (other serial numbers): plug in the board
-      nearest the Spectrum first (the master), then the other (the slave);
-      the simulator sees which COM port came and saves both serials
-      (--la-setup and in the GUI). Then capture from the GUI.
+- [x] Setup for anyone's boards (other serial numbers): done as Swap in the
+      window, remembered in la-boards.txt (2026-11-07, section 12).
 - [x] 2026-11-06 Capture scenarios: --la-trigger reset/ramcheck/ramdone/
       copyright/main/interrupt/addr=XXXX, glitch re-arm, the simulated
       board at the same stage, CPU vs data in the compare, RAM read-backs,
@@ -714,6 +712,18 @@ and will take the captures; Pico model to be agreed with Jim.
       --la-diagnose, diagnose.bat, 2026-11-06).
 - [ ] A game running as a health test (needs a trigger inside the game:
       addr= on its own code, or interrupt with the game's IM 2 vector).
+- [ ] (The user, 2026-11-07) Instead of a game: our own test program for
+      the Spectrum, loaded from a Dandanator or a DivMMC cartridge plugged
+      into the back of the logic analyser interface (its pass-through edge
+      connector). Written for the analyser: it runs known code at known
+      addresses (easy triggers, each test its own stage) and exercises
+      what the boot doesn't: every RAM address and pattern, the keyboard
+      port, the ULA's ports (border, beeper, MIC/EAR), contention timing,
+      IM 2, the upper RAM's refresh. The simulator runs the same program,
+      so every capture compares cycle by cycle. To check: the cartridge's
+      own lines on the bus (/ROMCS held high by it, its ROM paging) and
+      what the analyser's channels see then; the program also as a .tap
+      / .z80 for the DivMMC.
 - [x] Name the RAM chip from the wrong bit and the address (Issue 2: IC6-13
       lower 16K, IC15-22 upper 32K, one per data bit). Done in
       --la-diagnose; a real faulty 4116 (i2-lr1, IC7) named right.
@@ -858,13 +868,15 @@ Later, needs the user at the bench:
 From the first bench run on another PC (2026-11-07; folders
 diagnosis-i1-test1/-test4, diagnosis-i2-test2 (boards swapped) and
 diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
-- [ ] Master/slave: Find boards takes Windows' order, so on the other PC
+- [x] Master/slave: Find boards took Windows' order, so on the other PC
       the boards came swapped (COM4/COM5) and a working Issue 2 read as
-      "CLK stuck, /WAIT /BUSRQ low, /INT 12937 times". Remember the master
-      by its USB serial (ours: 31F0A0454251873A), show "COMx = master
-      (serial ...)", a Swap button; a new pair set up once (master plugged
-      in first). This is the to-do section 10 "Setup for anyone's boards"
-      item, never built.
+      "CLK stuck, /WAIT /BUSRQ low, /INT 12937 times". Done: the master is
+      remembered by its USB serial in la-boards.txt beside the program
+      (ours: master 31F0A0454251873A, slave D809518F9E74C711); Find boards
+      shows "Master (nearest the Spectrum): COMx, serial ..." and the
+      slave, a Swap button, and "remembered" or "a guess"; Swap and Start
+      save it; --la-diagnose without --la-ports uses it. Tested with
+      LA_FAKE_BOARDS (no boards on this PC): not yet with the real boards.
 - [ ] Swapped-boards check after the idle capture: CLK dead with /WAIT and
       /BUSRQ low and nonsense on the bus -> "the boards look the wrong way
       round: press Swap", not a fault verdict. (Test: diagnosis-i2-test2.)

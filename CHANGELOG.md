@@ -51,6 +51,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   needless "hold it, once more"). The reset button's bounce (the CPU
   starting again from 0000, up to 140 times) is skipped: the stage is
   compared from the last restart.
+- The logic analyser window remembers which board is the master by its
+  USB serial number (`la-boards.txt` beside the program), so another PC's
+  COM numbers don't matter: **Find boards** shows the master and the
+  slave, a **Swap** button, and whether the order is remembered or a
+  guess. The wrong way round, a working Spectrum read as a dead one.
+  `--la-diagnose` without `--la-ports` uses the remembered order.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

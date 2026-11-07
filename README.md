@@ -437,8 +437,12 @@ nothing on a 48K uses, are only a note. Checked on real faulty boards:
 ULAs, Z80s, 74LS157 multiplexers and 4116 RAM chips.
 
 In the window: **Diagnose** > **Diagnose with the logic analyser...** (with
-a Spectrum on the bench). Press **Find boards** (the board nearest the
-Spectrum is the master, first), then the green **Start**, and answer its
+a Spectrum on the bench). Press **Find boards**: it shows which board it
+takes as the master (the one nearest the Spectrum, channels 1-24) and the
+slave. The first time it's a guess, Windows' order: if it's the wrong way
+round press **Swap** (not sure which is which? unplug the slave's USB lead
+and press Find boards). It's remembered by the boards' serial numbers in
+`la-boards.txt` beside the program, on any PC. Then the green **Start**, and answer its
 questions with the buttons (green **Continue**, red **Stop**). A row of
 boxes shows the stages (blue: now, green: OK, red: wrong; click one for
 its text). When it's waiting for the Spectrum it shows a big red
@@ -493,7 +497,7 @@ IC13's faults came first, 5 of the 6 stages the same, a working board 2.
 
 From the command line:
 
-- `--la-diagnose DIR --board issue2 --la-ports MASTER,OTHER [--la-all]`
+- `--la-diagnose DIR --board issue2 [--la-ports MASTER,OTHER] [--la-all]`
   as the window does (`--la-replay`: from DIR's captures again;
   `--la-simulate --fault SPEC`: the simulated board). The captures and
   `diagnosis.txt` (every comparison) go in DIR, replacing the ones from an
