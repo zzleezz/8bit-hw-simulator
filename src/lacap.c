@@ -5,8 +5,12 @@
 #include "board.h"
 #include "zx48.h"
 #include "lapico.h"
+#include "atlas.h"
+#include <ctype.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Everything printed goes to the --la-log file as well. */
@@ -18,9 +22,34 @@ void (*la_status_hook)(int kind, int stage, int state);
 static void la_status(int kind, int stage, int state) {
     if (la_status_hook) la_status_hook(kind, stage, state);
 }
+/* What the diagnosis printed (for the parts its verdict names): kept
+ * while VTEXT_ON. */
+static char *vtext;
+static size_t vtext_n, vtext_cap;
+static bool vtext_on;
+static void vtext_add(const char *fmt, va_list a) {
+    char buf[8192];
+    int n = vsnprintf(buf, sizeof(buf), fmt, a);
+    if (n <= 0) return;
+    if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;
+    if (vtext_n + (size_t)n + 1 > vtext_cap) {
+        size_t cap = (vtext_cap ? vtext_cap * 2 : 16384) + (size_t)n;
+        char *p = realloc(vtext, cap);
+        if (!p) return;
+        vtext = p;
+        vtext_cap = cap;
+    }
+    memcpy(vtext + vtext_n, buf, (size_t)n + 1);
+    vtext_n += (size_t)n;
+}
 static int la_out(const char *fmt, ...) {
     va_list a;
     int n = 0;
+    if (vtext_on && la_screen) {
+        va_start(a, fmt);
+        vtext_add(fmt, a);
+        va_end(a);
+    }
     va_start(a, fmt);
     if (la_screen && la_text_hook) {
         char buf[8192];
@@ -635,9 +664,16 @@ static void find_nets(board_t *b, int net[LA_NSIG], la_capture_t *c) {
         snprintf(names, sizeof(names), "%s", sig_names[i]);
         for (size_t k = 0; k < sizeof(sig_nets) / sizeof(sig_nets[0]); k++)
             if (sig_nets[k].sig == i) snprintf(names, sizeof(names), "%s", sig_nets[k].nets);
-        for (char *w = strtok(names, " "); w && net[i] < 0; w = strtok(NULL, " ")) {
-            int n = sim_find_net(s, w);
+        /* (Not strtok: boards are recorded on several threads at once.) */
+        for (char *w = names; *w && net[i] < 0; ) {
+            while (*w == ' ') w++;
+            char *e = w + strcspn(w, " ");
+            bool last = !*e;
+            *e = 0;
+            int n = *w ? sim_find_net(s, w) : -1;
             if (n >= 0 && board_net_simulated(b, n)) net[i] = n;
+            if (last) break;
+            w = e + 1;
         }
         if (net[i] < 0 || !c) continue;
         c->have |= 1ull << i;
@@ -2828,10 +2864,508 @@ static int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev
 }
 
 #define STOP_MSG "  Couldn't capture it: the diagnosis goes on what the stages before show\n"
+/* ---- The screen (--la-screen): a picture of the monitor, matched against
+ * the fault atlas (atlas.h), with what the bus showed. ---- */
+
+/* Whether the D0-D7 at LINE[I] (to J) is a data bit, not a diode: it
+ * follows "bit", "bits", "line(s)", "pin(s)" or "gave", perhaps after
+ * other bits ("bits D1 D2 D3", "pins D0-D4", "bit D7"). */
+static bool data_bit_word(const char *line, size_t i, size_t j) {
+    if (j - i != 2 || line[i] != 'D' || line[i + 1] < '0' || line[i + 1] > '7') return false;
+    size_t k = i;
+    for (;;) {
+        while (k > 0 && (line[k - 1] == ' ' || line[k - 1] == ',' || line[k - 1] == '-')) k--;
+        size_t e = k;
+        while (k > 0 && isalnum((unsigned char)line[k - 1])) k--;
+        if (k == e) return false;
+        size_t n = e - k;
+        if (n == 2 && line[k] == 'D' && line[k + 1] >= '0' && line[k + 1] <= '7') continue;
+        static const char *words[] = { "bit", "bits", "line", "lines", "pin", "pins", "gave" };
+        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); w++)
+            if (strlen(words[w]) == n && !strncmp(line + k, words[w], n)) return true;
+        return false;
+    }
+}
+
+static int part_index(board_t *b, const char *ref) {
+    for (int i = 0; b && i < b->sim.nparts; i++)
+        if (!strcmp(b->sim.parts[i].ref, ref)) return i;
+    return -1;
+}
+
+static const char *const parts_heads[] = { "What to look at", "From the screen, what to look at",
+                                           "From the check, what to look at" };
+
+int la_text_parts(const struct machine *m, const char *text, char (*ref)[16], int *level, int max) {
+    board_t *b = board_create(m);
+    if (!b) return 0;
+    int n = 0, sec = 0, first_sec = -1, item = 0, kind = 0;
+    bool in = false, note = false, taken = false;
+    for (const char *line = text; line && *line; ) {
+        const char *end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        int head = -1;
+        for (int h = 0; h < 3; h++) if (!strncmp(line, parts_heads[h], strlen(parts_heads[h]))) head = h;
+        int num;
+        if (head >= 0) { in = true; sec++; item = 0; note = false; kind = head; }
+        else if (in) {
+            if (sscanf(line, "  %d.", &num) == 1) {
+                item = num;
+                note = false;
+                taken = false;
+                if (item == 1 && first_sec < 0) first_sec = sec;
+            } else if (!strncmp(line, "  Note:", 7)) note = true;
+            else if (len && line[0] != ' ') in = false;
+            /* The check's items: the fault's own part only (its description
+             * names nets and the parts on them). */
+            if (in && item && !note && !(kind == 2 && taken))
+                for (size_t i = 0; i < len; ) {
+                    if (isupper((unsigned char)line[i]) && (i == 0 || !isalnum((unsigned char)line[i - 1]))) {
+                        size_t j = i;
+                        while (j < len && isupper((unsigned char)line[j])) j++;
+                        size_t d = j;
+                        while (d < len && isdigit((unsigned char)line[d])) d++;
+                        if (d > j && d - i < 12 && (d >= len || !isalnum((unsigned char)line[d])) && !data_bit_word(line, i, d)) {
+                            char r[16];
+                            snprintf(r, sizeof(r), "%.*s", (int)(d - i), line + i);
+                            if (part_index(b, r) >= 0 && !(kind == 2 && taken)) {
+                                taken = true;
+                                int lev = sec == first_sec && item == 1 ? 2 : 1, k;
+                                for (k = 0; k < n && strcmp(ref[k], r); k++) {}
+                                if (k < n) { if (lev > level[k]) level[k] = lev; }
+                                else if (n < max) { snprintf(ref[n], 16, "%s", r); level[n++] = lev; }
+                            }
+                        }
+                        i = d > i ? d : i + 1;
+                    } else i++;
+                }
+        }
+        if (!end) break;
+        line = end + 1;
+    }
+    board_destroy(b);
+    return n;
+}
+
+/* The parts a fault SPEC is on ("IC13:data0=1 R26:removed" -> IC13 R26; a
+ * bridge "IC7.5-6:short" -> IC7; the ULA inside -> ULA's ref). */
+typedef struct { char ref[16]; int n, first; } spart_t;
+static void spec_parts(const atlas_cause_t *c, const char *ula, spart_t *p, int *np, int max, int order) {
+    const char *s = c->spec;
+    while (*s) {
+        while (*s == ' ') s++;
+        if (!*s) break;
+        size_t k = strcspn(s, ".: ");
+        char r[16];
+        snprintf(r, sizeof(r), "%.*s", (int)(k < 15 ? k : 15), s);
+        if (c->suspect) snprintf(r, sizeof(r), "%s", ula ? ula : "ULA");
+        int i;
+        for (i = 0; i < *np && strcmp(p[i].ref, r); i++) {}
+        if (i < *np) p[i].n++;
+        else if (*np < max) { snprintf(p[*np].ref, sizeof(p[0].ref), "%s", r); p[*np].n = 1; p[*np].first = order; (*np)++; }
+        if (c->suspect) break;
+        s += strcspn(s, " ");
+    }
+}
+
+/* Faults the bus would most likely have shown, the boot being right: on the
+ * CPU, the ROM or a RAM chip (the ROM's RAM test reads all of it). */
+static bool bus_covers(const char *ref) {
+    const char *cpu = ref_of("CPU"), *rom = ref_of("ROM");
+    if ((cpu && !strcmp(ref, cpu)) || (rom && !strcmp(ref, rom))) return true;
+    int i = part_index(vboard, ref);
+    const char *l = i >= 0 ? board_part_label(vboard, i) : NULL;
+    return l && (!strncmp(l, "LRAM", 4) || !strncmp(l, "URAM", 4));
+}
+
+/* The screen's part of the verdict: what the picture O->SCREEN matches,
+ * against what the bus named (BUS_TEXT: what was printed, its "What to
+ * look at"), BUS_OK when it found nothing wrong. 1: the screen is wrong
+ * (it names suspects), 0: a working board's picture, -1: no use. */
+static int screen_part(const la_cli_t *o, const machine_t *m, const char *bus_text, bool bus_ok) {
+    const char *img = o->screen, *nm = img;
+    for (const char *p = img; *p; p++) if (*p == '/' || *p == '\\') nm = p + 1;
+    int am = atlas_machine_of(m);
+    atlas_match_opts_t mo = { .path = o->atlas ? o->atlas : "fault_atlas.bin", .image = img, .top = ATLAS_MAX_GROUPS,
+                              .causes = -1, .machine = am, .cart = 0, .carts = o->carts ? o->carts : "carts" };
+    atlas_result_t r;
+    memset(&r, 0, sizeof(r));
+    bool ok = am >= 0 && atlas_match_run(&mo, &r);
+    if ((!ok || !r.ngroups) && am >= 0 && atlas_family(am) != am) {    /* a board the atlas has no pictures of */
+        atlas_result_free(&r);
+        memset(&r, 0, sizeof(r));
+        mo.machine = atlas_family(am);
+        ok = atlas_match_run(&mo, &r);
+    }
+    printf("\nThe screen (%s): ", nm);
+    if (!ok || !r.ngroups) {
+        printf("can't use it: %s\n", r.error[0] ? r.error : "nothing in the atlas is like it");
+        atlas_result_free(&r);
+        return -1;
+    }
+    /* The groups as alike as the best (one picture, several ways to it). */
+    float best = r.groups[0].score;
+    bool healthy = r.groups[0].healthy;
+    int nf = 0, np = 0;
+    spart_t sp[96];
+    vboard = board_create(m);
+    const char *ula = ref_of("ULA");
+    for (int g = 0; g < r.ngroups; g++) {
+        const atlas_group_t *gr = &r.groups[g];
+        if (gr->score < best - 0.03f || gr->healthy) continue;
+        for (int c = 0; c < gr->ncauses; c++) {
+            if (!gr->causes[c].spec[0]) continue;
+            spec_parts(&gr->causes[c], ula, sp, &np, 96, nf++);
+        }
+    }
+    printf("it looks like \"%s\" (%.0f%% alike)\n", r.groups[0].label, best * 100);
+    int rc = 1;
+    if (healthy || !np) {
+        printf("  A working board shows that too: the screen tells nothing more here.\n");
+        rc = 0;
+        goto out;
+    }
+    /* Most faults first; the bus being right, the parts it would have
+     * shown last. */
+    for (int i = 1; i < np; i++)
+        for (int j = i; j > 0; j--) {
+            bool cj = bus_ok && bus_covers(sp[j].ref), ci = bus_ok && bus_covers(sp[j - 1].ref);
+            bool before = cj != ci ? !cj : sp[j].n != sp[j - 1].n ? sp[j].n > sp[j - 1].n : sp[j].first < sp[j - 1].first;
+            if (!before) break;
+            spart_t t = sp[j]; sp[j] = sp[j - 1]; sp[j - 1] = t;
+        }
+    printf("  In the atlas, that picture comes from %d fault%s on %d part%s.\n", nf, nf == 1 ? "" : "s", np, np == 1 ? "" : "s");
+    char bref[32][16];
+    int blev[32], nb = bus_ok || !bus_text ? 0 : la_text_parts(m, bus_text, bref, blev, 32);
+    if (nb) {
+        char agree[200] = "", named[200] = "";
+        int na = 0, a = 0, b = 0;
+        for (int k = 0; k < nb; k++) {
+            b += snprintf(named + b, sizeof(named) - b > 0 ? sizeof(named) - b : 0, "%s%s", k ? ", " : "", bref[k]);
+            for (int i = 0; i < np; i++)
+                if (!strcmp(sp[i].ref, bref[k])) {
+                    a += snprintf(agree + a, sizeof(agree) - a > 0 ? sizeof(agree) - a : 0, "%s%s", na ? ", " : "", bref[k]);
+                    na++;
+                    break;
+                }
+        }
+        if (na)
+            printf("  It agrees with the bus: %s %s among them (a fault there gives this picture as well).\n", agree,
+                   na == 1 ? "is" : "are");
+        else {
+            printf("  None of them is what the bus names (%s). The bus is the more direct of the two; both together\n"
+                   "  can be two faults, or a fault the atlas doesn't have.\n", named);
+            printf("From the screen, what to look at as well:\n");
+            for (int i = 0; i < np && i < 4; i++) {
+                int pi = part_index(vboard, sp[i].ref);
+                const char *l = pi >= 0 ? board_part_label(vboard, pi) : NULL;
+                printf("  %d. %s%s%s%s: %d of those faults\n", i + 1, sp[i].ref, l ? " (" : "", l ? l : "", l ? ")" : "", sp[i].n);
+            }
+        }
+        goto out;
+    }
+    printf("From the screen, what to look at, most likely first%s:\n", bus_ok ? "" : " (the bus names no part)");
+    int shown = 0, ncov = 0;
+    for (int i = 0; i < np && shown < 6; i++) {
+        if (bus_ok && bus_covers(sp[i].ref)) { ncov++; continue; }
+        int pi = part_index(vboard, sp[i].ref);
+        const char *l = pi >= 0 ? board_part_label(vboard, pi) : NULL;
+        bool inside = ula && !strcmp(sp[i].ref, ula);
+        printf("  %d. %s%s%s%s: %d of those faults%s\n", ++shown, sp[i].ref, l ? " (" : "", l ? l : "", l ? ")" : "", sp[i].n,
+               inside ? " (at its pins; and inside it, which the atlas can't show)" : "");
+    }
+    if (!shown) printf("  None but the parts below.\n");
+    if (bus_ok) {
+        char cov[400];
+        int c = 0;
+        for (int i = 0; i < np; i++) {
+            if (!bus_covers(sp[i].ref)) continue;
+            int pi = part_index(vboard, sp[i].ref);
+            const char *l = pi >= 0 ? board_part_label(vboard, pi) : NULL;
+            if (c < (int)sizeof(cov))
+                c += snprintf(cov + c, sizeof(cov) - c, "%s%s%s%s%s", c ? ", " : "", sp[i].ref, l ? " (" : "", l ? l : "", l ? ")" : "");
+            ncov++;
+        }
+        if (c)
+            printf("  Note: less likely, as the bus is right and would most likely have shown a fault on them: %s.\n", cov);
+    } else if (np > shown) printf("  ... and %d more part%s\n", np - shown, np - shown == 1 ? "" : "s");
+    (void)ncov;
+out:
+    board_destroy(vboard);
+    vboard = NULL;
+    atlas_result_free(&r);
+    return rc;
+}
+
+int la_screen_again(const la_cli_t *o, const char *bus_text, bool bus_ok) {
+    if (!o->screen || !o->machine) return -1;
+    return screen_part(o, o->machine, bus_text, bus_ok);
+}
+
+/* ---- The check (--la-check): the screen's faults put on the simulated
+ * board one by one, each stage recorded and compared with the analyser's
+ * capture of it. The fault that does what the real board did, stage by
+ * stage, is the one. ---- */
+
+#define CHECK_MAX 32
+typedef struct {
+    char spec[96], desc[320];
+    int same;                   /* stages the same as the captures */
+    long cycles;                /* where the others differ: cycles the same before it */
+    bool bad;                   /* couldn't be simulated */
+} cand_t;
+
+typedef struct {
+    const machine_t *m;
+    cand_t *c; int nc;
+    la_capture_t *d; const char *const *path; int nst;
+    int next;                   /* the next job: candidate * nst + stage */
+    pthread_mutex_t mu;
+    int done, total;
+} check_t;
+
+static void multi_step(board_t *b, void *ctx) {
+    rec_t *r = ctx;
+    for (int s = 0; r[s].pre >= 0; s++) rec_step(b, &r[s]);
+}
+
+/* The board with SPEC ("" none) recorded for all N stages at once, as
+ * record_board() does each (from power on, each on its trigger): one boot
+ * for all, as the simulation goes the same way every time. GOT[s]: stage s
+ * came. False if SPEC can't be put on the board. */
+static bool record_stages(const machine_t *m, const char *spec, const la_capture_t *d, int n, la_capture_t *out, bool *got) {
+    board_t *b = board_create(m);
+    if (spec[0] && !board_apply_fault_spec(b, spec)) { board_destroy(b); return false; }
+    rec_t r[DIAG_NSTAGES + 1];
+    memset(r, 0, sizeof(r));
+    long long limit_ms = 0;
+    for (int s = 0; s < n; s++) {
+        int trig = d[s].trig_addr, pre = trig >= 0 ? 2000 : 512, post = sim_length(&d[s]);
+        if (post <= 0) post = 32000;
+        int arm = trig == 0x0038 ? 2000 : 0, max_ms = trig >= 0 ? arm + 4000 : 1000;
+        if (max_ms > limit_ms) limit_ms = max_ms;
+        r[s] = (rec_t){ .pre = pre, .post = post, .trig_addr = trig,
+                        .arm_step = (long long)arm * (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000) };
+        memset(&out[s], 0, sizeof(out[s]));
+        find_nets(b, r[s].net, &out[s]);
+        r[s].ring = calloc((size_t)pre, sizeof(uint64_t));
+        r[s].out = calloc((size_t)pre + (size_t)post, sizeof(uint64_t));
+    }
+    r[n].pre = -1;
+    bool hooked = board_step_hook(b, multi_step, r);
+    long long limit = (long long)ZX_FREQ * limit_ms / 1000;
+    for (long long t = 0; hooked && t < limit; t += 1000) {
+        bool all = true;
+        for (int s = 0; s < n && all; s++) all = r[s].done;
+        if (all) break;
+        board_run(b, 1000);
+    }
+    if (hooked) board_step_hook(b, NULL, NULL);
+    board_destroy(b);
+    for (int s = 0; s < n; s++) {
+        free(r[s].ring);
+        got[s] = r[s].triggered && r[s].done;
+        if (!got[s]) { free(r[s].out); out[s].s = NULL; continue; }
+        out[s].s = r[s].out;
+        out[s].n = r[s].nout;
+        out[s].pre = r[s].rcount;
+        out[s].trig_addr = r[s].trig_addr;
+        out[s].freq = ZX_FREQ * ZX_STEPS_PER_CYCLE;
+    }
+    return true;
+}
+
+static void *check_thread(void *arg) {
+    check_t *k = arg;
+    for (;;) {
+        pthread_mutex_lock(&k->mu);
+        int j = k->next++;
+        pthread_mutex_unlock(&k->mu);
+        if (j >= k->nc) break;
+        cand_t *c = &k->c[j];
+        la_capture_t r[DIAG_NSTAGES];
+        bool got[DIAG_NSTAGES];
+        bool ok = record_stages(k->m, c->spec, k->d, k->nst, r, got);
+        pthread_mutex_lock(&k->mu);
+        if (!ok) c->bad = true;
+        for (int s = 0; ok && s < k->nst; s++) {
+            if (!got[s]) continue;      /* it never gets there: that stage differs */
+            cmp_out_t co = { 0 };
+            bool was = la_screen;
+            la_screen = false;          /* the comparisons go to the log */
+            printf("\n==== check: %s, %s\n", c->spec[0] ? c->spec : "a working board", k->path[s]);
+            compare(k->path[s], &k->d[s], c->spec[0] ? c->spec : "a working board", &r[s], 8, false, &co);
+            la_screen = was;
+            if (co.rc == 0) c->same++;
+            else c->cycles += co.cycle;
+            la_free(&r[s]);
+        }
+        k->done++;
+        la_status(LA_EV_PROGRESS, k->done, k->total);
+        pthread_mutex_unlock(&k->mu);
+    }
+    return NULL;
+}
+
+static int check_threads(void) {
+    const char *e = getenv("LA_JOBS");
+    int n = e ? atoi(e) : (atlas_logical_processors() + 1) / 2;
+    return n < 1 ? 1 : n > 64 ? 64 : n;
+}
+
+/* The faults the screen O->SCREEN matches (the likeliest of each group
+ * first, then the next of each...), at most MAX; the ULA inside apart. */
+static int screen_candidates(const la_cli_t *o, const machine_t *m, cand_t *c, int max) {
+    int am = atlas_machine_of(m);
+    atlas_match_opts_t mo = { .path = o->atlas ? o->atlas : "fault_atlas.bin", .image = o->screen, .top = ATLAS_MAX_GROUPS,
+                              .causes = -1, .machine = am, .cart = 0, .carts = o->carts ? o->carts : "carts" };
+    atlas_result_t r;
+    memset(&r, 0, sizeof(r));
+    bool ok = am >= 0 && atlas_match_run(&mo, &r);
+    if ((!ok || !r.ngroups) && am >= 0 && atlas_family(am) != am) {
+        atlas_result_free(&r);
+        memset(&r, 0, sizeof(r));
+        mo.machine = atlas_family(am);
+        ok = atlas_match_run(&mo, &r);
+    }
+    int n = 0;
+    if (ok && r.ngroups && !r.groups[0].healthy) {
+        float best = r.groups[0].score;
+        for (int depth = 0; n < max; depth++) {
+            bool any = false;
+            for (int g = 0; g < r.ngroups && n < max; g++) {
+                const atlas_group_t *gr = &r.groups[g];
+                if (gr->score < best - 0.03f || gr->healthy) continue;
+                int seen = 0;
+                for (int q = 0; q < gr->ncauses; q++) {
+                    const atlas_cause_t *a = &gr->causes[q];
+                    if (a->suspect || !a->spec[0]) continue;
+                    if (seen++ != depth) continue;
+                    any = true;
+                    int dup = 0;
+                    for (int i = 0; i < n && !dup; i++) dup = !strcmp(c[i].spec, a->spec);
+                    if (dup) break;
+                    memset(&c[n], 0, sizeof(c[n]));
+                    snprintf(c[n].spec, sizeof(c[n].spec), "%s", a->spec);
+                    const char *dd = a->desc;
+                    size_t l = strcspn(dd, "\n");
+                    snprintf(c[n].desc, sizeof(c[n].desc), "%.*s", (int)(l < 300 ? l : 300), dd);
+                    n++;
+                    break;
+                }
+            }
+            if (!any) break;
+        }
+    }
+    atlas_result_free(&r);
+    return n;
+}
+
+static const char *folder_screen(const char *dir, char *out, int len);
+int la_check(const la_cli_t *o) {
+    const machine_t *m = o->machine ? o->machine : &machine_zx48;
+    const char *dir = o->diagnose;
+    char sp[1100];
+    la_cli_t q = *o;
+    if (!q.screen && dir) q.screen = folder_screen(dir, sp, sizeof(sp));
+    o = &q;
+    if (!o->screen || !dir) return -1;
+    static cand_t c[CHECK_MAX + 1];
+    int max = o->check > 0 && o->check < CHECK_MAX ? o->check : CHECK_MAX;
+    /* c[0]: a working board, what the others are measured against. */
+    memset(&c[0], 0, sizeof(c[0]));
+    int nc = screen_candidates(o, m, c + 1, max);
+    if (!nc) {
+        printf("\nChecked against the captures: the screen has no faults to check (a working board's picture, or\n"
+               "none read).\n");
+        return 0;
+    }
+    nc++;
+    /* The stages the analyser captured (not those that never came). */
+    la_capture_t d[DIAG_NSTAGES];
+    static char paths[DIAG_NSTAGES][1100];
+    const char *pp[DIAG_NSTAGES];
+    int nst = 0;
+    char err[300];
+    for (int i = 0; i < DIAG_NSTAGES; i++) {
+        const la_stage_t *st = stage_named(diag_plan[i].stage);
+        snprintf(paths[nst], sizeof(paths[0]), "%s/%s.lac", dir, st->name);
+        if (!la_read(paths[nst], &d[nst], err, sizeof(err))) continue;
+        pp[nst] = paths[nst];
+        nst++;
+    }
+    if (!nst) { printf("\nChecked against the captures: no captures in %s to check with.\n", dir); return 0; }
+    int nt = check_threads();
+    if (nt > nc) nt = nc;
+    printf("\nChecked against the captures: %d fault%s of the screen's, each put on the simulated board and\n"
+           "its %d stage%s compared with the analyser's (%d at a time).\n", nc - 1, nc == 2 ? "" : "s", nst,
+           nst == 1 ? "" : "s", nt);
+    check_t k = { .m = m, .c = c, .nc = nc, .d = d, .path = pp, .nst = nst, .total = nc };
+    pthread_mutex_init(&k.mu, NULL);
+    pthread_t th[64];
+    int started = 0;
+    for (int i = 0; i < nt; i++) if (pthread_create(&th[started], NULL, check_thread, &k) == 0) started++;
+    if (!started) check_thread(&k);
+    for (int i = 0; i < started; i++) pthread_join(th[i], NULL);
+    pthread_mutex_destroy(&k.mu);
+    for (int i = 0; i < nst; i++) la_free(&d[i]);
+    cand_t w = c[0];                    /* a working board */
+    printf("  A working board: %d of %d stage%s the same as the captures", w.same, nst, nst == 1 ? "" : "s");
+    if (w.same < nst) printf(", the others the same for %ld cycles", w.cycles);
+    printf(".\n");
+    /* Most stages the same first; then the most cycles the same where they differ. */
+    for (int i = 2; i < nc; i++)
+        for (int j = i; j > 1; j--) {
+            cand_t *a = &c[j], *b = &c[j - 1];
+            bool before = a->bad != b->bad ? !a->bad : a->same != b->same ? a->same > b->same : a->cycles > b->cycles;
+            if (!before) break;
+            cand_t t = *a; *a = *b; *b = t;
+        }
+    int better = 0;
+    for (int i = 1; i < nc; i++)
+        better += !c[i].bad && (c[i].same > w.same || (c[i].same == w.same && c[i].cycles > w.cycles));
+    if (!better) {
+        printf("  None of the screen's faults does more of what the board did than a working board: they don't\n"
+               "  explain the captures.\n");
+        return 0;
+    }
+    printf("From the check, what to look at, most likely first:\n");
+    int shown = 0;
+    for (int i = 1; i < nc && shown < 5; i++) {
+        if (c[i].bad || !(c[i].same > w.same || (c[i].same == w.same && c[i].cycles > w.cycles))) break;
+        if (c[i].same < c[1].same - 1) break;     /* well behind the best */
+        printf("  %d. %s: %d of %d stages the same", ++shown, c[i].spec, c[i].same, nst);
+        if (c[i].same < nst) printf(", the others for %ld cycles", c[i].cycles);
+        printf(" (%s)\n", c[i].desc);
+    }
+    if (c[1].same == nst)
+        printf("  Note: the first does just what the board did in every stage the analyser took.\n");
+    return 1;
+}
+
+/* A picture of the screen saved with the captures (the window's "screen.png"). */
+static const char *folder_screen(const char *dir, char *out, int len) {
+    static const char *const ext[] = { "png", "jpg", "jpeg", "bmp" };
+    for (int i = 0; i < 4; i++) {
+        snprintf(out, (size_t)len, "%s/screen.%s", dir, ext[i]);
+        FILE *f = fopen(out, "rb");
+        if (f) { fclose(f); return out; }
+    }
+    return NULL;
+}
+
 static int diagnose_run(const la_cli_t *o);
 static int diagnose(const la_cli_t *o) {
     bool own = !la_logf;
-    int rc = diagnose_run(o);
+    la_cli_t q = *o;
+    char sp[1100];
+    if (!q.screen && q.replay) q.screen = folder_screen(q.diagnose, sp, sizeof(sp));
+    vtext_n = 0;
+    if (vtext) vtext[0] = 0;
+    vtext_on = q.screen != NULL;
+    int rc = diagnose_run(&q);
+    vtext_on = false;
+    if (q.check && q.screen && la_check(&q) > 0 && rc == 0) rc = 2;
     if (own && la_logf) { fclose(la_logf); la_logf = NULL; }
     return rc;
 }
@@ -3024,6 +3558,11 @@ static int diagnose_run(const la_cli_t *o) {
             snprintf(ula, sizeof(ula), "the ULA (%s)", u ? u : "IC1");
             board_destroy(vboard);
             vboard = NULL;
+            if (o->screen)
+                printf("All %d stages are the same as a working %s: the CPU, the ROM, all of the RAM (the ROM's RAM test)\n"
+                       "and the start of BASIC are good. A wrong picture is then the ULA's video side: %s reads the screen\n"
+                       "over its own lines to the lower RAM, which the edge connector doesn't show.\n", passed, m->board_name, ula);
+            else
             printf("All %d stages are the same as a working %s: the CPU, the ROM, all of the RAM (the ROM's RAM test)\n"
                    "and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.\n"
                    "If the picture is wrong all the same (the copyright message garbled, wrong colours): the CPU wrote\n"
@@ -3033,6 +3572,7 @@ static int diagnose_run(const la_cli_t *o) {
                    "fault inside the chip.\n",
                    passed, m->board_name, ula);
         }
+        if (o->screen && screen_part(o, m, vtext, true) > 0) return 2;
         return 0;
     }
     if (!strcmp(fail_stage, "idle") && idle == 2)
@@ -3044,6 +3584,7 @@ static int diagnose_run(const la_cli_t *o) {
                passed == 1 ? "is" : "are");
     verdict(&e, m, fail_stage, missing, &co, where);
     printf("\nThe captures and the whole comparison: %s (diagnosis.txt)\n", dir);
+    if (o->screen) screen_part(o, m, vtext, false);
     return 2;
 }
 

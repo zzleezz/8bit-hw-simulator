@@ -2087,6 +2087,10 @@ static void unlock_board(void);
 /* Match a screenshot (the board must NOT be locked: matching takes a
  * moment, and reads no board; the simulation goes on meanwhile). */
 static void diagnose_picture(const char *path) {
+    if (la_window_takes_picture()) {    /* the screen for the logic analyser's diagnosis */
+        la_window_set_picture(path);
+        return;
+    }
     lock_board();
     U.diag_status[0] = 0;
     int machine = bench_machine();
@@ -3069,6 +3073,11 @@ void ui_frame(void) {
             diagnose_records_file(what, path);
             unlock_board();
         }
+    }
+    switch (la_window_wants_picture()) {
+    case 1: U.want_pick = true; break;
+    case 2: U.want_paste = true; break;
+    default: break;
     }
     if (U.want_paste) {
         U.want_paste = false;

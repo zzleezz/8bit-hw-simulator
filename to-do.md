@@ -843,8 +843,34 @@ Later, needs the user at the bench:
       held through the idle capture. A real board whose /RESET is broken.
 - [ ] Screenshots of the video-side ULA faults (i2-ula2, mc-3): they pass
       every stage (the edge connector can't see the ULA's own RAM reads).
-      Make the screenshot matcher a last step of the same diagnosis.
+      The matcher is now part of the same diagnosis (below): try it on them.
 - [ ] More RAM tests (the user has more), more Z80s.
+- [ ] (The user, at the bench, 2026-11-07) Screenshots of the monitor for
+      the saved diagnosis folders (diagnosis-test1, -board, -i2-*, ...),
+      or at least which kind the screen was (the window's "Pick a type"):
+      put each in its folder as screen.png. Then: does the screen agree
+      with the bus on real boards, how far to trust the screen against
+      the bus, and the check's ranking on real faults (so far tested on
+      test1 = IC13 with a simulated screen, and the real bad-ula.png on
+      the good board's captures).
+- [ ] At the bench: the Screen row live (Paste after a run, Pick a type,
+      the check button), and Save as keeping screen.png.
+The screen in the diagnosis (2026-11-07):
+- [x] --la-screen / the window's Screen row: matched against the atlas
+      with the bus's verdict (agrees, or its own suspects when the bus
+      finds nothing; the bus's RAM/CPU/ROM ones only a note then).
+- [x] Check the screen's faults against the captures (--la-check): one
+      boot per fault records all six stages; a working board as the
+      baseline. Test1 (real IC13): IC13's faults first, 5 of 6 stages.
+      About 1.5 minutes on 7 threads for 24 faults.
+- [x] Pick a type: the atlas's screens of the board by kind (9 kinds),
+      their pictures to pick from; the picked one is matched like a
+      screenshot.
+- [ ] The check's candidates come from the screen only. With no screen,
+      faults could come from the bus's verdict (a named RAM chip: its
+      data stuck 0/1, removed; a stuck line: the chips on it).
+- [ ] The ULA inside (the atlas's "ULA (inside)") can't be checked: it's
+      named, not simulated.
 Later, software:
 - [x] Simulated IC4.9:gnd passes all six stages: rightly, IC4's third
       section (pins 9-11) isn't connected on the Issue 2. Not a fault.

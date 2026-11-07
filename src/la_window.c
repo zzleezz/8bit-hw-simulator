@@ -11,6 +11,9 @@
 #ifdef _WIN32
 #include <direct.h>
 #endif
+#include "atlas.h"
+#include "diagnose.h"
+#include "thumbtex.h"
 #include "lacap.h"
 #include "lapico.h"
 #include "zx48.h"
@@ -78,6 +81,16 @@ static struct {
     bool expect_release;            /* the last question had the reset button held */
     char doing[200];
     long jump;                      /* a stage's box clicked: the text offset to show (-1 none) */
+
+    /* The screen: a picture of the monitor (the user's file; "" none), shown
+     * small; "Choose..." / "Paste" asked of the UI (1, 2). */
+    char screen[1100];
+    char screen_msg[300];
+    thumbtex_t screen_tex;
+    int want_pic;
+    /* "Pick a type...": the kinds of screen, a typical picture of each. */
+    bool picking;
+    int pick_cat;                   /* -1: the kinds; else its pictures */
 } L = { .all = true, .answer = -1, .jump = -1 };
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -171,18 +184,14 @@ static void status_hook(int kind, int stage, int state) {
         if (++L.arms == 1 && L.expect_release) snprintf(L.doing, sizeof(L.doing), "LET GO OF RESET");
         else if (L.cur_stage == 0) snprintf(L.doing, sizeof(L.doing), "Waiting for the Spectrum (left running: don't touch it)");
         else snprintf(L.doing, sizeof(L.doing), "Waiting for %s", stage_label[L.cur_stage]);
+    } else if (kind == LA_EV_PROGRESS) {
+        snprintf(L.doing, sizeof(L.doing), "Checking the screen's faults against the captures: %d of %d simulated", stage,
+                 state);
     } else if (kind == LA_EV_TRIGGERED) {
         L.sign = 2;
         snprintf(L.doing, sizeof(L.doing), "Reading the samples, then comparing with a working board");
     }
     pthread_mutex_unlock(&L.mu);
-}
-
-/* Is REF a part of board B? */
-static bool is_part(board_t *b, const char *ref) {
-    for (int i = 0; i < b->sim.nparts; i++)
-        if (!strcmp(b->sim.parts[i].ref, ref)) return true;
-    return false;
 }
 
 static void add_mark(const char *ref, int level) {
@@ -196,64 +205,15 @@ static void add_mark(const char *ref, int level) {
     L.mark_level[L.nmarks++] = level;
 }
 
-/* Whether the D0-D7 at LINE[I] (to J) is a data bit, not a diode: it
- * follows "bit", "bits", "line(s)", "pin(s)" or "gave", perhaps after
- * other bits ("bits D1 D2 D3", "pins D0-D4", "bit D7"). */
-static bool data_bit_word(const char *line, size_t i, size_t j) {
-    if (j - i != 2 || line[i] != 'D' || line[i + 1] < '0' || line[i + 1] > '7') return false;
-    size_t k = i;
-    for (;;) {
-        while (k > 0 && (line[k - 1] == ' ' || line[k - 1] == ',' || line[k - 1] == '-')) k--;
-        size_t e = k;
-        while (k > 0 && isalnum((unsigned char)line[k - 1])) k--;
-        if (k == e) return false;
-        size_t n = e - k;
-        if (n == 2 && line[k] == 'D' && line[k + 1] >= '0' && line[k + 1] <= '7') continue;
-        static const char *words[] = { "bit", "bits", "line", "lines", "pin", "pins", "gave" };
-        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); w++)
-            if (strlen(words[w]) == n && !strncmp(line + k, words[w], n)) return true;
-        return false;
-    }
-}
-
-/* The chips the verdict names: after "What to look at", the items'
- * references (IC26, TR6, D2...), item 1's the first to look at; not the
- * notes (a line nothing on the board uses). */
+/* The chips the verdict names (la_text_parts: the items of "What to look
+ * at" and the screen's), item 1's the first to look at. */
 static void find_marks(const char *text) {
     L.nmarks = 0;
     L.summary[0] = 0;
-    const char *v = strstr(text, "What to look at");
-    if (!v) return;
-    board_t *b = board_create(L.m);
-    if (!b) return;
-    int item = 0;
-    bool note = false;
-    for (const char *line = v; *line; ) {
-        const char *end = strchr(line, '\n');
-        size_t len = end ? (size_t)(end - line) : strlen(line);
-        int num;
-        if (sscanf(line, "  %d.", &num) == 1) { item = num; note = false; }
-        else if (!strncmp(line, "  Note:", 7)) note = true;
-        else if (len && line[0] != ' ') { if (line != v) break; }
-        if (item && !note)
-            for (size_t i = 0; i < len; ) {
-                if (isupper((unsigned char)line[i]) && (i == 0 || !isalnum((unsigned char)line[i - 1]))) {
-                    size_t j = i;
-                    while (j < len && isupper((unsigned char)line[j])) j++;
-                    size_t d = j;
-                    while (d < len && isdigit((unsigned char)line[d])) d++;
-                    if (d > j && d - i < 12 && (d >= len || !isalnum((unsigned char)line[d]))) {
-                        char ref[16];
-                        snprintf(ref, sizeof(ref), "%.*s", (int)(d - i), line + i);
-                        if (!data_bit_word(line, i, d) && is_part(b, ref)) add_mark(ref, item == 1 ? 2 : 1);
-                    }
-                    i = d > i ? d : i + 1;
-                } else i++;
-            }
-        if (!end) break;
-        line = end + 1;
-    }
-    board_destroy(b);
+    char ref[MAX_MARKS][16];
+    int lv[MAX_MARKS];
+    int n = la_text_parts(L.m, text, ref, lv, MAX_MARKS);
+    for (int k = 0; k < n; k++) add_mark(ref[k], lv[k]);
     int m = 0;
     for (int lev = 2; lev >= 1; lev--) {
         bool any = false;
@@ -267,11 +227,126 @@ static void find_marks(const char *text) {
     }
 }
 
+static bool copy_file(const char *from, const char *to);
+static void make_dir(const char *d) {
+#ifdef _WIN32
+    _mkdir(d);
+#else
+    mkdir(d, 0777);
+#endif
+}
+
+/* The screen's picture in DIR as screen.EXT (an earlier one there goes),
+ * for Save to keep with the captures: its path in OUT, or NULL for none. */
+static const char *screen_into(const char *dir, const char *screen, char *out, int len) {
+    static const char *const ext[] = { "png", "jpg", "jpeg", "bmp" };
+    char p[1200];
+    for (int i = 0; i < 4; i++) {
+        snprintf(p, sizeof(p), "%s/screen.%s", dir, ext[i]);
+        remove(p);
+    }
+    if (!screen[0]) return NULL;
+    const char *dot = strrchr(screen, '.');
+    char e[8] = "png";
+    if (dot && strlen(dot + 1) < sizeof(e)) {
+        snprintf(e, sizeof(e), "%s", dot + 1);
+        for (char *c = e; *c; c++) *c = (char)tolower((unsigned char)*c);
+    }
+    make_dir(dir);
+    snprintf(out, (size_t)len, "%s/screen.%s", dir, e);
+    return copy_file(screen, out) ? out : screen;
+}
+
+/* The text the diagnosis printed before its screen's part. */
+static size_t bus_text_len(void) {
+    const char *t = L.text ? strstr(L.text, "\nThe screen (") : NULL;
+    return t ? (size_t)(t - L.text) : L.len;
+}
+
+static void finish(int rc) {
+    pthread_mutex_lock(&L.mu);
+    for (int k = 0; k < NSTAGES; k++)
+        if (L.stage_st[k] == LA_ST_RUN) L.stage_st[k] = LA_ST_NONE;    /* stopped in it */
+    L.sign = 0;
+    L.doing[0] = 0;
+    L.rc = rc;
+    snprintf(L.rc_text, sizeof(L.rc_text), "%s",
+             L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: the verdict is below." :
+             "It stopped before a verdict (see the last lines below).");
+    char *copy = L.text ? strdup(L.text) : NULL;
+    pthread_mutex_unlock(&L.mu);
+    if (copy) { find_marks(copy); free(copy); }
+    atomic_store(&L.running, false);
+}
+
+static char atlas_path[1100];
+
+/* After a run: only the screen's part again, for a picture given (or
+ * taken away) then. */
+static void *screen_worker(void *arg) {
+    (void)arg;
+    static char screen[1300];
+    pthread_mutex_lock(&L.mu);
+    size_t bl = bus_text_len();
+    if (L.text) { L.text[bl] = 0; L.len = bl; }
+    char *bus = L.text ? strdup(L.text) : strdup("");
+    snprintf(screen, sizeof(screen), "%s", L.screen);
+    int was = L.rc;
+    pthread_mutex_unlock(&L.mu);
+    bool bus_ok = bus && !strstr(bus, "What to look at");
+    int rc = was;
+    if (screen[0] && bus) {
+        la_cli_t o;
+        memset(&o, 0, sizeof(o));
+        o.machine = L.m;
+        o.screen = screen;
+        o.atlas = atlas_path;
+        o.carts = "carts";
+        la_text_hook = text_hook;
+        int r = la_screen_again(&o, bus, bus_ok);
+        la_text_hook = NULL;
+        if (bus_ok && was != 1) rc = r > 0 ? 2 : 0;
+    } else if (bus_ok && was == 2)
+        rc = 0;                         /* the screen was all it had */
+    free(bus);
+    finish(rc);
+    return NULL;
+}
+
+/* After a run: the screen's faults checked against its captures. */
+static void *check_worker(void *arg) {
+    (void)arg;
+    static char screen[1300], folder[700];
+    pthread_mutex_lock(&L.mu);
+    char *t = L.text ? strstr(L.text, "\nChecked against the captures:") : NULL;  /* an earlier check's */
+    if (t) { *t = 0; L.len = (size_t)(t - L.text); }
+    snprintf(screen, sizeof(screen), "%s", L.screen);
+    snprintf(folder, sizeof(folder), "%s", L.run_mode == MODE_REPLAY ? L.folder : L.work);
+    snprintf(L.doing, sizeof(L.doing), "Checking the screen's faults against the captures");
+    int was = L.rc;
+    pthread_mutex_unlock(&L.mu);
+    la_cli_t o;
+    memset(&o, 0, sizeof(o));
+    o.machine = L.m;
+    o.diagnose = folder;
+    o.screen = screen[0] ? screen : NULL;
+    o.atlas = atlas_path;
+    o.carts = "carts";
+    o.check = CHECK_DEFAULT;
+    la_text_hook = text_hook;
+    la_status_hook = status_hook;
+    int r = la_check(&o);
+    la_text_hook = NULL;
+    la_status_hook = NULL;
+    finish(r > 0 && was == 0 ? 2 : was);
+    return NULL;
+}
+
 static void *worker(void *arg) {
     (void)arg;
     la_cli_t o;
     memset(&o, 0, sizeof(o));
-    static char folder[700], ports[128], fault[128];
+    static char folder[700], ports[128], fault[128], screen[1300];
     static const char *faults[1];
     snprintf(folder, sizeof(folder), "%s", L.folder);
     snprintf(ports, sizeof(ports), "%s", L.ports);
@@ -286,6 +361,30 @@ static void *worker(void *arg) {
         o.simulate = true;
         if (fault[0]) { faults[0] = fault; o.faults = faults; o.nfaults = 1; }
     }
+    /* The screen: kept with a fresh run's captures (and taken from a
+     * replayed folder's own screen.png when none is given). */
+    pthread_mutex_lock(&L.mu);
+    char given[1100];
+    snprintf(given, sizeof(given), "%s", L.screen);
+    pthread_mutex_unlock(&L.mu);
+    if (L.mode != MODE_REPLAY) o.screen = screen_into(folder, given, screen, sizeof(screen));
+    else if (given[0]) o.screen = given;
+    else {                      /* the folder's own, shown in the Screen row */
+        static const char *const ext[] = { "png", "jpg", "jpeg", "bmp" };
+        for (int i = 0; i < 4 && !o.screen; i++) {
+            snprintf(screen, sizeof(screen), "%s/screen.%s", folder, ext[i]);
+            FILE *f = fopen(screen, "rb");
+            if (!f) continue;
+            fclose(f);
+            o.screen = screen;
+            pthread_mutex_lock(&L.mu);
+            snprintf(L.screen, sizeof(L.screen), "%.1090s", screen);
+            snprintf(L.screen_msg, sizeof(L.screen_msg), "screen.%s", ext[i]);
+            pthread_mutex_unlock(&L.mu);
+        }
+    }
+    o.atlas = atlas_path;
+    o.carts = "carts";
     la_text_hook = text_hook;
     la_ask_hook = ask_hook;
     la_status_hook = status_hook;
@@ -293,19 +392,7 @@ static void *worker(void *arg) {
     la_text_hook = NULL;
     la_ask_hook = NULL;
     la_status_hook = NULL;
-    pthread_mutex_lock(&L.mu);
-    for (int k = 0; k < NSTAGES; k++)
-        if (L.stage_st[k] == LA_ST_RUN) L.stage_st[k] = LA_ST_NONE;    /* stopped in it */
-    L.sign = 0;
-    L.doing[0] = 0;
-    L.rc = rc;
-    snprintf(L.rc_text, sizeof(L.rc_text), "%s",
-             L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: the verdict is below." :
-             "It stopped before a verdict (see the last lines below).");
-    char *copy = L.text ? strdup(L.text) : NULL;
-    pthread_mutex_unlock(&L.mu);
-    if (copy) { find_marks(copy); free(copy); }
-    atomic_store(&L.running, false);
+    finish(rc);
     return NULL;
 }
 
@@ -357,6 +444,356 @@ static void start(const machine_t *m) {
     L.started_once = true;
 }
 
+/* After a run, on its thread: FN (the screen's part again, or the check). */
+static void after_run(void *(*fn)(void *)) {
+    if (atomic_load(&L.running) || !L.has_run || !L.m) return;
+    if (L.started_once) pthread_join(L.th, NULL);
+    L.started_once = false;
+    L.stop = false;
+    atomic_store(&L.running, true);
+    if (pthread_create(&L.th, NULL, fn, NULL) != 0) {
+        atomic_store(&L.running, false);
+        return;
+    }
+    L.started_once = true;
+}
+
+/* The screen given or taken away after a run: its part again, now. */
+static void screen_again(void) {
+    if (atomic_load(&L.running) || !L.has_run || !L.m) return;
+    if (L.run_mode != MODE_REPLAY) {        /* kept with the captures */
+        char out[1300];
+        screen_into(L.work, L.screen, out, sizeof(out));
+    }
+    after_run(screen_worker);
+}
+
+bool la_window_takes_picture(void) { return L.open && !atomic_load(&L.running); }
+
+int la_window_wants_picture(void) {
+    int w = L.want_pic;
+    L.want_pic = 0;
+    return w;
+}
+
+static void set_screen_none(void) {
+    thumbtex_free(&L.screen_tex);
+    L.screen[0] = 0;
+    L.screen_msg[0] = 0;
+}
+
+/* The screen's picture made small for the row (false if unreadable). */
+static bool load_thumb(const char *path) {
+    FILE *f = fopen(path, "rb");
+    unsigned char *data = NULL;
+    long n = 0;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        data = n > 0 && n < 64L * 1024 * 1024 ? malloc((size_t)n) : NULL;
+        if (data && fread(data, 1, (size_t)n, f) != (size_t)n) { free(data); data = NULL; }
+        fclose(f);
+    }
+    int w = 0, h = 0;
+    uint32_t *px = data ? atlas_small_picture(data, (int)n, 320, &w, &h) : NULL;
+    free(data);
+    if (!px) return false;
+    thumbtex_free(&L.screen_tex);
+    thumbtex_make(&L.screen_tex, px, w, h);
+    free(px);
+    return true;
+}
+
+void la_window_set_picture(const char *path) {
+    pthread_once(&once, init_sync);
+    if (!load_thumb(path)) {
+        snprintf(L.screen_msg, sizeof(L.screen_msg), "Can't read that picture: %s", path);
+        return;
+    }
+    pthread_mutex_lock(&L.mu);
+    snprintf(L.screen, sizeof(L.screen), "%s", path);
+    pthread_mutex_unlock(&L.mu);
+    const char *nm = path;
+    for (const char *p = path; *p; p++) if (*p == '/' || *p == '\\') nm = p + 1;
+    snprintf(L.screen_msg, sizeof(L.screen_msg), "%s", nm);
+    screen_again();
+}
+
+/* ---- "Pick a type...": the atlas's screens of the board, by kind ---- */
+
+#define PICK_NCAT 9
+#define PICK_MAXV 12
+static const char *const pick_name[PICK_NCAT] = {
+    "No picture (no video signal)", "One colour all over", "A blank screen inside a border",
+    "Wide vertical bars", "Thin vertical stripes", "A repeating pattern (lines, checks)",
+    "Coloured blocks all over", "Garbled text, stray marks", "The copyright message (looks right)" };
+static struct {
+    atlas_t a;
+    bool loaded;
+    int machine;                    /* the atlas board */
+    int v[PICK_NCAT][PICK_MAXV], nv[PICK_NCAT];
+    char label[PICK_NCAT][PICK_MAXV][256];
+    thumbtex_t tex[PICK_NCAT][PICK_MAXV];
+    char err[1300];
+} P;
+
+static int pick_kind(const atlas_outcome_t *o, const char *label) {
+    if (o->h.t.no_signal || strstr(label, "signal")) return 0;
+    if (!strncmp(label, "Solid", 5)) return 1;
+    if (!strncmp(label, "Blank", 5)) return 2;
+    if (!strncmp(label, "Vertical bars", 13)) {
+        const char *w = strstr(label, "pixels wide");
+        int px = 0;
+        if (w) {
+            const char *q = w;
+            while (q > label && q[-1] == ' ') q--;
+            while (q > label && isdigit((unsigned char)q[-1])) q--;
+            px = atoi(q);
+        }
+        return px >= 16 ? 3 : 4;
+    }
+    if (!strncmp(label, "Repeating", 9)) return 5;
+    if (!strncmp(label, "Attribute", 9)) return 6;
+    if (strstr(label, "copyright") || strstr(label, "booted")) return 8;
+    return 7;
+}
+
+static void pick_close(void) {
+    for (int c = 0; c < PICK_NCAT; c++)
+        for (int k = 0; k < PICK_MAXV; k++) thumbtex_free(&P.tex[c][k]);
+    if (P.loaded) atlas_free(&P.a);
+    P.loaded = false;
+    L.picking = false;
+}
+
+static void pick_open(const machine_t *m) {
+    pick_close();
+    memset(P.nv, 0, sizeof(P.nv));
+    P.err[0] = 0;
+    bool exists = false;
+    if (!atlas_load(&P.a, atlas_path, &exists) || !exists) {
+        snprintf(P.err, sizeof(P.err), "No fault atlas (%s): the screens come from it", atlas_path);
+        L.picking = true;
+        L.pick_cat = -1;
+        return;
+    }
+    P.loaded = true;
+    int am = atlas_machine_of(m);
+    for (int pass = 0; pass < 2 && am >= 0; pass++) {
+        P.machine = pass ? atlas_family(am) : am;
+        /* Each kind's pictures, the commonest (most faults) first. */
+        for (int i = 0; i < P.a.noutcomes; i++) {
+            const atlas_outcome_t *o = &P.a.outcomes[i];
+            if (o->h.machine != P.machine || o->h.mode != MODE_BOOT || !o->thumb) continue;
+            char label[256];
+            atlas_outcome_label(o, label, sizeof(label));
+            int c = pick_kind(o, label), n = P.nv[c];
+            int at = n;
+            while (at > 0 && P.a.outcomes[P.v[c][at - 1]].nfaults < o->nfaults) at--;
+            if (at >= PICK_MAXV) continue;
+            if (n == PICK_MAXV) n--;
+            for (int k = n; k > at; k--) {
+                P.v[c][k] = P.v[c][k - 1];
+                snprintf(P.label[c][k], sizeof(P.label[0][0]), "%s", P.label[c][k - 1]);
+            }
+            P.v[c][at] = i;
+            snprintf(P.label[c][at], sizeof(P.label[0][0]), "%s", label);
+            P.nv[c] = n + 1;
+        }
+        int any = 0;
+        for (int c = 0; c < PICK_NCAT; c++) any += P.nv[c];
+        if (any || P.machine == atlas_family(am)) break;
+    }
+    const uint32_t *pal = atlas_palette(P.machine);
+    for (int c = 0; c < PICK_NCAT; c++)
+        for (int k = 0; k < P.nv[c]; k++) {
+            const atlas_outcome_t *o = &P.a.outcomes[P.v[c][k]];
+            int n = o->h.w * o->h.h;
+            uint8_t *idx = malloc((size_t)n);
+            uint32_t *px = malloc((size_t)n * sizeof(uint32_t));
+            if (idx && px && atlas_decode_thumb(o, false, idx)) {
+                for (int q = 0; q < n; q++) px[q] = pal[idx[q] & 15];
+                thumbtex_make(&P.tex[c][k], px, o->h.w, o->h.h);
+            }
+            free(idx);
+            free(px);
+        }
+    L.picking = true;
+    L.pick_cat = -1;
+}
+
+/* The picked screen as a picture file (twice the thumbnail's size, a BMP
+ * the matcher reads like a screenshot): its path, or NULL. */
+static const char *pick_write(const atlas_outcome_t *o, char *path, int len) {
+    int w = o->h.w, h = o->h.h, n = w * h;
+    uint8_t *idx = malloc((size_t)n);
+    if (!idx || !atlas_decode_thumb(o, false, idx)) { free(idx); return NULL; }
+    const char *tmp = getenv("TEMP");
+    if (!tmp) tmp = getenv("TMPDIR");
+    snprintf(path, (size_t)len, "%s/la-picked-screen.bmp", tmp ? tmp : ".");
+    FILE *f = fopen(path, "wb");
+    if (!f) { free(idx); return NULL; }
+    int W = w * 2, H = h * 2, row = (W * 3 + 3) & ~3;
+    uint32_t size = 54u + (uint32_t)row * (uint32_t)H;
+    uint8_t hd[54] = { 'B', 'M' };
+    #define PUT32(o_, v_) do { uint32_t x_ = (uint32_t)(v_); hd[o_] = (uint8_t)x_; hd[o_ + 1] = (uint8_t)(x_ >> 8); \
+                               hd[o_ + 2] = (uint8_t)(x_ >> 16); hd[o_ + 3] = (uint8_t)(x_ >> 24); } while (0)
+    PUT32(2, size); PUT32(10, 54); PUT32(14, 40); PUT32(18, W); PUT32(22, H);
+    hd[26] = 1; hd[28] = 24;
+    PUT32(34, (uint32_t)row * (uint32_t)H);
+    #undef PUT32
+    fwrite(hd, 1, 54, f);
+    const uint32_t *pal = atlas_palette(P.machine);
+    uint8_t *line = calloc((size_t)row, 1);
+    for (int y = H - 1; y >= 0 && line; y--) {         /* bottom up */
+        for (int x = 0; x < W; x++) {
+            uint32_t c = pal[idx[(y / 2) * w + x / 2] & 15];   /* RGBA8: R in the low byte */
+            line[x * 3] = (uint8_t)(c >> 16);
+            line[x * 3 + 1] = (uint8_t)(c >> 8);
+            line[x * 3 + 2] = (uint8_t)c;
+        }
+        fwrite(line, 1, (size_t)row, f);
+    }
+    free(line);
+    free(idx);
+    fclose(f);
+    return path;
+}
+
+static void pick_image(struct nk_context *ctx, const thumbtex_t *t) {
+    struct nk_rect r;
+    if (nk_widget(&r, ctx) == NK_WIDGET_INVALID) return;
+    if (!t->live) {                 /* no signal: no picture kept */
+        struct nk_command_buffer *cv = nk_window_get_canvas(ctx);
+        nk_fill_rect(cv, r, 2, nk_rgb(20, 20, 22));
+        text_centered(cv, ctx, r, "no signal", nk_rgb(170, 170, 170));
+        return;
+    }
+    float w = r.w, h = t->w > 0 ? r.w * t->h / t->w : r.h;
+    if (h > r.h) { h = r.h; w = t->h > 0 ? h * t->w / t->h : r.w; }
+    struct nk_image img = thumbtex_image(t);
+    nk_draw_image(nk_window_get_canvas(ctx), nk_rect(r.x, r.y, w, h), &img, nk_rgb(255, 255, 255));
+}
+
+static void set_picked(int c, int k) {
+    char path[1100];
+    const atlas_outcome_t *o = &P.a.outcomes[P.v[c][k]];
+    char label[256];
+    snprintf(label, sizeof(label), "%s", P.label[c][k]);
+    if (!pick_write(o, path, sizeof(path))) {
+        snprintf(P.err, sizeof(P.err), "Couldn't write the picked screen to the temp folder");
+        return;
+    }
+    pick_close();
+    la_window_set_picture(path);
+    snprintf(L.screen_msg, sizeof(L.screen_msg), "picked: %s", label);
+}
+
+
+/* The picker, where the text goes. */
+static int settle;          /* frames since a kind was opened */
+static void pick_view(struct nk_context *ctx, float cw, float height) {
+    nk_layout_row_dynamic(ctx, height, 1);
+    if (!nk_group_begin(ctx, "la pick", 0)) return;
+    nk_layout_row_dynamic(ctx, 22, 1);
+    if (P.err[0]) {
+        nk_label_colored(ctx, P.err, NK_TEXT_LEFT, COL_FAULT);
+    } else if (L.pick_cat < 0) {
+        nk_label_colored(ctx, "What does the Spectrum's screen show? Pick the kind nearest to it:", NK_TEXT_LEFT, COL_HOVER);
+        for (int c = 0; c < PICK_NCAT; c++) {
+            if (!P.nv[c]) continue;
+            nk_layout_row_begin(ctx, NK_STATIC, 66, 2);
+            nk_layout_row_push(ctx, 88);
+            bool hit = nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT);
+            pick_image(ctx, &P.tex[c][0]);
+            nk_layout_row_push(ctx, fmaxf(120, cw - 120));
+            char t[120];
+            snprintf(t, sizeof(t), "%s  (%d kind%s)", pick_name[c], P.nv[c], P.nv[c] == 1 ? "" : "s");
+            if (nk_button_label(ctx, t) || hit) { L.pick_cat = c; settle = 0; }
+            nk_layout_row_end(ctx);
+        }
+    } else {
+        int c = L.pick_cat;
+        char t[160];
+        snprintf(t, sizeof(t), "%s: pick the nearest (hover for what it is)", pick_name[c]);
+        nk_label_colored(ctx, t, NK_TEXT_LEFT, COL_HOVER);
+        int per = (int)fmaxf(1, (cw - 10) / 140);
+        settle++;           /* the click that opened it isn't a pick */
+        for (int k = 0; k < P.nv[c]; k++) {
+            if (k % per == 0) nk_layout_row_static(ctx, 100, 132, per);
+            bool hov = nk_widget_is_hovered(ctx);
+            if (hov) nk_tooltip(ctx, P.label[c][k]);
+            bool hit = nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT);
+            pick_image(ctx, &P.tex[c][k]);
+            if (hit && settle > 3) { set_picked(c, k); break; }
+        }
+        if (L.picking) {
+            nk_layout_row_static(ctx, 30, 120, 1);
+            if (nk_button_label(ctx, "Back")) L.pick_cat = -1;
+        }
+    }
+    if (L.picking) {
+        nk_layout_row_static(ctx, 30, 120, 1);
+        if (nk_button_label(ctx, "Cancel")) pick_close();
+    }
+    nk_group_end(ctx);
+}
+
+/* The screen's row: its picture small, Choose... / Paste / None. */
+static void screen_row(struct nk_context *ctx, float cw, const machine_t *machine) {
+    static const char *tip = "A screenshot of the Spectrum's monitor (a capture card's, PNG, JPG or BMP): matched against "
+                             "the fault atlas with what the bus shows. Or drop it on this window, or Ctrl+V";
+    nk_layout_row_begin(ctx, NK_STATIC, 26, 6);
+    nk_layout_row_push(ctx, 60);
+    nk_label(ctx, "Screen", NK_TEXT_LEFT);
+    nk_layout_row_push(ctx, fmaxf(80, cw - 60 - 3 * 76 - 104 - 28));
+    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tip);
+    nk_label_colored(ctx, L.screen[0] ? L.screen_msg : L.screen_msg[0] ? L.screen_msg : "none (optional)", NK_TEXT_LEFT,
+                     L.screen[0] ? COL_TEXT : L.screen_msg[0] ? COL_FAULT : COL_DIMTEXT);
+    nk_layout_row_push(ctx, 76);
+    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tip);
+    if (nk_button_label(ctx, "Choose...")) L.want_pic = 1;
+    nk_layout_row_push(ctx, 76);
+    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "The picture on the clipboard (Ctrl+V)");
+    if (nk_button_label(ctx, "Paste")) L.want_pic = 2;
+    nk_layout_row_push(ctx, 104);
+    if (nk_widget_is_hovered(ctx))
+        nk_tooltip(ctx, "No screenshot? Pick what the screen looks like from the simulated faults' screens");
+    if (nk_button_label(ctx, "Pick a type...")) {
+        if (L.picking) pick_close();
+        else pick_open(machine);
+    }
+    nk_layout_row_push(ctx, 76);
+    if (L.screen[0]) {
+        if (nk_button_label(ctx, "None")) {
+            set_screen_none();
+            screen_again();
+        }
+    } else nk_spacing(ctx, 1);
+    nk_layout_row_end(ctx);
+    static char tried[1100];
+    if (L.screen[0] && !L.screen_tex.live && strcmp(tried, L.screen)) {    /* given before the window drew */
+        snprintf(tried, sizeof(tried), "%s", L.screen);
+        load_thumb(L.screen);
+    }
+    if (L.screen[0] && L.screen_tex.live) {
+        nk_layout_row_begin(ctx, NK_STATIC, 72, 2);
+        nk_layout_row_push(ctx, 60);
+        nk_spacing(ctx, 1);
+        nk_layout_row_push(ctx, 96);
+        struct nk_rect r;
+        if (nk_widget(&r, ctx) != NK_WIDGET_INVALID) {
+            const thumbtex_t *t = &L.screen_tex;
+            float w = r.w, h = t->w > 0 ? r.w * t->h / t->w : r.h;
+            if (h > r.h) { h = r.h; w = t->h > 0 ? h * t->w / t->h : r.w; }
+            struct nk_image img = thumbtex_image(t);
+            nk_draw_image(nk_window_get_canvas(ctx), nk_rect(r.x, r.y, w, h), &img, nk_rgb(255, 255, 255));
+        }
+        nk_layout_row_end(ctx);
+    }
+}
+
 static void answer(int a) {
     pthread_mutex_lock(&L.mu);
     L.answer = a;
@@ -375,21 +812,33 @@ void la_window_open(void) {
         snprintf(L.work, sizeof(L.work), "%s/last-diagnosis", L.base);
         snprintf(L.folder, sizeof(L.folder), "%s", L.work);
         snprintf(L.save, sizeof(L.save), "%s/diagnosis-", L.base);
+        diagnose_atlas_file(atlas_path, sizeof(atlas_path));
     }
 }
 bool la_window_is_open(void) { return L.open; }
+
+static void test_screen(const char *path) {
+    snprintf(L.screen, sizeof(L.screen), "%s", path);
+    const char *nm = path;
+    for (const char *p = path; *p; p++) if (*p == '/' || *p == '\\') nm = p + 1;
+    snprintf(L.screen_msg, sizeof(L.screen_msg), "%s", nm);
+}
 
 void la_window_open_test(const char *spec) {
     la_window_open();
     if (!strncmp(spec, "replay:", 7)) {
         L.mode = MODE_REPLAY;
-        snprintf(L.folder, sizeof(L.folder), "%s", spec + 7);
+        const char *b = strchr(spec + 7, '|');
+        snprintf(L.folder, sizeof(L.folder), "%.*s", b ? (int)(b - spec - 7) : (int)strlen(spec + 7), spec + 7);
+        if (b) test_screen(b + 1);
     } else if (!strncmp(spec, "simulate:", 9)) {
         L.mode = MODE_SIMULATE;
         const char *c = strchr(spec + 9, '|');
         if (!c) return;
         snprintf(L.fault, sizeof(L.fault), "%.*s", (int)(c - spec - 9), spec + 9);
-        snprintf(L.folder, sizeof(L.folder), "%s", c + 1);
+        const char *b = strchr(c + 1, '|');
+        snprintf(L.folder, sizeof(L.folder), "%.*s", b ? (int)(b - c - 1) : (int)strlen(c + 1), c + 1);
+        if (b) test_screen(b + 1);
     } else if (!strncmp(spec, "demo:", 5)) {
         /* How it looks with the analyser, for screenshots: "demo:ask",
          * "demo:armed", "demo:triggered". */
@@ -680,6 +1129,7 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         } else if (L.mode == MODE_SIMULATE)
             field(ctx, "Fault", L.fault, sizeof(L.fault), 70, cw,
                   "As --fault: IC26:removed, IC2.26:gnd, IC12:data0=1... (empty: the working board)");
+        screen_row(ctx, cw, machine);
         nk_layout_row_dynamic(ctx, 24, 1);
         nk_bool all = L.all;
         if (nk_widget_is_hovered(ctx))
@@ -693,6 +1143,12 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             if (color_button(ctx, "Start", COL_GO, nk_rgb(255, 255, 255))) start(machine);
         } else nk_spacing(ctx, 1);
         if (nk_button_label(ctx, "Close")) L.open = false;
+        if (L.picking) {
+            struct nk_rect region = nk_window_get_content_region(ctx);
+            float ph = region.y + region.h - (ctx->current->layout->at_y + ctx->current->layout->row.height) -
+                       ctx->style.window.spacing.y - 4;
+            pick_view(ctx, cw, ph < 160 ? 160 : ph);
+        }
         nk_end(ctx);
         return;
     }
@@ -737,7 +1193,9 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         } else {
             nk_layout_row_dynamic(ctx, 6, 1);
             nk_spacing(ctx, 1);
-            char t[200];
+            char t[220];
+            if (doing[0] && !stopping) snprintf(t, sizeof(t), "%s...", doing);
+            else
             snprintf(t, sizeof(t), "%s: %s", stage_label[cur],
                      stopping ? "stopping, at its next question or when this capture or simulation ends..."
                               : L.run_mode == MODE_ANALYSER ? "working..." : "simulating and comparing...");
@@ -779,11 +1237,24 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             nk_label_colored(ctx, L.saved[0] ? L.saved : "Not saved: the next run starts afresh (Save keeps this one)",
                              NK_TEXT_LEFT, !strncmp(L.saved, "Saved", 5) ? COL_TRACE : COL_DIMTEXT);
         }
+        screen_row(ctx, cw, machine);
+        pthread_mutex_lock(&L.mu);
+        bool had_screen = L.screen[0] || (L.text && strstr(L.text, "\nThe screen ("));
+        pthread_mutex_unlock(&L.mu);
+        if (had_screen && L.rc != 1) {
+            nk_layout_row_static(ctx, 30, 330, 1);
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "Put each of the screen's faults (24 at most) on the simulated board and compare every "
+                                "stage with the analyser's captures: the fault that does what this board did. A minute or "
+                                "two, on half the processors");
+            if (nk_button_label(ctx, "Check the screen's faults against the captures")) after_run(check_worker);
+        }
         nk_layout_row_static(ctx, 34, 160, 3);
         if (nk_widget_is_hovered(ctx))
             nk_tooltip(ctx, "Clear these results and the outlines on the board, and choose what to diagnose next");
         if (color_button(ctx, "New diagnosis", COL_GO, nk_rgb(255, 255, 255))) {
             clear_results();
+            set_screen_none();
             L.has_run = false;
         }
         if (L.nmarks) {
@@ -799,6 +1270,11 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
     float list_h = region.y + region.h - (ctx->current->layout->at_y + ctx->current->layout->row.height) -
                    ctx->style.window.spacing.y - 4;
     if (list_h < 120) list_h = 120;
+    if (L.picking && !running) {
+        pick_view(ctx, cw, list_h);
+        nk_end(ctx);
+        return;
+    }
     nk_layout_row_dynamic(ctx, list_h, 1);
     static nk_uint sx, sy;
     if (nk_group_scrolled_offset_begin(ctx, &sx, &sy, "la text", 0)) {
@@ -823,7 +1299,7 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             nk_layout_row_dynamic(ctx, lh * rows, 1);
             struct nk_color c = COL_TEXT;
             if (strstr(buf, "FAULT") || strstr(buf, "Wrong too") || strstr(buf, "It never")) c = COL_FAULT;
-            else if (!strncmp(buf, "  OK", 4)) c = COL_TRACE;
+            else if (!strncmp(buf, "  OK", 4) || !strncmp(buf, "  It agrees", 11)) c = COL_TRACE;
             else if (buf[0] == ' ' && buf[1] == ' ' && isdigit((unsigned char)buf[2])) c = COL_PULSE;
             if (rows > 1) nk_label_colored_wrap(ctx, buf, ink(c));
             else nk_label_colored(ctx, buf, NK_TEXT_LEFT, ink(c));

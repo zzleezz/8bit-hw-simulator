@@ -174,6 +174,11 @@ struct board {
     /* Logic probe statistics per net, reset by the UI every frame. */
     uint32_t *st_hi, *st_lo, *st_float, *st_fight;
     int st_countdown;
+    /* board_step_hook(): this board's own (boards recorded on several
+     * threads at once each have theirs). */
+    void (*hook_fn)(struct board *b, void *ctx);
+    void *hook_ctx;
+    int hook_countdown;
     /* Also sampled when pin_stats is set (the UI does): what each pin
      * itself drives, which can differ from its net (a lifted leg, two
      * outputs fighting, an open collector), and how often each product

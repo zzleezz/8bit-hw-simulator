@@ -99,24 +99,20 @@ uint32_t board_edges_stop(board_t *b, uint32_t *rises, uint32_t *highs) {
 }
 
 /* A step hook (board_step_hook()): a function called at every bus step of
- * one board, the way edge counting is (the board's statistics countdown
- * held at 1, the real one kept here), so it costs the others nothing. */
-static struct {
-    const board_t *b;
-    board_step_fn fn;
-    void *ctx;
-    int countdown;
-} hook;
-
+ * the board, the way edge counting is (the board's statistics countdown
+ * held at 1, the real one kept in the board), so it costs the others
+ * nothing. Each board has its own: boards recorded on several threads. */
 bool board_step_hook(board_t *b, board_step_fn fn, void *ctx) {
-    if (hook.b) {               /* stop the one on */
-        if (hook.b == b) b->st_countdown = hook.countdown;
-        memset(&hook, 0, sizeof(hook));
+    if (b->hook_fn) {           /* stop the one on */
+        b->st_countdown = b->hook_countdown;
+        b->hook_fn = NULL;
+        b->hook_ctx = NULL;
     }
     if (!fn) return true;
     if (edges.b == b) return false;
-    hook.b = b; hook.fn = fn; hook.ctx = ctx;
-    hook.countdown = b->st_countdown;
+    b->hook_fn = fn;
+    b->hook_ctx = ctx;
+    b->hook_countdown = b->st_countdown;
     b->st_countdown = 1;
     return true;
 }
@@ -135,11 +131,11 @@ void board_sample(board_t *b) {
         b->st_countdown = 1;
         if (--edges.countdown > 0) return;
         edges.countdown = 97;
-    } else if (hook.b == b) {   /* hooked: here at every step too */
-        hook.fn(b, hook.ctx);
+    } else if (b->hook_fn) {    /* hooked: here at every step too */
+        b->hook_fn(b, b->hook_ctx);
         b->st_countdown = 1;
-        if (--hook.countdown > 0) return;
-        hook.countdown = 97;
+        if (--b->hook_countdown > 0) return;
+        b->hook_countdown = 97;
     } else b->st_countdown = 97;
     /* Inputs reading an erratic level (a floating net near the threshold, a
      * lifted MOS leg) can change without any event: look at them again. */

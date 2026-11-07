@@ -140,6 +140,14 @@
  *       --la-simulate: the board under test is the simulated B with the
  *       --fault specs (a test of the diagnosis itself). --la-all: after
  *       a stage that's wrong, capture the rest as well (more to go on).
+ *       --la-screen PICTURE: a screenshot of the monitor too, matched
+ *       against the atlas (--atlas): whether it agrees with the bus, and
+ *       what it points at when the bus finds nothing (a replay uses
+ *       DIR/screen.png, .jpg or .bmp by itself). --la-check [N]: then
+ *       the screen's faults (N, 24 unless given) put on the simulated
+ *       board one by one, every stage compared with the captures: the
+ *       fault that does what the board did (LA_JOBS threads at a time,
+ *       else half the processors).
  *   --la-bootsel [--la-ports P,...]
  *       Restart the boards into the Pico's USB drive mode, to copy firmware
  *       (a .uf2) onto the RP2350 drive (la-firmware/README.md).
@@ -742,6 +750,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--la-replay")) args.la.replay = true;
         else if (!strcmp(argv[i], "--la-simulate")) args.la.simulate = true;
         else if (!strcmp(argv[i], "--la-all")) args.la.all = true;
+        else if (!strcmp(argv[i], "--la-screen") && i + 1 < argc) args.la.screen = argv[++i];
+        else if (!strcmp(argv[i], "--la-check")) {
+            args.la.check = CHECK_DEFAULT;
+            if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') args.la.check = atoi(argv[++i]);
+        }
         else if (!strcmp(argv[i], "--la-log") && i + 1 < argc) args.la.log = argv[++i];
         else if (argv[i][0] == '-') { fprintf(stderr, "unknown option %s\n", argv[i]); return 1; }
         else {
@@ -780,6 +793,8 @@ int main(int argc, char **argv) {
         args.la.machine = args.machine;
         args.la.faults = args.faults;
         args.la.nfaults = args.nfaults;
+        args.la.atlas = args.atlas_path;
+        args.la.carts = args.carts;
         return la_cli(&args.la);
     }
     if (args.merge_repairs || args.export_repairs || args.list_repairs || args.reread_repairs || args.repair_gaps) {

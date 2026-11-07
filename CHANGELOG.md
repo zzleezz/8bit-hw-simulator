@@ -30,6 +30,20 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   "pins" isn't a part on the board).
 - README: the title is the repository's name; pictures of the analyser
   window (ARMED, TRIGGERED, a real IC13 verdict) and the outlined board.
+- Logic analyser diagnosis with the screen: a screenshot of the monitor
+  (Choose, Paste, drop, or **Pick a type...** from the simulated faults'
+  screens when there's no capture card) is matched against the fault
+  atlas with what the bus showed: whether it agrees with the bus's
+  suspect, or, when the bus finds nothing, its own suspects (a bad ULA's
+  video side). Given after a run it's matched at once; it's kept with the
+  captures (`screen.png`). `--la-screen PICTURE` on the command line.
+- **Check the screen's faults against the captures** (`--la-check`): each
+  of the screen's faults put on the simulated board and every stage
+  compared with what the analyser took, against a working board's. On a
+  real faulty IC13, IC13's faults came first (5 of 6 stages the same, a
+  working board 2). A minute or two on half the processors.
+- Simulated boards can be recorded on several threads at once (the step
+  hook is the board's own, not one for the program).
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

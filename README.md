@@ -460,13 +460,46 @@ then captured. Below: the end of a run on a real Issue 2 with a faulty
 
 ![The Issue 2 board with IC13 outlined](docs/zx-board-fault.png)
 
+#### The screen as well
+
+The analyser sees the CPU's bus, not the picture; a screenshot of the
+monitor covers what it can't (the ULA's video side, the lower RAM as the
+ULA reads it). The **Screen** row, before Start or after a run, takes one:
+**Choose...**, **Paste** (or Ctrl+V, or drop it on the window), or, with
+no capture card, **Pick a type...**: the kinds of screen (no picture, one
+colour, a blank screen in a border, wide bars, thin stripes, a repeating
+pattern, coloured blocks, garbled text, the copyright message), each with
+the simulated faults' pictures to pick the nearest from. It's matched
+against the fault atlas (as "Diagnose screenshot" does), with what the bus
+showed:
+
+- the bus named a part: whether the screen agrees (a fault on that part
+  gives that picture too), or what the screen points at instead;
+- the bus found nothing wrong: the screen's own suspects, those the bus
+  would most likely have shown (the CPU, the ROM, the RAM chips) left to
+  a note. A bad ULA's video side shows up here.
+
+Given after a run, it's matched at once, without capturing again. The
+picture is kept with the captures (`screen.png`), and a replay of the
+folder uses it by itself.
+
+**Check the screen's faults against the captures** then puts each of the
+screen's faults (24 at most, plus a working board to measure them
+against) on the simulated board and compares every stage with what the
+analyser took: the fault that does what the real board did, stage by
+stage, is the one. It takes a minute or two on half the processors
+(`LA_JOBS=N` for another number). On a real Issue 2 with a faulty IC13,
+IC13's faults came first, 5 of the 6 stages the same, a working board 2.
+
 From the command line:
 
 - `--la-diagnose DIR --board issue2 --la-ports MASTER,OTHER [--la-all]`
   as the window does (`--la-replay`: from DIR's captures again;
   `--la-simulate --fault SPEC`: the simulated board). The captures and
   `diagnosis.txt` (every comparison) go in DIR, replacing the ones from an
-  earlier run there.
+  earlier run there. `--la-screen PICTURE` adds the screen;
+  `--la-check [N]` then checks its faults (N, 24 unless given) against
+  the captures.
 - `--la-devices` lists the boards; `--la-capture FILE --la-trigger STAGE`
   takes one capture; `--la-info`, `--la-cycles`, `--la-compare FILE`
   read and compare captures (`.lac` or CSV, as the LogicAnalyzer program

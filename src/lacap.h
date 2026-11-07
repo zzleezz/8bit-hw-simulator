@@ -102,8 +102,30 @@ typedef struct {
     int count;                  /* --la-count: cycles to list / context */
     int pre, post;              /* --la-pre, --la-post */
     bool refresh;               /* --la-refresh: compare refresh cycles too */
+    /* --la-screen FILE: a picture of the monitor (a capture card's
+     * screenshot), matched against the fault atlas ATLAS with what the bus
+     * showed (a replay finds DIR/screen.png by itself). */
+    const char *screen, *atlas, *carts;
+    /* --la-check [N]: after it, the screen's faults (N at most) put on the
+     * simulated board one by one and compared with the captures, stage by
+     * stage (LA_JOBS threads, else half the processors). */
+    int check;
 } la_cli_t;
+#define CHECK_DEFAULT 24
+/* The check alone, on DIAGNOSE's captures (O->screen, O->machine): 1 it
+ * names faults, 0 none fit, -1 no screen. */
+int la_check(const la_cli_t *o);
 int la_cli(const la_cli_t *o);
+/* The parts a diagnosis's text names, as the window outlines them: in the
+ * items under "What to look at" and "From the screen, what to look at"
+ * (not a data bit's "D7", not a note): REF[k] and LEVEL[k] 2 for the first
+ * item's, else 1. How many (at most MAX). */
+struct machine;
+int la_text_parts(const struct machine *m, const char *text, char (*ref)[16], int *level, int max);
+/* The screen's part again (O->screen, O->machine, O->atlas) for a run
+ * that printed BUS_TEXT (BUS_OK: the bus found nothing wrong): 1 it names
+ * suspects, 0 a working board's picture, -1 no use. */
+int la_screen_again(const la_cli_t *o, const char *bus_text, bool bus_ok);
 
 /* The stages a capture can be triggered at (--la-trigger NAME): the
  * address, and what it is. NULL name ends the list. */
@@ -116,7 +138,7 @@ extern bool (*la_ask_hook)(const char *prompt);
 /* And how far it is (from its thread): LA_EV_STAGE with STAGE 0 (idle) to
  * 6 (the boot's six) and its STATE; LA_EV_ARMED and LA_EV_TRIGGERED as
  * the analyser arms and fires. */
-enum { LA_EV_STAGE, LA_EV_ARMED, LA_EV_TRIGGERED };
+enum { LA_EV_STAGE, LA_EV_ARMED, LA_EV_TRIGGERED, LA_EV_PROGRESS /* the check: STAGE jobs done of STATE */ };
 enum { LA_ST_NONE, LA_ST_RUN, LA_ST_OK, LA_ST_FAULT, LA_ST_NEVER, LA_ST_SKIP };
 extern void (*la_status_hook)(int kind, int stage, int state);
 typedef struct { const char *name; int addr; double ms; const char *what; } la_stage_t;
