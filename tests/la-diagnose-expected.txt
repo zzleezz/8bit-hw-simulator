@@ -1,3 +1,22 @@
+######## real diagnosis-bad-ula-i3
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 69% of its pulses)
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: running code from RAM (0038-D6A8): it went astray
+  FAULT: something's wrong (below); the boot's stages next show more
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  OK: the same as a working one
+2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way (cycle 125)
+3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way (cycle 0)
+4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+  It never came either. When it should have, the CPU was fetching from 103E-1056
+The boot goes wrong at ramcheck (1 stage before it is good).
+What to look at, most likely first:
+  1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 4004). Not one chip: what all its
+     chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
 ######## real diagnosis-board
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 85% of its pulses)
@@ -29,9 +48,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
 Left running, it isn't working, so the boot's stages weren't taken.
 What to look at, most likely first:
-  1. No clock: CLK (IC2's pin 6) is stuck low. It comes from IC1 (the ULA, from the 14 MHz crystal): the ULA, the
-     crystal, or a short on the line. Nothing runs without it.
-     So the CPU isn't running (22 of the lines a running Z80 changes never change): that follows from the clock.
+  1. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with
+     /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The
+     master is the board nearest the Spectrum (channels 1-24): press Swap in the window (or give
+     --la-ports MASTER,OTHER the other way round) and run it again.
 ######## real diagnosis-i1-test4
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: stuck low
@@ -73,7 +93,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
 The boot goes wrong at reset (0 stages before it are good).
 What to look at, most likely first:
-  1. Address line A11: 4839 of the 4870 wrong ROM reads are the ROM's own byte from the address with A11 the
+  1. Address line A11: 5983 of the 6019 wrong ROM reads are the ROM's own byte from the address with A11 the
      other way. So the ROM sees A11 otherwise than the edge connector does: the line is weak or floating
      (in between 0 and 5 V), not stuck. Its driver is the CPU (IC2 pin 1): a faulty CPU's output does this;
      else a break in the track to the ROM (IC5) or a chip loading the line.
@@ -225,10 +245,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
 Left running, it isn't working, so the boot's stages weren't taken.
 What to look at, most likely first:
-  1. /RESET goes low 18 times in 49 ms, left running with nobody at the button: the CPU keeps
-     restarting (a working one's stays high). Something pulls /RESET low now and then: the CPU (IC2 pin 26:
-     a faulty Z80 can short its input), the reset circuit (its capacitor and resistor), the button, or the
-     5 V supply dipping. Pull the CPU and watch pin 26's socket hole: it should stay at 5 V.
+  1. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with
+     /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The
+     master is the board nearest the Spectrum (channels 1-24): press Swap in the window (or give
+     --la-ports MASTER,OTHER the other way round) and run it again.
 ######## real diagnosis-i2-test3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 67% of its pulses)
@@ -406,6 +426,29 @@ What to look at, most likely first:
   1. Keyboard line KB0 reads low on every half row (8 reads): as if CAPS SHIFT A Q 1 0 P ENTER SPACE were all held
      down, which no hand does. The line is shorted to 0 V (the keyboard connector, the membrane's
      track, a bridge to its neighbour) or the ULA's KB0 input (IC1 pin 19) is.
+######## real diagnosis-issue1-dead
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: stuck low
+  /RESET: high
+  /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
+  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
+Left running, it isn't working, so the boot's stages weren't taken.
+What to look at, most likely first:
+  1. No clock: CLK (IC2's pin 6) is stuck low. It comes from IC1 (the ULA, from the 14 MHz crystal): the ULA, the
+     crystal, or a short on the line. Nothing runs without it.
+     So the CPU isn't running (19 of the lines a running Z80 changes never change): that follows from the clock.
+######## real diagnosis-issue2-busreq
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 59% of its pulses)
+  /RESET: high
+  /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
+  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
+Left running, it isn't working, so the boot's stages weren't taken.
+What to look at, most likely first:
+  1. /BUSRQ (IC2 pin 25) is low all through: the CPU hands the bus over and stops. It's the CPU's input, from the
+     edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.
 ######## real diagnosis-issue2-faulty-chip-test
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -438,6 +481,17 @@ What to look at, most likely first:
   1. IC8, the lower RAM's bit D2 (4000-7FFF): it reads 1 where it should be 0 (2 reads, the first at 4000)
   2. Or what the lower RAM's chips share, if they are all addressed wrong (only 2 wrong reads to go on):
      IC3 (MUX), IC4 (MUX), IC1 (ULA)
+######## real diagnosis-issue2-wait
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 57% of its pulses)
+  /RESET: high
+  /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
+  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
+Left running, it isn't working, so the boot's stages weren't taken.
+What to look at, most likely first:
+  1. /WAIT (IC2 pin 24) is low all through: the CPU waits for ever in its bus cycle. It's the CPU's input, from the
+     edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.
 ######## real diagnosis-issue2
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -516,6 +570,19 @@ What to look at, most likely first:
      line. What they share is the CPU (IC2) reading them (its data inputs, its timing), or the data bus
      as a whole: a chip driving it when it shouldn't (the ULA, IC1; the ROM, IC5), a short across it.
      Swap the CPU first.
+######## real diagnosis-swap-test
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: stuck low
+  /RESET: low all through
+  /INT: low all through
+  The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
+  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
+Left running, it isn't working, so the boot's stages weren't taken.
+What to look at, most likely first:
+  1. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with
+     /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The
+     master is the board nearest the Spectrum (channels 1-24): press Swap in the window (or give
+     --la-ports MASTER,OTHER the other way round) and run it again.
 ######## real diagnosis-test1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 87% of its pulses)

@@ -877,9 +877,19 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       slave, a Swap button, and "remembered" or "a guess"; Swap and Start
       save it; --la-diagnose without --la-ports uses it. Tested with
       LA_FAKE_BOARDS (no boards on this PC): not yet with the real boards.
-- [ ] Swapped-boards check after the idle capture: CLK dead with /WAIT and
-      /BUSRQ low and nonsense on the bus -> "the boards look the wrong way
-      round: press Swap", not a fault verdict. (Test: diagnosis-i2-test2.)
+- [x] Swapped-boards check after the idle capture: CLK stopped with /WAIT
+      and /BUSRQ both held low -> "the boards look the wrong way round:
+      press Swap", before any fault. Right on i1-test1, i2-test2 and
+      swap-test (all three runs with the boards swapped).
+- [x] diagnosis-bad-ula-i3 (Issue 3B, known bad ULA) said A8 and A12 stuck:
+      /RESET seen high only 5 ms in, taken as the start (the last 1230
+      cycles, the RAM fill at FDxx). Fixed (a rise with the CPU busy before
+      it isn't the start), and a capture beginning just after 0000 lined
+      up on its first cycle. Now: reset OK, the lower RAM as a whole (IC3,
+      IC4, IC1 ULA, R1-R8). i3-test5 gives the same: its ULA too? If a good
+      ULA fixes it, put the ULA first in that verdict.
+- [ ] tests/la-diagnose.sh replays every real folder as an Issue 2: take
+      the board from the folder's diagnosis.txt ("Diagnosing a ...").
 - [x] The reset stage on a working board (i2-test3): the button bounced on
       release, the CPU started again from 0000 (17 times in that capture,
       143 in i3-test5's) and it said FAULT, or wrong ROM reads. Fixed: the
@@ -914,9 +924,16 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       picture's label, not a description of the screenshot. Describe the
       screenshot itself first, then the nearest picture and how alike;
       under about 80% say it's only a rough match.
-- [ ] The Issue 1 board (i1-test4, unfinished): the user to scope ULA pin
-      32, edge connector B8 (with the interface on) and CPU pin 6. First
-      real Issue 1: diagnosis only checked simulated before.
+- [ ] The Issue 1 board (i1-test1, i1-test4, issue1-dead; parked until it
+      has its turn on the bench, CPU soldered in): the user scoped the
+      address lines floating at about 1.2 V (the analyser reads that as
+      low). With /BUSACK low, /BUSRQ high, /RD and /WR low together and
+      /HALT low, the Z80 has let go of the bus with nobody asking: the
+      CPU, as the user suspects too. ASK the user what the fault turned out
+      to be, then check the verdict against it. First real Issue 1.
+- [ ] The verdict for that pattern: all of A0-A15 "low" with /BUSACK low
+      is a floating bus (the CPU let it go), not lines stuck low: say so,
+      and name the CPU first (with the clock rule above).
 The screen in the diagnosis (2026-11-07):
 - [x] --la-screen / the window's Screen row: matched against the atlas
       with the bus's verdict (agrees, or its own suspects when the bus

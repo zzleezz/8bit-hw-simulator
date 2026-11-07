@@ -57,6 +57,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   slave, a **Swap** button, and whether the order is remembered or a
   guess. The wrong way round, a working Spectrum read as a dead one.
   `--la-diagnose` without `--la-ports` uses the remembered order.
+- Logic analyser diagnosis: the boards the wrong way round are said so
+  (CLK stopped with /WAIT and /BUSRQ both held low), not taken for a dead
+  Spectrum. A /RESET that the analyser sees rise only after the CPU has
+  been running no longer marks where the CPU started (it made a working
+  part of the RAM test look like A8 and A12 stuck). A reset capture that
+  begins just after the fetch at 0000 is lined up on its first cycle.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

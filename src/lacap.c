@@ -993,6 +993,15 @@ static int la_start(const la_capture_t *c) {
     for (int i = z + 1; i < c->n && !r; i++)      /* not the fill's end */
         if (!lo(c->s[i], LA_RESET) && lo(c->s[i - 1], LA_RESET)) r = i;
     if (!r) return z;
+    /* /RESET rises slowly (a capacitor): the Z80 can be running well
+     * before the analyser sees it high. With the CPU busy before that
+     * rise, it isn't where the CPU started: the start is earlier. */
+    {
+        int falls_before = 0;
+        for (int i = z + 1; i < r && falls_before < 50 && (c->have >> LA_MREQ & 1); i++)
+            falls_before += lo(c->s[i], LA_MREQ) && !lo(c->s[i - 1], LA_MREQ);
+        if (falls_before >= 50) return z;
+    }
     bool m1 = c->have >> LA_M1 & 1;
     int best = r;
     for (int i = z + 1; i < r; i++)
@@ -1310,6 +1319,16 @@ static int compare(const char *an, const la_capture_t *a, const char *bn, const 
             printf("The CPU started again from 0000 %d time%s just after the reset (the reset button bouncing as\n"
                    "it's let go): compared from the last start\n", ra + rb, ra + rb == 1 ? "" : "s");
         if (ia || ib) snprintf(from, sizeof(from), ", from the %s fetch at 0000", ra || rb ? "last" : "first");
+        /* The capture began a cycle or two after the fetch at 0000 (the
+         * analyser saw the start late): the working board's from the same
+         * cycle as the capture's first. */
+        if (!(ca[ia].kind == LA_FETCH && ca[ia].addr == 0) && cb[ib].kind == LA_FETCH && cb[ib].addr == 0)
+            for (int k = ib; k < nb && k < ib + 64; k++)
+                if (cb[k].kind == ca[ia].kind && cb[k].addr == ca[ia].addr && cb[k].data == ca[ia].data) {
+                    ib = k;
+                    snprintf(from, sizeof(from), ", from %04X (the capture began after 0000)", ca[ia].addr);
+                    break;
+                }
     } else {
         ia = at_trigger(ca, na, a, align);
         ib = at_trigger(cb, nb, b, align);
@@ -1565,7 +1584,11 @@ static int pick_ports(const char *list, char ports[][64], int max, char *err, in
         if (found > 1 && known) {
             int k = 0;
             for (; k < found && k < max; k++) snprintf(ports[k], 64, "%.63s", p[k].port);
-            printf("The boards: %s is the master (serial %s, as remembered in la-boards.txt)\n", p[0].port, p[0].serial);
+            static char said[64];          /* once a run, not at every capture */
+            if (strcmp(said, p[0].serial)) {
+                printf("The boards: %s is the master (serial %s, as remembered in la-boards.txt)\n", p[0].port, p[0].serial);
+                snprintf(said, sizeof(said), "%s", p[0].serial);
+            }
             return k;
         }
         int n = snprintf(err, errlen, found ? "%d boards: say which is the master with --la-ports MASTER,OTHER (a port or a serial number),\n"
@@ -2483,6 +2506,16 @@ static int verdict(const ev_t *e, const machine_t *m, const char *stage, bool mi
     int nstuck = 0, nctl = 0;
     for (int s = 0; s < LA_NSIG; s++)
         if (e->stuck[s]) { nstuck++; nctl += s == LA_MREQ || s == LA_RD || s == LA_WR || s == LA_M1 || s == LA_RFSH; }
+    /* The analyser's two boards the wrong way round: each line is read from
+     * another, and a working Spectrum looks dead. CLK stopped with /WAIT and
+     * /BUSRQ both held low (each has a pull-up) is that, not a fault. */
+    if (idle_st && e->stuck[LA_CLK] && e->held[LA_WAIT] && e->held[LA_BUSRQ]) {
+        printf("  %d. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with\n"
+               "     /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The\n"
+               "     master is the board nearest the Spectrum (channels 1-24): press Swap in the window (or give\n"
+               "     --la-ports MASTER,OTHER the other way round) and run it again.\n", ++n);
+        goto done;
+    }
     if (e->rst_pulses) {
         printf("  %d. /RESET goes low %d time%s in %d ms, left running with nobody at the button: the CPU keeps\n"
                "     restarting (a working one's stays high). Something pulls /RESET low now and then: the CPU (%s pin 26:\n"
