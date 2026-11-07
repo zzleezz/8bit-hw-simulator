@@ -712,6 +712,20 @@ and will take the captures; Pico model to be agreed with Jim.
       --la-diagnose, diagnose.bat, 2026-11-06).
 - [ ] A game running as a health test (needs a trigger inside the game:
       addr= on its own code, or interrupt with the game's IM 2 vector).
+- [x] diagnosis-issue3-ic22-bad (2026-11-07): an Issue 3B that boots to the
+      copyright, all 6 stages OK, but ZX Diagnostics v0.37 fails the upper
+      RAM (walk, inversion, march, random) at IC22 (D7). Right, as far as
+      the boot goes: the ROM's RAM test (11DC-11EE) writes 02 and DECs to
+      01 and 00 only, so bits D2-D7 never hold a 1. The "All 6 stages"
+      text no longer says "all of the RAM ... good": it says the ROM's test
+      is weak and to run a full RAM test.
+- [ ] First test program for the cartridge idea below: the ZX Diagnostics
+      ROM itself (carts/zx-diagnostics-v0.37.rom, already in the
+      simulator). Captured on the real board from the Dandanator, compared
+      with the simulated board running it: its walk/march tests write every
+      pattern, so IC22's fault would show as a wrong read-back at a known
+      address and bit. Needs its stage addresses (from its source, git.io/
+      vkf1o) and /ROMCS held by the cartridge.
 - [ ] (The user, 2026-11-07) Instead of a game: our own test program for
       the Spectrum, loaded from a Dandanator or a DivMMC cartridge plugged
       into the back of the logic analyser interface (its pass-through edge

@@ -37,8 +37,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i1-test1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: stuck low
@@ -130,8 +133,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-log3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -180,8 +186,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-mc-4
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -212,8 +221,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-mc-6
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -269,8 +281,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-ula1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -306,8 +321,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-ula3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -343,8 +361,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-um1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -516,8 +537,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-issue2pulledchip3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -537,6 +561,31 @@ What to look at, most likely first:
      there at all (its pin floats and reads either way).
      The RAM test (the ROM's own, at the switch on) stopped at 8001, in the upper RAM; a working one's goes to FFFF.
      There it read 02, wrote 01, read 01, wrote 10; a working one's reads 02, writes 01, reads 01, writes 00.
+######## real diagnosis-issue3-ic22-bad
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 89% of its pulses)
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 10A8-162C
+  OK: the same as a working one
+1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+  OK: the same as a working one
+2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  OK: the same as a working one
+3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  OK: the same as a working one (the RAM test passed all 48K)
+4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+  OK: the same as a working one
+5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+  OK: the same as a working one
+6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  OK: the same as a working one
+Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-newtest1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 87% of its pulses)
@@ -1232,8 +1281,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM, all of the RAM (the ROM's RAM test)
-and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.
+All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
+bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
+patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+This doesn't test the picture, the keyboard, the sound or the tape.
 ######## screen IC13:data0=1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 66% of its pulses)

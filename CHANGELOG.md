@@ -63,6 +63,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   been running no longer marks where the CPU started (it made a working
   part of the RAM test look like A8 and A12 stuck). A reset capture that
   begins just after the fetch at 0000 is lined up on its first cycle.
+- Logic analyser diagnosis: a board that passes all six stages is no
+  longer said to have "all of the RAM good". The ROM's own RAM test only
+  writes 02, 01 and 00, so bits D2-D7 never hold a 1: a real Issue 3B
+  with a faulty IC22 (upper RAM, D7) booted and passed, while ZX
+  Diagnostics failed it. The verdict says so and points to a full RAM
+  test.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board

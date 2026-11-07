@@ -3709,12 +3709,18 @@ static int diagnose_run(const la_cli_t *o) {
             board_destroy(vboard);
             vboard = NULL;
             if (o->screen)
-                printf("All %d stages are the same as a working %s: the CPU, the ROM, all of the RAM (the ROM's RAM test)\n"
-                       "and the start of BASIC are good. A wrong picture is then the ULA's video side: %s reads the screen\n"
+                printf("All %d stages are the same as a working %s: the CPU, the ROM and the start of BASIC are good, and\n"
+                       "the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so\n"
+                   "bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some\n"
+                   "patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.\n"
+                       "A wrong picture is then the ULA's video side: %s reads the screen\n"
                        "over its own lines to the lower RAM, which the edge connector doesn't show.\n", passed, m->board_name, ula);
             else
-            printf("All %d stages are the same as a working %s: the CPU, the ROM, all of the RAM (the ROM's RAM test)\n"
-                   "and the start of BASIC are good. This doesn't test the picture, the keyboard, the sound or the tape.\n"
+            printf("All %d stages are the same as a working %s: the CPU, the ROM and the start of BASIC are good, and\n"
+                   "the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so\n"
+                   "bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some\n"
+                   "patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.\n"
+                   "This doesn't test the picture, the keyboard, the sound or the tape.\n"
                    "If the picture is wrong all the same (the copyright message garbled, wrong colours): the CPU wrote\n"
                    "the screen right and the RAM keeps it, so it's the ULA's video side: %s reads the screen over its own\n"
                    "address and data lines to the lower RAM, which the edge connector doesn't show. Diagnose a\n"
