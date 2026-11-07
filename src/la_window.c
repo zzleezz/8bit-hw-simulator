@@ -196,6 +196,26 @@ static void add_mark(const char *ref, int level) {
     L.mark_level[L.nmarks++] = level;
 }
 
+/* Whether the D0-D7 at LINE[I] (to J) is a data bit, not a diode: it
+ * follows "bit", "bits", "line(s)", "pin(s)" or "gave", perhaps after
+ * other bits ("bits D1 D2 D3", "pins D0-D4", "bit D7"). */
+static bool data_bit_word(const char *line, size_t i, size_t j) {
+    if (j - i != 2 || line[i] != 'D' || line[i + 1] < '0' || line[i + 1] > '7') return false;
+    size_t k = i;
+    for (;;) {
+        while (k > 0 && (line[k - 1] == ' ' || line[k - 1] == ',' || line[k - 1] == '-')) k--;
+        size_t e = k;
+        while (k > 0 && isalnum((unsigned char)line[k - 1])) k--;
+        if (k == e) return false;
+        size_t n = e - k;
+        if (n == 2 && line[k] == 'D' && line[k + 1] >= '0' && line[k + 1] <= '7') continue;
+        static const char *words[] = { "bit", "bits", "line", "lines", "pin", "pins", "gave" };
+        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); w++)
+            if (strlen(words[w]) == n && !strncmp(line + k, words[w], n)) return true;
+        return false;
+    }
+}
+
 /* The chips the verdict names: after "What to look at", the items'
  * references (IC26, TR6, D2...), item 1's the first to look at; not the
  * notes (a line nothing on the board uses). */
@@ -225,7 +245,7 @@ static void find_marks(const char *text) {
                     if (d > j && d - i < 12 && (d >= len || !isalnum((unsigned char)line[d]))) {
                         char ref[16];
                         snprintf(ref, sizeof(ref), "%.*s", (int)(d - i), line + i);
-                        if (is_part(b, ref)) add_mark(ref, item == 1 ? 2 : 1);
+                        if (!data_bit_word(line, i, d) && is_part(b, ref)) add_mark(ref, item == 1 ? 2 : 1);
                     }
                     i = d > i ? d : i + 1;
                 } else i++;

@@ -1,4 +1,7 @@
-# c64-hw-sim
+# 8bit-hw-simulator
+
+*Started as antirez's [c64-hw-simulator](https://github.com/antirez/c64-hw-simulator)
+(c64-hw-sim); the program is still called `c64-hw-sim`.*
 
 c64-hw-sim simulates the motherboards of the Commodore 64 (ASSY 250407
 and 250469) and of the ZX Spectrum (boards Issue 1, 2, 3B, 4B and 6A), pin by pin. You can lift the
@@ -446,6 +449,16 @@ into `last-diagnosis`; to keep one, type the board's name after
 `diagnosis-` under **Save as** and press **Save**. The same window
 diagnoses a saved folder of captures again, or the simulated board with a
 fault as the one under test.
+
+![The window waiting for the Spectrum (ARMED, LET GO OF RESET), then captured (TRIGGERED)](docs/la-window-armed-triggered.png)
+
+Above: the RAM test stage, waiting for the Spectrum's reset to be let go,
+then captured. Below: the end of a run on a real Issue 2 with a faulty
+4116 (IC13, which was the bad chip), and the chip outlined on the board.
+
+![The verdict: IC13, the lower RAM's bit D7](docs/la-window-verdict.png)
+
+![The Issue 2 board with IC13 outlined](docs/zx-board-fault.png)
 
 From the command line:
 

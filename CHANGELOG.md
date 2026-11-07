@@ -25,6 +25,11 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   and 2, and R26 open as a cause). A 16K Issue 1 no longer fails the RAM
   test's end: its reads of 8000 (no RAM there, as on a working one) aren't
   a fault. Checked, simulated, on the Issue 1, 3B, 4B and 6A.
+- The logic analyser window no longer outlines diode D7 when the verdict
+  names a RAM chip's "bit D7" (a data bit after "bit", "bits", "line" or
+  "pins" isn't a part on the board).
+- README: the title is the repository's name; pictures of the analyser
+  window (ARMED, TRIGGERED, a real IC13 verdict) and the outlined board.
 - Logic analyser captures of the Spectrum's edge connector (work in
   progress, before the real analyser was built): read a `.lac` or CSV file
   from the LogicAnalyzer program (`--la-info`), record the simulated board
