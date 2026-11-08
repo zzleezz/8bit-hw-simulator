@@ -6,7 +6,7 @@ Changes not yet in a release are under "Unreleased".
 This project is AI-generated: the code and these notes were written with
 Claude (Anthropic's AI), directed and tested by zzleezz.
 
-## Unreleased
+## V1.2 (2026-11-08)
 
 - Logic analyser diagnosis, each thing said once: a dead board's idle
   stage says "it isn't running", and the summary why the boot's stages
@@ -87,8 +87,6 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 - Logic analyser window: the results text is laid out as paragraphs. It
   was wrapped twice (for a terminal, then for the window), which broke
   sentences into fragments, and only an item's first line was colored.
-
-## V1.2 (2026-11-07)
 
 - Logic analyser diagnosis: no more "it's in the folder from before: use
   it?" at every stage. A run always captures afresh (the folder's earlier
