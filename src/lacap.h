@@ -147,7 +147,9 @@ extern bool (*la_ask_hook)(const char *prompt);
 /* And how far it is (from its thread): LA_EV_STAGE with STAGE 0 (idle) to
  * 6 (the boot's six) and its STATE; LA_EV_ARMED and LA_EV_TRIGGERED as
  * the analyser arms and fires. */
-enum { LA_EV_STAGE, LA_EV_ARMED, LA_EV_TRIGGERED, LA_EV_PROGRESS /* the check: STAGE jobs done of STATE */ };
+enum { LA_EV_STAGE, LA_EV_ARMED, LA_EV_TRIGGERED, LA_EV_PROGRESS /* the check: STAGE jobs done of STATE */,
+       LA_EV_VERDICT /* the text from here is the conclusion */,
+       LA_EV_FOLDER /* the next line names the captures' folder */ };
 enum { LA_ST_NONE, LA_ST_RUN, LA_ST_OK, LA_ST_FAULT, LA_ST_NEVER, LA_ST_SKIP };
 extern void (*la_status_hook)(int kind, int stage, int state);
 typedef struct { const char *name; int addr; double ms; const char *what; } la_stage_t;

@@ -17,6 +17,7 @@
 #include "lacap.h"
 #include "lapico.h"
 #include "zx48.h"
+#include "filedialog.h"
 #include <ctype.h>
 #include <math.h>
 #include <pthread.h>
@@ -84,6 +85,11 @@ static struct {
     bool expect_release;            /* the last question had the reset button held */
     char doing[200];
     long jump;                      /* a stage's box clicked: the text offset to show (-1 none) */
+    /* Where the conclusion starts in the text, and the line naming the
+     * captures' folder (shown as a row with "Open folder" instead). */
+    bool has_verdict, has_folder;
+    size_t verdict_off, folder_off;
+    float width;                    /* the window's width as the user left it (0: not yet) */
 
     /* The screen: a picture of the monitor (the user's file; "" none), shown
      * small; "Choose..." / "Paste" asked of the UI (1, 2). */
@@ -190,6 +196,12 @@ static void status_hook(int kind, int stage, int state) {
     } else if (kind == LA_EV_PROGRESS) {
         snprintf(L.doing, sizeof(L.doing), "Checking the screen's faults against the captures: %d of %d simulated", stage,
                  state);
+    } else if (kind == LA_EV_VERDICT) {
+        L.has_verdict = true;
+        L.verdict_off = L.len;
+    } else if (kind == LA_EV_FOLDER) {
+        L.has_folder = true;
+        L.folder_off = L.len;
     } else if (kind == LA_EV_TRIGGERED) {
         L.sign = 2;
         snprintf(L.doing, sizeof(L.doing), "Reading the samples, then comparing with a working board");
@@ -274,7 +286,7 @@ static void finish(int rc) {
     L.doing[0] = 0;
     L.rc = rc;
     snprintf(L.rc_text, sizeof(L.rc_text), "%s",
-             L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: the verdict is below." :
+             L.stop ? "Stopped." : rc == 0 ? "Done: no fault found." : rc == 2 ? "Done: what it found is below." :
              "It stopped before a verdict (see the last lines below).");
     char *copy = L.text ? strdup(L.text) : NULL;
     pthread_mutex_unlock(&L.mu);
@@ -424,6 +436,8 @@ static void clear_results(void) {
     L.sign = L.arms = 0;
     L.doing[0] = 0;
     L.jump = -1;
+    L.has_verdict = L.has_folder = false;
+    L.verdict_off = L.folder_off = 0;
     pthread_mutex_unlock(&L.mu);
 }
 
@@ -522,6 +536,17 @@ static bool load_thumb(const char *path) {
     thumbtex_make(&L.screen_tex, px, w, h);
     free(px);
     return true;
+}
+
+int la_window_monitor(struct nk_image *img, int *w, int *h) {
+    if (!L.open) return 0;
+    if (L.screen[0] && L.screen_tex.live && L.screen_tex.w > 0) {
+        *img = thumbtex_image(&L.screen_tex);
+        *w = L.screen_tex.w;
+        *h = L.screen_tex.h;
+        return 2;
+    }
+    return 1;
 }
 
 void la_window_set_picture(const char *path) {
@@ -1077,12 +1102,12 @@ static void stage_strip(struct nk_context *ctx, const int *st, int cur, bool run
         case LA_ST_OK: fill = nk_rgb(35, 140, 60); what = "OK"; break;
         case LA_ST_FAULT: fill = nk_rgb(200, 45, 40); what = "WRONG"; break;
         case LA_ST_NEVER: fill = nk_rgb(200, 45, 40); what = "never came"; break;
-        case LA_ST_SKIP: fill = nk_rgb(45, 45, 48); fg = nk_rgb(120, 120, 120); what = "skipped"; break;
+        case LA_ST_SKIP: fill = nk_rgb(52, 52, 56); fg = nk_rgb(175, 175, 175); what = "skipped"; break;
         default: fill = nk_rgb(75, 75, 80); fg = nk_rgb(170, 170, 170); what = ""; break;
         }
         (void)cur;
         nk_fill_rect(cv, r, 4, fill);
-        if (st[k] == LA_ST_SKIP) nk_stroke_line(cv, r.x + 4, r.y + r.h - 4, r.x + r.w - 4, r.y + 4, 1.5f, nk_rgb(110, 110, 110));
+        if (st[k] == LA_ST_SKIP) nk_stroke_rect(cv, nk_rect(r.x + 1, r.y + 1, r.w - 2, r.h - 2), 4, 1.0f, nk_rgb(110, 110, 110));
         float fh = ctx->style.font->height;
         text_centered(cv, ctx, nk_rect(r.x, r.y + 4, r.w, fh + 2), stage_label[k], fg);
         if (what[0]) text_centered(cv, ctx, nk_rect(r.x, r.y + r.h - fh - 6, r.w, fh + 2), what, fg);
@@ -1177,10 +1202,55 @@ static const char *para_next(const char *line, const char *end, char *out, size_
     return next;
 }
 
+/* A heading in the results. */
+static void heading(struct nk_context *ctx, const char *t, float *y) {
+    nk_layout_row_dynamic(ctx, 26, 1);
+    nk_label_colored(ctx, t, NK_TEXT_LEFT, ink(COL_HOVER));
+    *y += 26 + ctx->style.window.spacing.y;
+}
+
+/* The text T from FROM to TO as paragraphs (see para_next), colored by
+ * what they say; *Y grows by what it takes, and *JUMP_Y gets the place of
+ * the paragraph at text offset JUMP (when not NULL and JUMP >= 0). */
+static void draw_text(struct nk_context *ctx, const char *t, size_t from, size_t to, float avail, long jump, float *y,
+                      float *jump_y) {
+    static char para[8192];
+    const struct nk_user_font *f = ctx->style.font;
+    float lh = 16, gap = ctx->style.window.spacing.y;
+    for (const char *line = t + from; line < t + to; ) {
+        const char *start = line;
+        line = para_next(line, t + to, para, sizeof(para));
+        if (jump_y && jump >= 0 && *jump_y < 0 && start - t >= jump) *jump_y = *y;
+        /* Measured a little narrower than the row, so a line that only
+         * just fits gets its second row rather than being cut off. */
+        int rows = avail > 50 ? wrap_rows(f, para, avail * 0.96f) : 1;
+        nk_layout_row_dynamic(ctx, lh * rows, 1);
+        struct nk_color c = COL_TEXT;
+        if (strstr(para, "FAULT") || strstr(para, "Wrong too") || strstr(para, "It never")) c = COL_FAULT;
+        else if (!strncmp(para, "  OK", 4) || !strncmp(para, "  It agrees", 11)) c = COL_TRACE;
+        else if (para[0] == ' ' && para[1] == ' ' && isdigit((unsigned char)para[2])) c = COL_PULSE;
+        nk_label_colored_wrap(ctx, para, ink(c));
+        *y += lh * rows + gap;
+    }
+}
+
+/* The captures' folder, from the line that names it ("...: DIR (diagnosis.txt)"). */
+static bool folder_of_run(char *out, int len) {
+    out[0] = 0;
+    pthread_mutex_lock(&L.mu);
+    if (L.has_folder && L.text && L.folder_off < L.len) {
+        const char *p = strstr(L.text + L.folder_off, "comparison: ");
+        const char *e = p ? strstr(p, " (diagnosis.txt)") : NULL;
+        if (p && e && e - p - 12 < len) snprintf(out, (size_t)len, "%.*s", (int)(e - p - 12), p + 12);
+    }
+    pthread_mutex_unlock(&L.mu);
+    return out[0] != 0;
+}
+
 void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *machine) {
     if (!L.open) return;
     pthread_once(&once, init_sync);
-    float w = fminf(720, fmaxf(480, area.w * 0.5f)), h = area.h - 32;
+    float w = L.width > 0 ? L.width : fminf(820, fmaxf(560, area.w * 0.55f)), h = area.h - 32;
     if (w > area.w - 32) w = area.w - 32;
     struct nk_rect r = nk_rect(area.x + 16, area.y + 16, w, h);
     if (L.reopen) {
@@ -1198,6 +1268,7 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         return;
     }
     L.bounds = nk_window_get_bounds(ctx);
+    L.width = L.bounds.w;
     float cw = nk_window_get_content_region(ctx).w - 20;
     bool zx = is_zx48(machine);
     if (L.start_pending && zx) { L.start_pending = false; start(machine); }
@@ -1410,6 +1481,20 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             if (nk_button_label(ctx, "Show the board")) L.open = false;
         }
         if (nk_button_label(ctx, "Close")) L.open = false;
+        char dir[1100];
+        if (!running && folder_of_run(dir, sizeof(dir))) {
+            const char *b = strrchr(dir, '/'), *b2 = strrchr(dir, '\\');
+            if (b2 > b) b = b2;
+            char lab[300];
+            snprintf(lab, sizeof(lab), "Captures and diagnosis.txt: %s", b ? b + 1 : dir);
+            nk_layout_row_begin(ctx, NK_STATIC, 26, 2);
+            nk_layout_row_push(ctx, cw - 130 > 100 ? cw - 130 : 100);
+            if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, dir);
+            nk_label_colored(ctx, lab, NK_TEXT_LEFT, COL_DIMTEXT);
+            nk_layout_row_push(ctx, 120);
+            if (nk_button_label(ctx, "Open folder")) filedialog_open_file(dir);
+            nk_layout_row_end(ctx);
+        }
     }
 
     /* What it printed, the newest at the bottom (or a clicked stage's). */
@@ -1430,33 +1515,36 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         size_t tl = L.len;
         long jump = L.jump;
         L.jump = -1;
-        float y = 0, jump_y = -1, lh = 16, gap = ctx->style.window.spacing.y;
+        float y = 0, jump_y = -1;
         const struct nk_user_font *f = ctx->style.font;
         float avail = nk_window_get_content_region(ctx).w - 2 * ctx->style.window.group_padding.x -
-                      ctx->style.window.scrollbar_size.x - 8;
-        static char para[8192];
-        for (const char *line = t; line < t + tl; ) {
-            /* A paragraph: the text's lines are wrapped for a terminal, so
-             * the lines that carry on the one before are joined, then
-             * wrapped to the window (see para_next). */
-            const char *start = line;
-            line = para_next(line, t + tl, para, sizeof(para));
-            if (jump >= 0 && jump_y < 0 && start - t >= jump) jump_y = y;
-            int rows = avail > 50 ? wrap_rows(f, para, avail) : 1;
-            nk_layout_row_dynamic(ctx, lh * rows, 1);
-            struct nk_color c = COL_TEXT;
-            if (strstr(para, "FAULT") || strstr(para, "Wrong too") || strstr(para, "It never")) c = COL_FAULT;
-            else if (!strncmp(para, "  OK", 4) || !strncmp(para, "  It agrees", 11)) c = COL_TRACE;
-            else if (para[0] == ' ' && para[1] == ' ' && isdigit((unsigned char)para[2])) c = COL_PULSE;
-            if (rows > 1) nk_label_colored_wrap(ctx, para, ink(c));
-            else nk_label_colored(ctx, para, NK_TEXT_LEFT, ink(c));
-            y += lh * rows + gap;
-        }
+                      ctx->style.window.scrollbar_size.x - 20;
+        bool done_view = !running && L.has_verdict && L.verdict_off <= tl;
+        if (done_view) {
+            /* The conclusion first, then the run stage by stage. */
+            size_t fs = tl, fe = tl;
+            if (L.has_folder && L.folder_off >= L.verdict_off && L.folder_off <= tl) {
+                fs = L.folder_off;
+                const char *nl = fs + 1 < tl ? memchr(t + fs + 1, '\n', tl - fs - 1) : NULL;
+                fe = nl ? (size_t)(nl - t) + 1 : tl;
+            }
+            heading(ctx, "What it found", &y);
+            draw_text(ctx, t, L.verdict_off, fs, avail, -1, &y, NULL);
+            draw_text(ctx, t, fe, tl, avail, -1, &y, NULL);
+            heading(ctx, "The run, stage by stage", &y);
+            draw_text(ctx, t, 0, L.verdict_off, avail, jump, &y, &jump_y);
+        } else
+            draw_text(ctx, t, 0, tl, avail, jump, &y, &jump_y);
+        (void)f;
         bool more = tl != L.shown_len;
         L.shown_len = tl;
         pthread_mutex_unlock(&L.mu);
+        static bool was_done;
+        bool now_done = !running && L.has_verdict;
         if (jump_y >= 0) sy = (nk_uint)(jump_y > 4 ? jump_y - 4 : 0);
-        else if (more) sy = (nk_uint)(y + 100);   /* down to the newest */
+        else if (now_done && !was_done) sy = 0;   /* finished: the conclusion, at the top */
+        else if (more && !now_done) sy = (nk_uint)(y + 100);   /* down to the newest */
+        was_done = now_done;
         nk_group_end(ctx);
     }
     nk_end(ctx);

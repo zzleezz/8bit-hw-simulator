@@ -1668,7 +1668,7 @@ static int pick_ports(const char *list, char ports[][64], int max, char *err, in
  * fires on those (the RAM test's writes can fake almost any address):
  * these need the zx firmware (la-firmware), whose trigger wants 75 ns. */
 const la_stage_t la_stages[] = {
-    { "reset",     0xFFFF,    0.031, "the reset: the RAM test's first write (FFFF), about 110 T after it" },
+    { "reset",     0xFFFF,    0.031, "the reset: the RAM test's first write (FFFF), about 110 clock cycles after it" },
     { "ramcheck",  0x11E2,  449.419, "the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)" },
     { "ramdone",   0x11EF, 1650.562, "the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)" },
     { "copyright", 0x1539, 1714.319, "the copyright message (1539, 1.71 s after the reset)" },
@@ -1676,6 +1676,22 @@ const la_stage_t la_stages[] = {
     { "interrupt", 0x0038,       -1, "a frame interrupt (50 a second, while the ROM's interrupt routine is used)" },
     { NULL, 0, 0, NULL }
 };
+
+/* When the CPU went another way: at the capture's first bus cycle or after N. */
+static const char *went_when(int cycle) {
+    static char b[64];
+    if (cycle <= 0) return "from the capture's first bus cycle";
+    snprintf(b, sizeof(b), "after %d bus cycle%s", cycle, cycle == 1 ? "" : "s");
+    return b;
+}
+
+/* A stage's name as the window's boxes say it ("RAM test", not "ramcheck"). */
+static const char *stage_plain(const char *name) {
+    static const char *const from[] = { "idle", "reset", "ramcheck", "ramdone", "copyright", "main", "interrupt" };
+    static const char *const to[] = { "Idle", "Reset", "RAM test", "RAM done", "Copyright", "Main loop", "Interrupt" };
+    for (int k = 0; k < 7; k++) if (!strcmp(name, from[k])) return to[k];
+    return name;
+}
 
 static const la_stage_t *stage_named(const char *t) {
     for (const la_stage_t *s = la_stages; s->name; s++) if (!strcasecmp(s->name, t)) return s;
@@ -3721,7 +3737,7 @@ static int diagnose_run(const la_cli_t *o) {
         char ipath[1024];
         snprintf(path, sizeof(path), "%s/%s.lac", dir, st->name);
         snprintf(ipath, sizeof(ipath), "%s/%s-instead.lac", dir, st->name);
-        printf("\n%d of %d, %s: %s\n", i + 1, DIAG_NSTAGES, st->name, st->what);
+        printf("\n%d of %d, %s: %s\n", i + 1, DIAG_NSTAGES, stage_plain(st->name), st->what);
         la_status(LA_EV_STAGE, i + 1, LA_ST_RUN);
         double at = i == 0 ? 0 : st->ms + 5;    /* when it's past due */
         if (o->replay) {
@@ -3818,7 +3834,7 @@ static int diagnose_run(const la_cli_t *o) {
         if (fail_stage) {               /* --la-all: a later stage that's wrong too */
             if (!instead) ev_merge(&e, &se);
             if (instead) printf("  It never came either. When it should have, the CPU was %s\n", where);
-            else if (sco.diverged) printf("  Wrong too: the CPU went another way (cycle %d)\n", sco.cycle);
+            else if (sco.diverged) printf("  Wrong too: the CPU went another way %s\n", went_when(sco.cycle));
             else printf("  Wrong too: it got there, but the bus shows something wrong\n");
             if (instead) break;
             continue;
@@ -3828,7 +3844,7 @@ static int diagnose_run(const la_cli_t *o) {
         fail_stage = st->name;
         missing = instead;
         if (instead) printf("  It never came. When it should have, the CPU was %s\n", where);
-        else if (sco.diverged) printf("  FAULT: the CPU went another way (cycle %d)\n", sco.cycle);
+        else if (sco.diverged) printf("  FAULT: the CPU went another way %s\n", went_when(sco.cycle));
         else printf("  FAULT: it got there, but the bus shows something wrong\n");
         /* --la-all: on to the rest (not after a stage that never came:
          * the later ones won't either). */
@@ -3836,6 +3852,7 @@ static int diagnose_run(const la_cli_t *o) {
         printf("  (--la-all: capturing the rest as well)\n");
     }
     printf("\n");
+    la_status(LA_EV_VERDICT, 0, 0);
     if (idle == 1) {
         if (!fail_stage) { e = ie; fail_stage = "idle"; snprintf(where, sizeof(where), "%s", ie.idle_where); }
         else ev_merge(&e, &ie);     /* not its stuck lines: left running, a faulty board's in other code */
@@ -3880,9 +3897,10 @@ static int diagnose_run(const la_cli_t *o) {
     else if (!strcmp(fail_stage, "idle"))
         printf("The boot's %d stages are the same as a working one's, but left running it isn't.\n", passed);
     else
-        printf("The boot goes wrong at %s (%d stage%s before it %s good).\n", fail_stage, passed, passed == 1 ? "" : "s",
+        printf("The boot goes wrong at %s (%d stage%s before it %s good).\n", stage_plain(fail_stage), passed, passed == 1 ? "" : "s",
                passed == 1 ? "is" : "are");
     verdict(&e, m, fail_stage, missing, &co, where);
+    la_status(LA_EV_FOLDER, 0, 0);
     printf("\nThe captures and the whole comparison: %s (diagnosis.txt)\n", dir);
     if (o->screen) screen_part(o, m, vtext, false);
     return 2;

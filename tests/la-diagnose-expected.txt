@@ -5,17 +5,17 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-162C (and the frame interrupt)
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed 16K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2 (RAM 16K): the CPU, the ROM and the start of BASIC are good, and
@@ -30,15 +30,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: running code from RAM (0038-D6A8): it went astray
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 125)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 125 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was fetching from 103E-1056
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 4004). Not one chip: what all its
      chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
@@ -49,17 +49,17 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-0E66 (and the frame interrupt)
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
@@ -99,12 +99,12 @@ What to look at, most likely first:
 ######## real diagnosis-i2-cpu1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   FAULT: it got there, but the bus shows something wrong
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
 Note: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 Note: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET
 is stuck low), when the CPU drives nothing; what it shows isn't the boot.
 What to look at, most likely first:
@@ -115,15 +115,15 @@ What to look at, most likely first:
 ######## real diagnosis-i2-cpu2
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 15)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way after 15 bus cycles
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. Address line A11: 5983 of the 6019 wrong ROM reads are the ROM's own byte from the address with A11 the
      other way. So the ROM sees A11 otherwise than the edge connector does: the line is weak or floating
@@ -133,15 +133,15 @@ What to look at, most likely first:
 ######## real diagnosis-i2-log1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 193)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 193 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was still filling the RAM for the RAM test (11DC-11E1)
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM's address line A3: the RAM test found 4008 reading 00, which is what it had just left
      at 4000: those two are the same cell, so A3 doesn't get through to the lower RAM's chips. Its
@@ -150,17 +150,17 @@ What to look at, most likely first:
 ######## real diagnosis-i2-log2
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
@@ -170,16 +170,16 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-log3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   Not in the folder (reset.lac): the diagnosis stops here
 ######## real diagnosis-i2-log4
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 0)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way from the capture's first bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. A9 is stuck high all through, where a working board's changes all the time: a short to 5 V (or another line), or the line
      broken. It's IC2's pin 39.
@@ -189,31 +189,31 @@ What to look at, most likely first:
 ######## real diagnosis-i2-lr1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was fetching from 0008-491C (and the frame interrupt)
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC7, the lower RAM's bit D1 (4000-7FFF): it reads 1 where it should be 0 (8 reads, the first at 4000)
 ######## real diagnosis-i2-mc-3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
@@ -223,12 +223,12 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-mc-4
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   FAULT: it got there, but the bus shows something wrong
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
 Note: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 Note: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET
 is stuck low), when the CPU drives nothing; what it shows isn't the boot.
 What to look at, most likely first:
@@ -238,17 +238,17 @@ What to look at, most likely first:
 ######## real diagnosis-i2-mc-5
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
@@ -258,15 +258,15 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-mc-6
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 2476)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way after 2476 bus cycles
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC1, the ULA: its timing with the CPU (contention). All 4 wrong bytes of the lower RAM were written
      or read while the ULA was fetching the screen; of the 1 that read back right (with those bits), 1
@@ -297,17 +297,17 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-162C (and the frame interrupt)
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
@@ -318,15 +318,15 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-ula1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   FAULT: it got there, but the bus shows something wrong
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The CPU's clock is wrong: the analyser sees only 1% of CLK's pulses (a working ULA's: about 90%),
      so they are too narrow or too weak, from IC1 (the ULA). A CPU on a clock like that misreads and
@@ -338,17 +338,17 @@ What to look at, most likely first:
 ######## real diagnosis-i2-ula2
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
@@ -358,19 +358,19 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-ula3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   FAULT: it got there, but the bus shows something wrong
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 175)
-The boot goes wrong at main (4 stages before it are good).
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way after 175 bus cycles
+The boot goes wrong at Main loop (4 stages before it are good).
 What to look at, most likely first:
   1. Keyboard line KB0 reads low on every half row (8 reads): as if CAPS SHIFT A Q 1 0 P ENTER SPACE were all held
      down, which no hand does. The line is shorted to 0 V (the keyboard connector, the membrane's
@@ -378,17 +378,17 @@ What to look at, most likely first:
 ######## real diagnosis-i2-ula4
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
@@ -398,19 +398,19 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-um1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC22, the upper RAM's bit D7: the CPU read it otherwise than the analyser saw. The RAM test read 02
      at 8000 (as the analyser saw it) but wrote back 81, one less than 82: what the CPU got. So D7
@@ -425,31 +425,31 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: running code from RAM (C5D7-D329): it went astray
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 125)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 0)
-The boot goes wrong at ramcheck (1 stage before it is good).
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 125 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D6 D7 wrong (the first at 4004). Not one chip: what all its
      chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
 ######## real diagnosis-iss2-majorchip-1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   FAULT: it got there, but the bus shows something wrong
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
 Note: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 Note: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET
 is stuck low), when the CPU drives nothing; what it shows isn't the boot.
 What to look at, most likely first:
@@ -459,19 +459,19 @@ What to look at, most likely first:
 ######## real diagnosis-iss2-majorchip-2
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  FAULT: the CPU went another way (cycle 175)
-The boot goes wrong at interrupt (5 stages before it are good).
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  FAULT: the CPU went another way after 175 bus cycles
+The boot goes wrong at Interrupt (5 stages before it are good).
 What to look at, most likely first:
   1. Keyboard line KB0 reads low on every half row (8 reads): as if CAPS SHIFT A Q 1 0 P ENTER SPACE were all held
      down, which no hand does. The line is shorted to 0 V (the keyboard connector, the membrane's
@@ -506,15 +506,15 @@ What to look at, most likely first:
 ######## real diagnosis-issue2-faulty-chip-test
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC17, the upper RAM's bit D2 (8000-FFFF): it reads 1 where it should be 0 (1 read, the first at 8000)
   2. Or what the upper RAM's chips share, if they are all addressed wrong (only 1 wrong read to go on):
@@ -528,7 +528,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0008-2244
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   Not in the folder (reset.lac): the diagnosis stops here
 The boot's 0 stages are the same as a working one's, but left running it isn't.
 What to look at, most likely first:
@@ -546,13 +546,13 @@ What to look at, most likely first:
 ######## real diagnosis-issue2-one-pulled-chip
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC8, the lower RAM's bit D2 (4000-7FFF): it reads 1 where it should be 0 (2 reads, the first at 4000)
   2. Or what the lower RAM's chips share, if they are all addressed wrong (only 2 wrong reads to go on):
@@ -571,26 +571,26 @@ What to look at, most likely first:
 ######## real diagnosis-issue2
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   Not in the folder (ramdone.lac): the diagnosis stops here
 ######## real diagnosis-issue2again
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
@@ -600,15 +600,15 @@ This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-issue2pulledchip3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC19, the upper RAM's bit D4: the CPU read it otherwise than the analyser saw. The RAM test read 01
      at 8001 (as the analyser saw it) but wrote back 10, one less than 11: what the CPU got. So D4
@@ -623,17 +623,17 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
@@ -662,11 +662,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: running code from RAM (FEC7-FFC8): it went astray
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 1)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way after 1 bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   Not in the folder (that run stopped at the first fault): the rest is from the stages before
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   Note: /RFSH (IC2 pin 28) is stuck low. Nothing on this board uses it (only the edge connector has
   it), so a Z80 with that output dead still runs it: not the fault, unless something plugged in needs it.
@@ -694,19 +694,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0E4D-0E66
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC13, the lower RAM's bit D7 (4000-7FFF): it reads 1 where it should be 0 (29 reads, the first at 4000)
 ######## sim IC10:flip@4005
@@ -716,19 +716,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   FAULT: it got there, but the bus shows something wrong
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   Wrong too: it got there, but the bus shows something wrong
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC10, the lower RAM's bit D4 (4000-7FFF): it reads wrong both ways (3 reads, the first at 4005)
 ######## sim IC12:data0=1
@@ -738,15 +738,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: halted (HALT low): it ran into a HALT, so it went astray before
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was halted (HALT low): it ran into a HALT, so it went astray before
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC12, the lower RAM's bit D6 (4000-7FFF): it reads 1 where it should be 0 (9 reads, the first at 4000)
   2. Left running, the CPU halts (/HALT, IC2 pin 18, low all through): it ran into a HALT. So it
@@ -758,15 +758,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 2397)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way after 2397 bus cycles
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was still filling the RAM for the RAM test (11DC-11E1)
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC13, the lower RAM's bit D7 (4000-7FFF): it reads 0 where it should be 1 (5 reads, the first at 5CB3)
 ######## sim IC15:addr3
@@ -776,19 +776,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0D1C-0EAB
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  FAULT: the CPU went another way (cycle 108)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  FAULT: the CPU went another way after 108 bus cycles
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at copyright (3 stages before it are good).
+The boot goes wrong at Copyright (3 stages before it are good).
 What to look at, most likely first:
   1. IC15, the upper RAM's bit D0 (8000-FFFF): it reads wrong both ways (63 reads, the first at FF4E)
 ######## sim IC17:data0=1
@@ -798,19 +798,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC17, the upper RAM's bit D2 (8000-FFFF): it reads 1 where it should be 0 (1 read, the first at 8000)
   2. Or what the upper RAM's chips share, if they are all addressed wrong (only 1 wrong read to go on):
@@ -824,19 +824,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  FAULT: the CPU went another way (cycle 53)
-The boot goes wrong at interrupt (5 stages before it are good).
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  FAULT: the CPU went another way after 53 bus cycles
+The boot goes wrong at Interrupt (5 stages before it are good).
 What to look at, most likely first:
   1. Keyboard line KB0 reads low on every half row (3 reads): as if CAPS SHIFT A Q 1 0 P ENTER SPACE were all held
      down, which no hand does. The line is shorted to 0 V (the keyboard connector, the membrane's
@@ -848,15 +848,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was still filling the RAM for the RAM test (11DC-11E1)
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D5 wrong (the first at 4000). Not one chip: what all its
      chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
@@ -881,19 +881,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC20, the upper RAM's bit D5 (8000-FFFF): it reads 1 where it should be 0 (1 read, the first at 8000)
   2. Or what the upper RAM's chips share, if they are all addressed wrong (only 1 wrong read to go on):
@@ -907,19 +907,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   Wrong too: it got there, but the bus shows something wrong
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. The upper RAM's address line A3: the RAM test found 8008 reading 00, which is what it had just left
      at 8000: those two are the same cell, so A3 doesn't get through to the upper RAM's chips. Its
@@ -934,11 +934,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: running code from RAM (0000-FFFF): it went astray
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 11)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way after 11 bus cycles
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   It never came either. When it should have, the CPU was running code from RAM (9794-AF80): it went astray
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. D2 is stuck low all through, where a working board's changes all the time: a short to 0 V (or another line), or the line
      broken. It's IC2's pin 12.
@@ -952,15 +952,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low all through
   The CPU: fetching from 0038-0324 (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came. When it should have, the CPU was fetching from 0038-0324 (and the frame interrupt)
-The boot goes wrong at copyright (3 stages before it are good).
+The boot goes wrong at Copyright (3 stages before it are good).
 What to look at, most likely first:
   1. /INT (IC2 pin 16) is low all through, left running: a working one's goes low for 32 T every 20 ms.
      It comes from the ULA (IC1 pin 12, through R26): the ULA, R26 open (the line left floating), or a short to 0 V on the line.
@@ -971,19 +971,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-003C (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 0)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 1)
-The boot goes wrong at reset (0 stages before it are good).
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way from the capture's first bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way after 1 bus cycle
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. /RD is stuck high all through, where a working board's changes all the time: a short to 5 V (or another line), or the line
      broken. It's IC2's pin 21.
@@ -997,15 +997,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 3)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 4)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way after 3 bus cycles
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way after 4 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was still filling the RAM for the RAM test (11DC-11E1)
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. /WR is stuck low all through, where a working board's changes all the time: a short to 0 V (or another line), or the line
      broken. It's IC2's pin 22.
@@ -1054,13 +1054,13 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-02D0 (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 1)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 1)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way after 1 bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way after 1 bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   It never came either. When it should have, the CPU was fetching from 0038-02D0 (and the frame interrupt)
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. A0 is stuck low all through, where a working board's changes all the time: a short to 0 V (or another line), or the line
      broken. It's IC2's pin 30.
@@ -1074,11 +1074,11 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: running code from RAM (0010-F3F2): it went astray
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 0)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way from the capture's first bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   It never came either. When it should have, the CPU was running code from RAM (0010-F3F2): it went astray
-The boot goes wrong at reset (0 stages before it are good).
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. A4 is stuck high all through, where a working board's changes all the time: a short to 5 V (or another line), or the line
      broken. It's IC2's pin 34.
@@ -1092,19 +1092,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   FAULT: it got there, but the bus shows something wrong
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 47)
-The boot goes wrong at reset (0 stages before it are good).
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way after 47 bus cycles
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. A15 is stuck low all through, where a working board's changes all the time: a short to 0 V (or another line), or the line
      broken. It's IC2's pin 5.
@@ -1131,15 +1131,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0008-1C0C
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 601)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 601 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was fetching from 0008-1C0C
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM's address line A5: the RAM test found 4020 reading 00, which is what it had just left
      at 4000: those two are the same cell, so A5 doesn't get through to the lower RAM's chips. Its
@@ -1152,15 +1152,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 000C-16D3
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 329)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 329 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was fetching from 000C-16D3
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM's address line A4: the RAM test found 4010 reading 00, which is what it had just left
      at 4000: those two are the same cell, so A4 doesn't get through to the lower RAM's chips. Its
@@ -1173,15 +1173,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: still filling the RAM for the RAM test (11DC-11E1)
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 91)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 91 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was still filling the RAM for the RAM test (11DC-11E1)
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D5 wrong (the first at 4002). Not one chip: what all its
      chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
@@ -1194,19 +1194,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-C670 (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 0)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 1)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 1)
-The boot goes wrong at reset (0 stages before it are good).
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way from the capture's first bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way after 1 bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way after 1 bus cycle
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. IC5, the ROM: its D3 reads 0 where it should be 1 (12632 reads, the first at 11EA)
 ######## sim IC5:removed
@@ -1216,19 +1216,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-003C (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 0)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 1)
-The boot goes wrong at reset (0 stages before it are good).
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way from the capture's first bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way after 1 bus cycle
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. IC5, the ROM: 16852 reads with bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 0038): the chip, or its address lines or
      select (/ROMCS)
@@ -1239,19 +1239,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 2493)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 91)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 167)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way after 2493 bus cycles
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way after 91 bus cycles
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way after 167 bus cycles
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC6, the lower RAM's bit D0 (4000-7FFF): it reads 1 where it should be 0 (2 reads, the first at 5C50)
   2. Or what the lower RAM's chips share, if they are all addressed wrong (only 2 wrong reads to go on):
@@ -1263,15 +1263,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: running code from RAM (4BCB-5976): it went astray
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came either. When it should have, the CPU was running code from RAM (035D-5C59): it went astray
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC6, the lower RAM's bit D0 (4000-7FFF): it reads 1 where it should be 0 (13 reads, the first at 4000)
 ######## sim IC8:data0=0
@@ -1281,19 +1281,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  FAULT: the CPU went another way (cycle 2493)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 79)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 167)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way after 2493 bus cycles
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way after 79 bus cycles
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way after 167 bus cycles
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
-The boot goes wrong at ramdone (2 stages before it are good).
+The boot goes wrong at RAM done (2 stages before it are good).
 What to look at, most likely first:
   1. IC8, the lower RAM's bit D2 (4000-7FFF): it reads 0 where it should be 1 (5 reads, the first at 5CB2)
 ######## sim R26:removed
@@ -1303,15 +1303,15 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low all through
   The CPU: fetching from 0038-0324 (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   It never came. When it should have, the CPU was fetching from 0038-0324 (and the frame interrupt)
-The boot goes wrong at copyright (3 stages before it are good).
+The boot goes wrong at Copyright (3 stages before it are good).
 What to look at, most likely first:
   1. /INT (IC2 pin 16) is low all through, left running: a working one's goes low for 32 T every 20 ms.
      It comes from the ULA (IC1 pin 12, through R26): the ULA, R26 open (the line left floating), or a short to 0 V on the line.
@@ -1322,17 +1322,17 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 10A8-162C
   OK: the same as a working one
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
   OK: the same as a working one
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
   OK: the same as a working one (the RAM test passed all 48K)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
   OK: the same as a working one
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
   OK: the same as a working one
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
@@ -1347,19 +1347,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0E4D-0E66
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
   OK: the same as a working one
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  FAULT: the CPU went another way (cycle 57)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  FAULT: the CPU went another way after 57 bus cycles
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   Wrong too: it got there, but the bus shows something wrong
-The boot goes wrong at ramcheck (1 stage before it is good).
+The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. IC13, the lower RAM's bit D7 (4000-7FFF): it reads 1 where it should be 0 (30 reads, the first at 4000)
 The screen (shot.png): it shows blank black screen, white border.
@@ -1373,19 +1373,19 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: fetching from 0038-003C (and the frame interrupt)
   FAULT: something's wrong (below); the boot's stages next show more
-1 of 6, reset: the reset: the RAM test's first write (FFFF), about 110 T after it
-  FAULT: the CPU went another way (cycle 0)
-2 of 6, ramcheck: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-3 of 6, ramdone: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
-  Wrong too: the CPU went another way (cycle 0)
-4 of 6, copyright: the copyright message (1539, 1.71 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-5 of 6, main: the editor's main loop starts (12A9, 1.73 s after the reset)
-  Wrong too: the CPU went another way (cycle 0)
-6 of 6, interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
-  Wrong too: the CPU went another way (cycle 1)
-The boot goes wrong at reset (0 stages before it are good).
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  FAULT: the CPU went another way from the capture's first bus cycle
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way from the capture's first bus cycle
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  Wrong too: the CPU went another way after 1 bus cycle
+The boot goes wrong at Reset (0 stages before it are good).
 What to look at, most likely first:
   1. IC5, the ROM: 16852 reads with bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 0038): the chip, or its address lines or
      select (/ROMCS)

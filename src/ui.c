@@ -1713,6 +1713,26 @@ static void monitor_window(struct nk_context *ctx, float x, float y) {
     struct nk_rect r = nk_rect(x, y, RIGHT_W, MON_H + 44);
     nk_window_set_bounds(ctx, "Monitor", r);
     if (nk_begin(ctx, "Monitor", r, NK_WINDOW_TITLE | NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
+        /* While the logic analyser's window is open: the real Spectrum's
+         * screen (the screenshot given), not the simulated board's, which
+         * could be taken for it at the bench. */
+        struct nk_image li;
+        int lw = 0, lh = 0, lm = la_window_monitor(&li, &lw, &lh);
+        if (lm) {
+            nk_layout_row_dynamic(ctx, 18, 1);
+            nk_label_colored(ctx, lm == 2 ? "The real Spectrum (its screenshot)" : "The real Spectrum: no screenshot given",
+                             NK_TEXT_CENTERED, nk_rgb(240, 170, 0));
+            float ih = MON_H - 22;
+            if (lm == 2) {
+                float scale = fminf(MON_W / (float)lw, ih / (float)lh), w = lw * scale;
+                nk_layout_row_begin(ctx, NK_STATIC, ih, 2);
+                nk_layout_row_push(ctx, (MON_W - w) / 2);
+                nk_spacing(ctx, 1);
+                nk_layout_row_push(ctx, w);
+                nk_image(ctx, li);
+                nk_layout_row_end(ctx);
+            }
+        } else {
         /* The picture with its own proportions (square pixels). */
         float sw = (float)M()->screen_w, sh = (float)M()->screen_h;
         float scale = fminf(MON_W / sw, MON_H / sh), w = sw * scale;
@@ -1722,6 +1742,7 @@ static void monitor_window(struct nk_context *ctx, float x, float y) {
         nk_layout_row_push(ctx, w);
         nk_image(ctx, nk_image_handle(snk_nkhandle(U.snk_img)));
         nk_layout_row_end(ctx);
+        }
     }
     nk_end(ctx);
 }

@@ -8,6 +8,17 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Logic analyser window, after a run: what it found comes first, under
+  the stage boxes, and the run stage by stage below it. The captures'
+  folder is a short name with an **Open folder** button. The stages are
+  called as the boxes call them (RAM test, not ramcheck), "about 110 T"
+  is "about 110 clock cycles", and "(cycle 57)" is "after 57 bus
+  cycles". Skipped stage boxes are plain, without the strike-through.
+  The window keeps the width you drag it to.
+- While the logic analyser window is open, the Monitor shows the real
+  Spectrum's screenshot (or says none was given), not the simulated
+  board's healthy screen, which could be taken for the real one.
+
 - Diagnose from screenshot: vertical bars are matched by how wide they are
   and how far apart, not where they start or which color comes first
   (both vary from board to board), and jailbars (the faint lines most

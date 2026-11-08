@@ -31,6 +31,10 @@ int la_window_mark(const machine_t *machine, const char *ref);
 void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *machine);
 /* The bench board's options (RAM 16K...): a run takes them when started. */
 void la_window_board(struct board *b);
+/* While the window is open the Monitor shows the real Spectrum's screen,
+ * not the simulated one: 0 the window is closed (show the simulation), 1
+ * no screenshot given, 2 the screenshot in *IMG (W x H). */
+int la_window_monitor(struct nk_image *img, int *w, int *h);
 /* The screen (a screenshot of the monitor) for the diagnosis: does the
  * window take a picture now (open, not running), and give it one (from
  * the UI thread). After a run it's matched at once with what the bus
