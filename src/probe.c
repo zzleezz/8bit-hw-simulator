@@ -11,6 +11,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define MAX_READINGS 64
 #define SHOWN_GROUPS 6          /* groups listed before "show more" */
@@ -256,9 +257,8 @@ static int pin_for_net(int net) {
 /* "Import capture": the lines of a logic analyser capture (best idle.lac,
  * the board left running) as readings on their pads; one already taken
  * on the same net is replaced. */
-static void import_capture(void) {
-    char path[1200], err[300];
-    if (filedialog_capture(path, sizeof(path)) != FILEDIALOG_PICKED) return;
+static void import_from(const char *path) {
+    char err[300];
     int net[64], rd[64];
     int n = la_probe_readings(P.b, path, net, rd, 64, err, sizeof(err));
     const char *base = strrchr(path, '/');
@@ -292,13 +292,128 @@ static void remove_reading(int i) {
     update();
 }
 
-/* "U7.3", "U7 3", "U7-3", "u7.3": a pin of the board, -1 if none. */
-static int parse_pin(board_t *b, const char *text) {
-    char ref[16], pad[8];
-    if (sscanf(text, " %15[^.: -]%*[.: -]%7s", ref, pad) != 2) return -1;
-    for (char *c = ref; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
-    int part = sim_find_part(&b->sim, ref);
-    return part >= 0 ? board_pad_pin(b, part, pad) : -1;
+static int parse_pin(board_t *b, const char *text) { return probe_parse_pin(b, text); }
+
+static void apply_screens(void);
+static void apply_shot(void);
+static void save_to(const char *path);
+static void load_from(const char *path);
+
+/* The file dialogs the buttons ask for: opened by ui.c after the frame,
+ * with the board unlocked (a dialog opened while drawing the window hung
+ * the program: its message loop ran the frame again, which waited for
+ * the board this frame had locked). */
+static int want_dialog;         /* PROBE_DIALOG_*, 0 none */
+
+int probe_wants_dialog(void) {
+    int w = want_dialog;
+    want_dialog = 0;
+    return w;
+}
+
+int probe_ask_dialog(int what, char *path, int len) {
+    return what == PROBE_DIALOG_CAPTURE ? filedialog_capture(path, len) : filedialog_probe(what == PROBE_DIALOG_SAVE, path, len);
+}
+
+void probe_dialog_done(int what, const char *path) {
+    if (!P.loaded) return;
+    if (what == PROBE_DIALOG_CAPTURE) import_from(path);
+    else if (what == PROBE_DIALOG_SAVE) save_to(path);
+    else if (what == PROBE_DIALOG_LOAD) load_from(path);
+}
+
+/* "Save...": the readings and the settings that rank them (read back by
+ * Load...), then the report of what they say (probe_file.c). */
+static void save_to(const char *path) {
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    FILE *f = fopen(path, "w");
+    if (!f) { snprintf(P.import_note, sizeof(P.import_note), "Couldn't write %.200s", base); return; }
+    time_t now = time(NULL);
+    char when[40];
+    strftime(when, sizeof(when), "%Y-%m-%d %H:%M", localtime(&now));
+    fprintf(f, "# Diagnose by probing, saved %s by 8bit-hw-simulator (AI-generated).\n"
+               "# The lines up to \"----\" are read back by Load...; the report after them is for reading.\n", when);
+    fprintf(f, "board: %s\n", atlas_machine_id(P.machine));
+    fprintf(f, "strategy: %s\n", probe_strategy_name(P.strategy));
+    fprintf(f, "probing-on: %s\n", P.on_legs ? "legs" : "pads");
+    if (P.from_shot)
+        for (int i = 0; i < P.nshot; i++) fprintf(f, "screenshot: %s\n", P.shot[i]);
+    else {
+        if (P.kind >= 0) fprintf(f, "screen-kind: %s\n", P.db.kinds[P.kind].name);
+        if (P.colors >= 0) fprintf(f, "screen-colors: %s\n", P.db.colorsets[P.colors].name);
+        if (P.exact >= 0) fprintf(f, "screen-exact: %s\n", P.db.screens[P.exact].label);
+    }
+    const sim_t *s = &P.b->sim;
+    const uint8_t *m = P.marks[P.machine];
+    for (int i = 0; m && i < s->nparts; i++)
+        if (m[i]) fprintf(f, "mark: %s %s\n", s->parts[i].ref, m[i] == MARK_MT ? "MT" : m[i] == MARK_MOS ? "MOS" : "other");
+    for (int i = 0; P.boost && i < s->nparts; i++)
+        if (P.boost[i] != 1) fprintf(f, "weight: %s %.3f\n", s->parts[i].ref, P.boost[i]);
+    for (int i = 0; i < P.n; i++) {
+        const probe_reading_t *r = &P.rd[i];
+        fprintf(f, "reading: %s.%s %s %s%s\n", s->parts[s->pins[r->pin].part].ref, s->bd->pads[r->pin].name,
+                r->leg ? "leg" : "pad", r->analyser ? "analyser " : "", probe_reading_name(r->reading));
+    }
+    fprintf(f, "---- the report (not read back) ----\n\n");
+    if (P.boost_note[0]) fprintf(f, "%s\n", P.boost_note);
+    probe_report(f, &P.db, P.b, P.rd, P.n);
+    bool ok = !ferror(f);
+    if (fclose(f) || !ok) snprintf(P.import_note, sizeof(P.import_note), "Couldn't write all of %.200s", base);
+    else snprintf(P.import_note, sizeof(P.import_note), "Saved %d reading%s and the suspects to %.200s", P.n,
+                  P.n == 1 ? "" : "s", path);
+    update();       /* probe_report() ranked them: the window's order again */
+}
+
+/* "Load...": a saved probing's readings and settings, on this board. The
+ * repair records' weights are this computer's own, not the file's. */
+static void load_from(const char *path) {
+    char err[400];
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    static probe_file_t pf;
+    if (!probe_file_read(path, &pf, err, sizeof(err))) {
+        snprintf(P.import_note, sizeof(P.import_note), "Couldn't load %.60s: %.200s", base, err);
+        return;
+    }
+    if (strcmp(pf.board, atlas_machine_id(P.machine))) {
+        snprintf(P.import_note, sizeof(P.import_note), "%.60s is of another board (%s): put that one on the bench first",
+                 base, pf.board);
+        return;
+    }
+    if (pf.strategy >= 0) P.strategy = P.db.strategy = pf.strategy;
+    if (pf.on_legs >= 0) P.on_legs = P.db.on_legs = pf.on_legs;
+    uint8_t *m = P.marks[P.machine];
+    if (m) {
+        memset(m, 0, (size_t)P.b->sim.nparts);
+        for (int i = 0; i < pf.nmarks; i++) {
+            int p = sim_find_part(&P.b->sim, pf.marks[i].ref);
+            if (p >= 0) m[p] = (uint8_t)pf.marks[i].mark;
+        }
+    }
+    P.kind = P.colors = P.exact = -1;
+    if (pf.nshot) {
+        P.nshot = pf.nshot;
+        for (int i = 0; i < pf.nshot; i++) snprintf(P.shot[i], sizeof(P.shot[i]), "%s", pf.shot[i]);
+        apply_shot();
+        if (!P.shot_found) apply_screens();
+    } else {
+        for (int k = 0; k < P.db.nkinds; k++) if (!strcmp(P.db.kinds[k].name, pf.kind)) P.kind = k;
+        for (int c = 0; c < P.db.ncolorsets; c++) if (pf.colors[0] && !strcmp(P.db.colorsets[c].name, pf.colors)) P.colors = c;
+        for (int sc = 0; sc < P.db.nscreens; sc++) if (pf.exact[0] && !strcmp(P.db.screens[sc].label, pf.exact)) P.exact = sc;
+        apply_screens();
+    }
+    P.n = 0;
+    int missing = 0;
+    for (int i = 0; i < pf.n && P.n < MAX_READINGS; i++) {
+        int pin = probe_parse_pin(P.b, pf.rd[i].pin);
+        if (pin < 0 || P.b->sim.pins[pin].net < 0) { missing++; continue; }
+        P.rd[P.n++] = (probe_reading_t){ pin, P.b->sim.pins[pin].net, pf.rd[i].reading, pf.rd[i].leg, pf.rd[i].analyser };
+    }
+    set_weights();
+    update();
+    snprintf(P.import_note, sizeof(P.import_note), "Loaded %d reading%s from %.60s%s", P.n, P.n == 1 ? "" : "s", base,
+             missing ? " (some pins aren't on this board: left out)" : "");
 }
 
 /* A row tall enough for TEXT wrapped in WIDTH. */
@@ -318,6 +433,22 @@ static struct nk_color reading_color(int r) {
          : r == PROBE_BAD ? COL_FIGHT : COL_FLOAT;
 }
 
+/* A button filled with reading R's color (a little darker, so the text
+ * reads): black text on the light ones, white on the dark. */
+static bool reading_button(struct nk_context *ctx, const char *label, int r) {
+    struct nk_color c = reading_color(r);
+    struct nk_color bg = nk_rgb(c.r * 4 / 5, c.g * 4 / 5, c.b * 4 / 5);
+    float lum = 0.299f * bg.r + 0.587f * bg.g + 0.114f * bg.b;
+    return color_button(ctx, label, bg, lum > 140 ? nk_rgb(0, 0, 0) : nk_rgb(255, 255, 255));
+}
+
+/* A wrapped line that says more when pointed at (TIP NULL: nothing). */
+static void wrapped_tip(struct nk_context *ctx, const char *text, float width, struct nk_color c, const char *tip) {
+    nk_layout_row_dynamic(ctx, wrapped_height(ctx, text, width), 1);
+    if (tip && nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tip);
+    nk_label_colored_wrap(ctx, text, c);
+}
+
 /* What a healthy board shows on a net, "" if the atlas doesn't say. */
 static const char *healthy_on(int net) {
     if (P.db.healthy < 0 || net < 0) return "";
@@ -332,50 +463,22 @@ static bool screen_fits(int s) {
 
 /* Only the faults giving the pictures picked. */
 static void apply_screens(void) {
-    bool *on = calloc((size_t)P.db.nscreens + 1, sizeof(bool));
-    for (int s = 0; s < P.db.nscreens; s++) on[s] = P.exact >= 0 ? s == P.exact : P.kind >= 0 && screen_fits(s);
-    probe_db_set_screens(&P.db, on);
-    free(on);
+    probe_db_pick_screens(&P.db, P.kind, P.colors, P.exact);
     P.from_shot = false;
     update();
-}
-
-/* LABEL without how the picture moves (", animated", ", changing",
- * ", blinking (16 frames)"), which a screenshot can't show. */
-static void still_label(const char *label, char *out, int len) {
-    static const char *const moves[] = { ", animated", ", changing", ", blinking" };
-    snprintf(out, (size_t)len, "%s", label);
-    for (size_t i = 0; i < sizeof(moves) / sizeof(moves[0]); i++) {
-        char *p = strstr(out, moves[i]);
-        if (p) *p = 0;
-    }
 }
 
 /* The screenshot's pictures, the faults being loaded: any of them,
  * however it moves. */
 static void apply_shot(void) {
     P.shot_pending = false;
-    bool *on = calloc((size_t)P.db.nscreens + 1, sizeof(bool));
-    P.shot_found = 0;
-    char still[ATLAS_MAX_GROUPS][256], a[256];
-    for (int i = 0; i < P.nshot; i++) still_label(P.shot[i], still[i], sizeof(still[i]));
-    for (int s = 0; s < P.db.nscreens; s++) {
-        still_label(P.db.screens[s].label, a, sizeof(a));
-        for (int i = 0; i < P.nshot; i++)
-            if (!strcmp(a, still[i])) {
-                if (!P.shot_found || i < P.shot_first) P.shot_first = i;
-                on[s] = true;
-                P.shot_found++;
-                break;
-            }
-    }
+    P.shot_first = 0;
+    P.shot_found = probe_db_pick_shot(&P.db, (const char (*)[256])P.shot, P.nshot, &P.shot_first);
     if (P.shot_found) {
         P.kind = P.colors = P.exact = -1;
-        probe_db_set_screens(&P.db, on);
         P.from_shot = true;
         update();
     }
-    free(on);
 }
 
 void probe_screens_from_screenshot(const char (*labels)[256], int n) {
@@ -510,9 +613,19 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
         int net = P.b->sim.pins[pin].net;
         pin_desc(P.b, pin, desc, sizeof(desc));
         bool leg = leg_of(pin);
-        snprintf(line, sizeof(line), "%s %s, %s", pin == P.sug_pin ? "Probe next:" : "Probing:", desc,
-                 leg ? "on the chip's leg" : "on its pad (solder side)");
-        wrapped(ctx, line, cw, COL_HOVER);
+        /* Where to put the probe only when it isn't where "Probing on" says;
+         * how the pin splits the suspects when pointed at. */
+        char tip[300] = "";
+        if (pin == P.sug_pin) {
+            int nk = 0;
+            for (int r = 0; r < PROBE_NREADINGS; r++) nk += P.counts[r];
+            snprintf(tip, sizeof(tip), "Splits the %d groups of suspects: low %d, high %d, pulsing %d, floating %d, "
+                     "bad levels %d", nk, P.counts[PROBE_LOW], P.counts[PROBE_HIGH], P.counts[PROBE_PULSING],
+                     P.counts[PROBE_FLOATING], P.counts[PROBE_BAD]);
+        }
+        snprintf(line, sizeof(line), "%s %s%s", pin == P.sug_pin ? "Probe next:" : "Probing:", desc,
+                 leg == P.on_legs ? "" : leg ? ", on the chip's leg" : ", on its pad (solder side)");
+        wrapped_tip(ctx, line, cw, COL_HOVER, tip[0] ? tip : NULL);
         if (pin == P.sug_pin && leg && !P.on_legs)
             wrapped(ctx, "Only the chip's side of this leg tells the faults left apart: probe the leg itself, "
                          "above the board (a lifted or unsoldered leg shows what the chip does, not the trace).",
@@ -522,21 +635,13 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
                      probe_bench_step(P.machine, P.sug_bench));
             wrapped(ctx, line, cw, COL_TRACE);
         }
-        snprintf(line, sizeof(line), "net %s; a healthy board shows %s", net >= 0 ? P.b->sim.nets[net].name : "-",
-                 healthy_on(net)[0] ? healthy_on(net) : "(not known)");
+        snprintf(line, sizeof(line), "A healthy board shows %s here (net %s)",
+                 healthy_on(net)[0] ? healthy_on(net) : "(not known)", net >= 0 ? P.b->sim.nets[net].name : "-");
         wrapped(ctx, line, cw, COL_DIMTEXT);
-        if (pin == P.sug_pin) {
-            int nk = 0;
-            for (int r = 0; r < PROBE_NREADINGS; r++) nk += P.counts[r];
-            snprintf(line, sizeof(line),
-                     "Splits the %d groups of suspects: low %d, high %d, pulsing %d, floating %d, bad levels %d", nk,
-                     P.counts[PROBE_LOW], P.counts[PROBE_HIGH], P.counts[PROBE_PULSING], P.counts[PROBE_FLOATING],
-                     P.counts[PROBE_BAD]);
-            wrapped(ctx, line, cw, COL_DIMTEXT);
-        }
-        /* What the probe shows: the reading buttons, two rows. */
-        static const char *const labels[PROBE_NREADINGS] = { "Low", "High", "Pulsing", "Floating / no light",
-                                                             "Bad levels" };
+        /* What the probe shows: one button a reading, in the board view's
+         * colors (low blue, high red, pulsing yellow, floating grey, bad
+         * levels magenta). */
+        static const char *const labels[PROBE_NREADINGS] = { "Low", "High", "Pulsing", "Floating", "Bad levels" };
         static const char *const tips[PROBE_NREADINGS] = {
             "Steady low, no activity",
             "Steady high, no activity",
@@ -544,47 +649,40 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
             "Nothing drives it: no light on a logic probe, or a steady level around 1.4 V with no activity",
             "Active, but the levels are wrong on the scope: swings that don't reach a proper low or high "
             "(two chips driving it at once, a weak or dead output)" };
-        static const float width[PROBE_NREADINGS] = { 90, 90, 90, 170, 170 };
+        nk_layout_row_dynamic(ctx, 30, PROBE_NREADINGS);
         for (int i = 0; i < PROBE_NREADINGS; i++) {
-            if (i == 0) nk_layout_row_begin(ctx, NK_STATIC, 30, 4);
-            if (i == 4) nk_layout_row_begin(ctx, NK_STATIC, 30, 2);
-            nk_layout_row_push(ctx, width[i]);
-            struct nk_color c = reading_color(i);
             if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tips[i]);
-            nk_style_push_color(ctx, &ctx->style.button.text_normal, ink(c));
-            nk_style_push_color(ctx, &ctx->style.button.text_hover, ink(c));
-            if (nk_button_label(ctx, labels[i])) add_reading(pin, i);
-            nk_style_pop_color(ctx);
-            nk_style_pop_color(ctx);
-            if (i == 3) nk_layout_row_end(ctx);
+            if (reading_button(ctx, labels[i], i)) add_reading(pin, i);
         }
         /* The scope looks like the simulator's healthy board: whatever it
          * shows there, without putting it into words. */
         int healthy = P.db.healthy >= 0 && net >= 0 ? probe_reading_of(P.db.groups[P.db.healthy].nets[net]) : -1;
-        nk_layout_row_push(ctx, 200);
+        nk_layout_row_begin(ctx, NK_STATIC, 28, 2);
+        nk_layout_row_push(ctx, cw - 130);
         if (healthy >= 0) {
-            if (nk_widget_is_hovered(ctx)) {
-                snprintf(line, sizeof(line), "The real board looks like the simulator's healthy board here: "
-                         "enters what it shows (%s)", probe_reading_name(healthy));
-                nk_tooltip(ctx, line);
-            }
-            if (nk_button_label(ctx, "Same as a healthy board")) add_reading(pin, healthy);
-        } else nk_label_colored(ctx, "(healthy board not known here)", NK_TEXT_LEFT, COL_DIMTEXT);
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "The real board looks like the simulator's healthy board here: enters what it shows");
+            snprintf(line, sizeof(line), "Same as a healthy board: %s", probe_reading_name(healthy));
+            if (reading_button(ctx, line, healthy)) add_reading(pin, healthy);
+        } else nk_label_colored(ctx, "(what a healthy board shows here isn't known)", NK_TEXT_LEFT, COL_DIMTEXT);
+        nk_layout_row_push(ctx, 120);
+        if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "Zoom the board in on this pin");
+        if (nk_button_label(ctx, "Show on board")) act->show_pin = pin;
         nk_layout_row_end(ctx);
     }
-    /* Another pin: shown on the board, typed, or clicked there. */
+    /* Another pin: typed, or clicked on the board. */
     nk_layout_row_begin(ctx, NK_STATIC, 28, 4);
-    nk_layout_row_push(ctx, 120);
-    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "Zoom the board in on this pin");
-    if (nk_button_label(ctx, "Show on board") && pin >= 0) act->show_pin = pin;
-    nk_layout_row_push(ctx, 80);
-    nk_label_colored(ctx, "or type:", NK_TEXT_RIGHT, COL_DIMTEXT);
+    nk_layout_row_push(ctx, 100);
+    nk_label(ctx, "Another pin:", NK_TEXT_LEFT);
     nk_layout_row_push(ctx, 90);
+    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "Write it like U7.3 (the chip, a dot, the pin)");
     nk_flags ev = nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, P.pin_text,
                                                  sizeof(P.pin_text), nk_filter_ascii);
     P.typing = (ev & NK_EDIT_ACTIVE) != 0;
     nk_layout_row_push(ctx, 50);
     bool go = nk_button_label(ctx, "Go") || (ev & NK_EDIT_COMMITED);
+    nk_layout_row_push(ctx, cw - 100 - 90 - 50 - 12);
+    nk_label_colored(ctx, "or click one on the board", NK_TEXT_LEFT, COL_DIMTEXT);
     nk_layout_row_end(ctx);
     if (go && P.pin_text[0]) {
         int p = parse_pin(P.b, P.pin_text);
@@ -596,8 +694,7 @@ static void probe_next(struct nk_context *ctx, float cw, probe_action_t *act) {
             P.pin_note[0] = 0;
         } else snprintf(P.pin_note, sizeof(P.pin_note), "No pin %s on this board (write it like U7.3)", P.pin_text);
     }
-    wrapped(ctx, P.pin_note[0] ? P.pin_note : "or click a pin on the board", cw,
-            P.pin_note[0] ? COL_HIGH : COL_DIMTEXT);
+    if (P.pin_note[0]) wrapped(ctx, P.pin_note, cw, COL_HIGH);
     if (pin >= 0 && pin != P.sug_pin && P.sug_pin >= 0) {
         nk_layout_row_static(ctx, 26, 240, 1);
         pin_desc(P.b, P.sug_pin, desc, sizeof(desc));
@@ -646,22 +743,29 @@ static void bad_levels_note(int net, char *buf, size_t len) {
 static void readings(struct nk_context *ctx, float cw) {
     char line[300], desc[160];
     bool zx = atlas_family(P.machine) == ATLAS_ZX48;
-    nk_layout_row_begin(ctx, NK_STATIC, 26, zx ? 4 : 3);
-    nk_layout_row_push(ctx, cw - 200 - (zx ? 150 : 0));
+    nk_layout_row_begin(ctx, NK_STATIC, 26, 3);
+    nk_layout_row_push(ctx, cw - 196);
     snprintf(line, sizeof(line), "Readings: %d", P.n);
     nk_label(ctx, line, NK_TEXT_LEFT);
-    if (zx) {
-        nk_layout_row_push(ctx, 140);
-        if (nk_widget_is_hovered(ctx))
-            nk_tooltip(ctx, "Take the readings from a logic analyser capture: every line at the edge connector, low, "
-                            "high or pulsing. Best idle.lac from a diagnosis folder (the Spectrum left running)");
-        if (nk_button_label(ctx, "Import capture...")) import_capture();
-    }
     nk_layout_row_push(ctx, 90);
     if (nk_button_label(ctx, "Undo") && P.n) remove_reading(P.n - 1);
     nk_layout_row_push(ctx, 90);
     if (nk_button_label(ctx, "Clear all") && P.n) { P.n = 0; P.import_note[0] = 0; update(); }
     nk_layout_row_end(ctx);
+    /* The files: an analyser capture in, the probing out and back. */
+    nk_layout_row_dynamic(ctx, 26, zx ? 3 : 2);
+    if (zx) {
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "Take the readings from a logic analyser capture: every line at the edge connector, low, "
+                            "high or pulsing. Best idle.lac from a diagnosis folder (the Spectrum left running)");
+        if (nk_button_label(ctx, "Import capture...")) want_dialog = PROBE_DIALOG_CAPTURE;
+    }
+    if (nk_widget_is_hovered(ctx))
+        nk_tooltip(ctx, "Save the readings, the settings and the suspects to a text file (to read, to send, or to load "
+                        "again later)");
+    if (nk_button_label(ctx, "Save...")) want_dialog = PROBE_DIALOG_SAVE;
+    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "Load the readings and settings of a saved probing (this board's)");
+    if (nk_button_label(ctx, "Load...")) want_dialog = PROBE_DIALOG_LOAD;
     if (P.import_note[0]) wrapped(ctx, P.import_note, cw, COL_DIMTEXT);
     const probe_group_t *best = P.db.ngroups ? &P.db.groups[P.order[0]] : NULL;
     for (int i = 0; i < P.n; i++) {
@@ -743,12 +847,15 @@ static void group(struct nk_context *ctx, int k, float cw, probe_action_t *act) 
         wrapped(ctx, what, cw, COL_DIMTEXT);
     }
     int ncauses = P.expanded[g] || nm <= SHOWN_CAUSES + 1 ? nm : SHOWN_CAUSES;
-    float dw = cw - 150 - 110 - 16;
+    /* Each cause: its name and the button on one line, what it is under
+     * them (the button stays a button's height however long that is). */
     for (int i = 0, listed = 0; i < gr->nfaults && listed < ncauses; i++) {
         if (!probe_fault_shown(&P.db, gr->faults[i])) continue;
         listed++;
         const atlas_fault_t *f = &P.db.atlas.faults[gr->faults[i]];
-        nk_layout_row_begin(ctx, NK_STATIC, wrapped_height(ctx, one_line(desc, sizeof(desc), f->desc), dw), 3);
+        nk_layout_row_begin(ctx, NK_STATIC, 24, 2);
+        nk_layout_row_push(ctx, cw - 150 - 8);
+        nk_label_colored(ctx, f->spec[0] ? f->spec : "The healthy board", NK_TEXT_LEFT, f->spec[0] ? COL_FAULT : COL_TRACE);
         nk_layout_row_push(ctx, 150);
         if (nk_widget_is_hovered(ctx))
             nk_tooltip(ctx, f->spec[0] ? "Repair everything, put this fault on the board, power cycle, and show where it is"
@@ -757,11 +864,10 @@ static void group(struct nk_context *ctx, int k, float cw, probe_action_t *act) 
             act->apply = true;
             snprintf(act->spec, sizeof(act->spec), "%s", f->spec);
         }
-        nk_layout_row_push(ctx, 110);
-        nk_label_colored(ctx, f->spec[0] ? f->spec : "(healthy)", NK_TEXT_LEFT, COL_FAULT);
-        nk_layout_row_push(ctx, dw);
-        nk_label_wrap(ctx, desc);
         nk_layout_row_end(ctx);
+        /* The healthy board's description is the test's own ("expected: the
+         * copyright message"): nothing to add to its name. */
+        if (f->spec[0]) wrapped(ctx, one_line(desc, sizeof(desc), f->desc), cw, COL_DIMTEXT);
     }
     if (nm > ncauses || P.expanded[g]) {
         nk_layout_row_static(ctx, 24, 220, 1);
@@ -834,10 +940,9 @@ void probe_window(struct nk_context *ctx, struct nk_rect area, board_t *b, int m
     if (fresh) nk_window_set_scroll(ctx, 0, 0);
     P.bounds = nk_window_get_bounds(ctx);
     float cw = nk_window_get_content_region(ctx).w - 20;
-    wrapped(ctx, "Switch the real machine on and wait a few seconds. Probe each pin it asks for, on the chip's leg or "
-                 "the solder side (\"Probing on\" below), and click what the logic probe shows. The faults that fit "
-                 "stay at the top.",
-            cw, COL_DIMTEXT);
+    if (!P.n)       /* how to start: once readings come in, it's under way */
+        wrapped(ctx, "Switch the real machine on and wait a few seconds. Probe the pin it asks for and click what "
+                     "the logic probe shows: the faults that fit stay at the top.", cw, COL_DIMTEXT);
     if (P.loaded && !P.db.have_legs)
         wrapped(ctx, "This atlas has no readings of the chips' own side of open legs yet (build it again: "
                      "--build-atlas=full): a lifted leg is judged by its pad only.", cw, COL_PULSE);
@@ -855,7 +960,7 @@ void probe_window(struct nk_context *ctx, struct nk_rect area, board_t *b, int m
     }
     screen_choice(ctx, cw);
     strategy_choice(ctx, cw);
-    diagnose_caps(ctx, cw);
+    diagnose_caps(ctx, cw, true);
     markings(ctx, cw);
     /* The records changed, or a screenshot matched others. */
     if (P.boost_serial != diagnose_records_serial()) {

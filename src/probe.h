@@ -33,4 +33,13 @@ typedef struct {
 void probe_window(struct nk_context *ctx, struct nk_rect area, board_t *b, int machine, probe_action_t *act);
 void probe_shutdown(void);
 
+/* A file dialog one of the window's buttons asked for (PROBE_DIALOG_*, 0
+ * none; asking clears it). The caller opens it after the frame with the
+ * board unlocked (probe_ask_dialog(): FILEDIALOG_*), then, the board
+ * locked again, hands the file picked to probe_dialog_done(). */
+enum { PROBE_DIALOG_CAPTURE = 1, PROBE_DIALOG_SAVE, PROBE_DIALOG_LOAD };
+int probe_wants_dialog(void);
+int probe_ask_dialog(int what, char *path, int len);
+void probe_dialog_done(int what, const char *path);
+
 #endif

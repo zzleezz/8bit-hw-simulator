@@ -1209,6 +1209,37 @@ Steps:
       [ ] Reprogram the SteamCard Pro (ROMs/steamcard-test.bin, bank 3)
           with v4 (v3's image: ROMs/steamcard-test-v3.bin) and capture the good Issue 2 and the IC22 board again.
 
+## The backslash problem on the main PC (asked 2026-11-08)
+- [x] (Done 2026-11-08 night.) Cause found: the Bash tool itself halves
+      a double backslash before bash sees the command (a file written
+      with Write kept `\\`; the same line sent through Bash, as a quoted
+      heredoc or in single quotes, arrived as `\`; a single backslash and
+      PowerShell here-strings came through intact). Hook added: the
+      project's .claude/settings.json runs
+      .claude/hooks/no-double-backslash.py before every Bash command
+      and refuses one with two backslashes in a row (tested: blocked
+      live). Change or disable it with /hooks.
+      Was: Fix it at the source. Scripts Claude Code sends inline through its
+      Bash tool (heredocs: `py -I - <<'EOF'`) lose backslashes on this PC
+      (`\\` -> `\`, so C's `\n` became a real line break), even with a
+      quoted delimiter. It broke builds/edits 2026-10-27, 2026-11-07 and
+      three times on 2026-11-08, though a memory note already said not to
+      do it. To do: find where they are lost (the Bash tool on Windows
+      or Git Bash), and add a PreToolUse hook in .claude/settings.json
+      that refuses a Bash command with a heredoc and a backslash in it,
+      so the rule is enforced instead of remembered.
+
+## The "Diagnose by probing" window (asked 2026-11-08)
+- [x] (Done 2026-11-08 night, CHANGELOG.) Tidy its layout; go over the
+      workflow and how much text repeats.
+- [x] (Done, the same.) Colour the reading buttons by what they mean
+      (high red, pulsing yellow, ...: the board view's colours).
+- [ ] The user to look at it on the bench: anything still in the way?
+- [x] (2026-11-08) Save.../Load... froze the program, Import capture...
+      too: the dialogs now open after the frame. tests/probe-file.sh
+      checks a saved file reads back to the same report. (A --probe-test
+      before/after was skipped: probe_db.c, all it runs, is unchanged.)
+
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
       power-path faults (F1, L4, L5 said "CPU running"). Rebuilt with item 1.

@@ -94,6 +94,9 @@
  *       "Diagnose by probing" tested: N (20) faults of the atlas at random
  *       on each machine, put on a board and probed where the tool says,
  *       PCT% of the readings taken wrong on purpose (see probe_db.h).
+ *   --probe-load FILE [--atlas FILE]
+ *       A probing saved from its window (Save...): its readings ranked
+ *       again with the weights it was saved with, printed as its report.
  *
  *   Logic analyser captures of the Spectrum's edge connector (lacap.h:
  *   Jim's interface with two LogicAnalyzer boards, .lac or .csv files):
@@ -249,6 +252,7 @@ static struct {
     int match_test, top, causes, match_machine, match_cart;
     int probe_test, probe_noise;      /* probe_db.h */
     const char *probe_capture;        /* --probe-capture FILE */
+    const char *probe_load;           /* --probe-load FILE */
     bool probe;
     unsigned seed;
     la_cli_t la;                /* --la-...: lacap.h */
@@ -710,6 +714,7 @@ int main(int argc, char **argv) {
         }
         else if (!strcmp(argv[i], "--probe")) args.probe = true;
         else if (!strcmp(argv[i], "--probe-capture") && i + 1 < argc) args.probe_capture = argv[++i];
+        else if (!strcmp(argv[i], "--probe-load") && i + 1 < argc) args.probe_load = argv[++i];
         else if (!strcmp(argv[i], "--probe-noise") && i + 1 < argc) args.probe_noise = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--match-dir") && i + 1 < argc) args.match_dir = argv[++i];
         else if (!strcmp(argv[i], "--match-debug") && i + 1 < argc) args.match_debug = argv[++i];
@@ -789,6 +794,10 @@ int main(int argc, char **argv) {
     if (args.probe_capture) {
         atlas_init_shared();
         return probe_capture_cli(args.atlas_path, args.machine ? args.machine : &machine_zx48, args.probe_capture);
+    }
+    if (args.probe_load) {
+        atlas_init_shared();
+        return probe_load_cli(args.atlas_path, args.probe_load);
     }
     if (args.probe_test) {
         atlas_init_shared();

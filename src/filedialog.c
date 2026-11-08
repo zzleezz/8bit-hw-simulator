@@ -288,6 +288,52 @@ int filedialog_repairs(bool save, char *path, int len) {
     return got;
 }
 
+int filedialog_probe(bool save, char *path, int len) {
+    int got;
+    path[0] = 0;
+#ifdef _WIN32
+    wchar_t file[MAX_PATH * 4] = L"probing.txt";
+    if (!save) file[0] = 0;
+    OPENFILENAMEW ofn;
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = GetActiveWindow();
+    ofn.lpstrFilter = L"Saved probing (*.txt)\0*.txt\0All files\0*.*\0";
+    ofn.lpstrDefExt = L"txt";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = sizeof(file) / sizeof(file[0]);
+    ofn.lpstrTitle = save ? L"Save the readings and suspects" : L"Load a saved probing";
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    if (!(save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn))) return FILEDIALOG_CANCELLED;
+    if (!WideCharToMultiByte(CP_UTF8, 0, file, -1, path, len, NULL, NULL)) return FILEDIALOG_CANCELLED;
+    slashes(path);
+    got = FILEDIALOG_PICKED;
+#elif defined(__APPLE__)
+    got = run_dialog(save ? "osascript -e 'POSIX path of (choose file name with prompt \"Save the readings\""
+                            " default name \"probing.txt\")' 2>/dev/null"
+                          : "osascript -e 'POSIX path of (choose file with prompt \"Load a saved probing\")' 2>/dev/null",
+                     path, len);
+#else
+    got = run_dialog(save ? "if command -v zenity >/dev/null 2>&1; then"
+                            " zenity --file-selection --save --confirm-overwrite --title='Save the readings'"
+                            " --filename=probing.txt 2>/dev/null;"
+                            " elif command -v kdialog >/dev/null 2>&1; then"
+                            " kdialog --title 'Save the readings' --getsavefilename probing.txt '*.txt' 2>/dev/null;"
+                            " else exit 127; fi"
+                          : "if command -v zenity >/dev/null 2>&1; then"
+                            " zenity --file-selection --title='Load a saved probing' 2>/dev/null;"
+                            " elif command -v kdialog >/dev/null 2>&1; then"
+                            " kdialog --title 'Load a saved probing' --getopenfilename . '*.txt' 2>/dev/null;"
+                            " else exit 127; fi",
+                     path, len);
+#endif
+    size_t n = strlen(path);
+    if (got == FILEDIALOG_PICKED && save && !strchr(strrchr(path, '/') ? strrchr(path, '/') : path, '.') &&
+        (int)n + 5 <= len)
+        strcat(path, ".txt");
+    return got;
+}
+
 int filedialog_capture(char *path, int len) {
     int got;
     path[0] = 0;

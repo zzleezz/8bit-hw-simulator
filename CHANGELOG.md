@@ -8,6 +8,26 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Diagnose by probing: Save... and Load... The readings, the settings
+  that rank them (the screen, the strategy, legs or pads, chip markings,
+  the repair records' weights) and a report of the suspects, as a text
+  file to read, send, or load again. --probe-load FILE prints the same
+  report without the window, with the weights it was saved with.
+- Diagnose by probing: Import capture... froze the program (its file
+  dialog was opened while the window was being drawn, with the board
+  locked). Its dialogs now open after the frame, like the others.
+- Diagnose by probing, tidied: the reading buttons are filled in the
+  board view's colours (low blue, high red, pulsing yellow, floating
+  grey, bad levels magenta) and sit on one row; "Same as a healthy
+  board" says, and is coloured as, the reading it enters. Less repeated
+  text: where to probe is said only when it isn't what "Probing on"
+  says, the suspects' split and the capacitor warning's reasons are
+  tooltips, the start text goes once there are readings, the pin entry
+  is one row, the file buttons one row. Each cause: its name and a
+  normal-height Apply & Inspect button, the description under them; the
+  healthy board no longer shows the test script's description.
+- tests/probe-file.sh: a file saved by the window's Save... read back by
+  --probe-load must give the report it holds; the files Load must refuse.
 - A test ROM for 16K/48K Spectrums, made for the logic analyser
   (zxtest/, built with sjasmplus): nine tests in a loop (data and address
   lines, the ROM's sum, a march over the lower and upper RAM, the ULA's

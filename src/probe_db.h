@@ -35,6 +35,7 @@
 #define PROBE_DB_H
 #include "atlas.h"
 #include "board.h"
+#include <stdio.h>
 
 /* What the probe shows. PULSING: any activity, even rare. FLOATING: no
  * light, or a dim one (an in-between level), nothing driving it. BAD:
@@ -184,5 +185,37 @@ int probe_test(const char *atlas_path, int count, unsigned seed, int noise_pct);
  * la_probe_readings) as the probing window's readings on board M, and the
  * faults that fit them, best first. */
 int probe_capture_cli(const char *atlas_path, const struct machine *m, const char *capture);
+
+/* ---- Saved to a file and read back (probe_file.c) ----
+ * A text file: the lines up to "----" are read back ("key: value"; board,
+ * strategy, probing-on, screen-kind/-colors/-exact or screenshot labels,
+ * mark REF MT|MOS|other, weight REF FACTOR from the repair records,
+ * reading PIN pad|leg [analyser] low|high|pulsing|floating|bad levels),
+ * the report after them (probe_report()) is for reading. */
+#define PROBE_FILE_MAX 64
+typedef struct {
+    char board[32];             /* atlas_machine_id() */
+    int strategy, on_legs;      /* -1 if not given */
+    char kind[64], colors[64], exact[256];
+    char shot[ATLAS_MAX_GROUPS][256]; int nshot;
+    struct { char ref[16]; int mark; } marks[PROBE_FILE_MAX]; int nmarks;
+    struct { char ref[16]; float f; } boost[PROBE_FILE_MAX]; int nboost;
+    struct probe_file_reading { char pin[24]; int reading; bool leg, analyser; } rd[PROBE_FILE_MAX]; int n;
+} probe_file_t;
+bool probe_file_read(const char *path, probe_file_t *pf, char *err, int errlen);
+/* "U7.3", "u7 3", "U7-3": a pin of B, -1 if none. */
+int probe_parse_pin(board_t *b, const char *text);
+/* Only the faults giving the pictures of KIND (in COLORS), or the one
+ * picture EXACT (db->kinds, colorsets, screens; -1: any). */
+void probe_db_pick_screens(probe_db_t *db, int kind, int colors, int exact);
+/* Only the faults giving one of the pictures LABELS (a screenshot's best
+ * matches, however they move): how many pictures were found (0: nothing
+ * changed), *FIRST the first label found. */
+int probe_db_pick_shot(probe_db_t *db, const char (*labels)[256], int n, int *first);
+/* The readings, the faults that fit them best first, and the pin to
+ * probe next, as text. */
+void probe_report(FILE *f, probe_db_t *db, board_t *b, const probe_reading_t *rd, int n);
+/* --probe-load FILE: probe_report() of a saved file, with its weights. */
+int probe_load_cli(const char *atlas_path, const char *file);
 
 #endif

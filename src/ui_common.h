@@ -84,6 +84,24 @@ static inline float text_width(struct nk_context *ctx, const char *txt) {
     return f->width(f->userdata, f->height, txt, (int)strlen(txt));
 }
 
+/* A button in a color of its own: BG filled, FG the text (the analyser
+ * window's Start and Stop, the probing window's readings). */
+static inline bool color_button(struct nk_context *ctx, const char *label, struct nk_color bg, struct nk_color fg) {
+    struct nk_style_button *b = &ctx->style.button;
+    struct nk_color hov = nk_rgb(bg.r + (255 - bg.r) / 5, bg.g + (255 - bg.g) / 5, bg.b + (255 - bg.b) / 5);
+    nk_style_push_style_item(ctx, &b->normal, nk_style_item_color(bg));
+    nk_style_push_style_item(ctx, &b->hover, nk_style_item_color(hov));
+    nk_style_push_style_item(ctx, &b->active, nk_style_item_color(hov));
+    nk_style_push_color(ctx, &b->text_normal, fg);
+    nk_style_push_color(ctx, &b->text_hover, fg);
+    nk_style_push_color(ctx, &b->text_active, fg);
+    nk_style_push_color(ctx, &b->border_color, hov);
+    bool r = nk_button_label(ctx, label);
+    nk_style_pop_color(ctx); nk_style_pop_color(ctx); nk_style_pop_color(ctx); nk_style_pop_color(ctx);
+    nk_style_pop_style_item(ctx); nk_style_pop_style_item(ctx); nk_style_pop_style_item(ctx);
+    return r;
+}
+
 /* Text centered in a rectangle. */
 static inline void text_centered(struct nk_command_buffer *cv, struct nk_context *ctx,
                                  struct nk_rect r, const char *txt, struct nk_color c) {

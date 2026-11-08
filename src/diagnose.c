@@ -267,7 +267,7 @@ static void save_record(void);
 static float wrapped_height(struct nk_context *ctx, const char *text, float width);
 static bool original_caps = true;
 
-void diagnose_caps(struct nk_context *ctx, float cw) {
+void diagnose_caps(struct nk_context *ctx, float cw, bool brief) {
     static const char *const caps[2] = { "Original (never replaced)", "Replaced (recapped)" };
     static const char *const warn =
         "Original electrolytic capacitors: after 40 years many are dried out. Worn capacitors make faults the "
@@ -282,7 +282,12 @@ void diagnose_caps(struct nk_context *ctx, float cw) {
         nk_tooltip(ctx, "The electrolytic capacitors on the real machine. The simulator's capacitors are always good");
     original_caps = nk_combo(ctx, caps, 2, original_caps ? 0 : 1, 22, nk_vec2(300, 80)) == 0;
     nk_layout_row_end(ctx);
-    if (original_caps) {
+    if (original_caps && brief) {        /* one line, the reasons when pointed at */
+        nk_layout_row_dynamic(ctx, 22, 1);
+        if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, warn);
+        nk_label_colored(ctx, "Original caps: the results may not be reliable (point here for why)", NK_TEXT_LEFT,
+                         COL_PULSE);
+    } else if (original_caps) {
         nk_layout_row_dynamic(ctx, wrapped_height(ctx, warn, cw), 1);
         nk_label_colored_wrap(ctx, warn, COL_PULSE);
     }
@@ -1296,7 +1301,7 @@ static void main_window(struct nk_context *ctx, struct nk_rect area, diagnose_ac
         nk_group_end(ctx);
     }
     nk_layout_row_end(ctx);
-    diagnose_caps(ctx, cw);
+    diagnose_caps(ctx, cw, false);
 
     /* The matches scroll under the screenshot, which stays in sight to
      * compare them with. */

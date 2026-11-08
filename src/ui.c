@@ -3083,6 +3083,18 @@ void ui_frame(void) {
                      save ? "" : ": drop the .hwstate file on the window");
         }
     }
+    int probe_dialog = probe_wants_dialog();
+    if (probe_dialog) {         /* "Diagnose by probing": Import capture, Save, Load */
+        char path[4096];
+        set_stage(STAGE_DIALOG);
+        int got = probe_ask_dialog(probe_dialog, path, sizeof(path));
+        set_stage(STAGE_IDLE);
+        if (got == FILEDIALOG_PICKED) {
+            lock_board();
+            probe_dialog_done(probe_dialog, path);
+            unlock_board();
+        }
+    }
     if (U.want_records_file) {
         int what = U.want_records_file;
         U.want_records_file = 0;

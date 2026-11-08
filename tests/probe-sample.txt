@@ -1,0 +1,153 @@
+# Diagnose by probing, saved 2026-11-08 21:00 by 8bit-hw-simulator (AI-generated).
+# The lines up to "----" are read back by Load...; the report after them is for reading.
+board: zx48i2
+strategy: Bench procedure
+probing-on: legs
+mark: IC5 MT
+weight: IC1 1.250
+reading: IC2.26 leg high
+reading: IC2.6 leg pulsing
+reading: IC2.19 pad low
+reading: IC2.27 leg analyser low
+---- the report (not read back) ----
+
+Repair records move up: IC1 ULA x1.2 (1 on real boards)
+Board: ZX Spectrum 48K Issue 2; the atlas's readings of the ZX Spectrum 48K Issue 2
+Next pin by: Bench procedure; probing on: the chips' legs
+The screen: any picture
+
+Readings (4):
+  IC2.26 /RESET (CPU)                  leg  high       healthy: high         (net /RESET)
+  IC2.6 CLK (CPU)                      leg  pulsing    healthy: pulsing      (net Net-(IC2-/CLK))
+  IC2.19 /MREQ (CPU)                   pad  low        healthy: pulsing      (net /MREQ)
+  IC2.27 /M1 (CPU)                     leg  low        healthy: pulsing     (from the analyser)   (net /M1)
+
+2 faults fit the readings best (2 groups); 801 more groups about one reading off.
+824 groups give the screen picked, 803 in the running.
+
+#1  cost 0.00, 0 readings off, 1 fault, likelihood 0.1%
+    IC2.24:gnd             net /WAIT stuck low: IC2 CPU pin 24 (/WAIT) shorted to GND - [chip] Z80A
+
+#2  cost 0.00, 0 readings off, 1 fault, likelihood 0.0%
+    R29:open               R29 1K5 open (between /WAIT and +5V)
+
+#3  cost 0.60, 1 reading off, 1 fault, likelihood 0.1%
+    off: IC2.19 /MREQ (CPU) reads low, this gives pulsing
+    IC2.27:gnd             net /M1 stuck low: IC2 CPU pin 27 (/M1) shorted to GND, or the output dead inside the chip - [chip] Z80A
+
+#4  cost 0.60, 1 reading off, 1 fault, likelihood 0.1%
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC2.19:gnd             net /MREQ stuck low: IC2 CPU pin 19 (/MREQ) shorted to GND, or the output dead inside the chip; also on the net: IC5.20(/CE), IC23.1(1A), IC23.2(1B), IC1.38(/MREQ) - [chip] Z80A
+
+#5  cost 0.60, 1 reading off, 1 fault, likelihood 0.0%
+    off: IC2.6 CLK (CPU) reads pulsing, this gives floating
+    IC2.6:open             IC2 CPU pin 6 (CLK) open: the leg doesn't reach net Net-(IC2-/CLK) - [chip] Z80A
+
+#6  cost 0.60, 1 reading off, 1 fault, likelihood 0.0%
+    off: IC2.6 CLK (CPU) reads pulsing, this gives low
+    IC2.6-7:short          IC2 Z80A pins 6-7 shorted: CLK and D4 bridged - [chip] Z80A
+
+#7  cost 0.85, 1 reading off, 1 fault, likelihood 0.0%
+    off: IC2.19 /MREQ (CPU) reads low, this gives pulsing
+    IC2.27-28:short        IC2 Z80A pins 27-28 shorted: /M1 and /RFSH bridged - [chip] Z80A
+
+#8  cost 1.00, 1 reading off, 1 fault, likelihood 0.1%
+    off: IC2.19 /MREQ (CPU) reads low, this gives floating
+    IC2:removed            tests/zx-faults.sh no_cpu (expected: black border, the power-on garbage of the screen RAM): IC2 CPU removed (or dead) - [chip] Z80A
+
+#9  cost 1.10, 2 readings off, 1 fault, likelihood 0.0%
+    off: IC2.19 /MREQ (CPU) reads low, this gives bad levels
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC1.37-38:short        IC1 ULA 6C001 pins 37-38 shorted: A15 and /MREQ bridged - [chip] 5C112 video, I/O
+
+#10  cost 1.10, 2 readings off, 1 fault, likelihood 0.0%
+    off: IC2.19 /MREQ (CPU) reads low, this gives bad levels
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC2.19-20:short        IC2 Z80A pins 19-20 shorted: /MREQ and /IORQ bridged - [chip] Z80A
+
+#11  cost 1.10, 2 readings off, 1 fault, likelihood 0.0%
+    off: IC2.19 /MREQ (CPU) reads low, this gives bad levels
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC2.18-19:short        IC2 Z80A pins 18-19 shorted: /HALT and /MREQ bridged - [chip] Z80A
+
+#12  cost 1.10, 2 readings off, 1 fault, likelihood 0.0%
+    off: IC2.19 /MREQ (CPU) reads low, this gives bad levels
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC5.20-21:short        IC5 uPD23128 ROM pins 20-21 shorted: /CE and A10 bridged - [ROM] uPD23128 $0000-$3FFF
+
+#13  cost 1.10, 2 readings off, 1 fault, likelihood 0.0%
+    off: IC2.19 /MREQ (CPU) reads low, this gives bad levels
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC23.2-3:short         IC23 74LS32 pins 2-3 shorted: /MREQ and /URAS bridged - [glue logic] 74LS32
+
+#14  cost 1.20, 2 readings off, 257 faults, likelihood 29.0% (the healthy board)
+    off: IC2.19 /MREQ (CPU) reads low, this gives pulsing
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    (healthy)              tests/zx-faults.sh healthy (expected: the copyright message, (c) 1982 Sinclair Research Ltd): healthy board, no fault
+    TR4:weak               TR4 ZTX650 weak: tests good, fails under load
+    IC8:removed            IC8 LRAM2 removed (or dead) - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC7:removed            IC7 LRAM1 removed (or dead) - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC9:removed            IC9 LRAM3 removed (or dead) - [video RAM] 4116 bit D3 $4000-$7FFF
+    IC13:removed           IC13 LRAM7 removed (or dead) - [video RAM] 4116 bit D7 $4000-$7FFF
+    IC11:removed           IC11 LRAM5 removed (or dead) - [video RAM] 4116 bit D5 $4000-$7FFF
+    IC10:removed           tests/zx-faults.sh lram_ic10 (expected: no copyright: the RAM test fails at 16384, its fill pattern stays on screen): IC10 LRAM4 removed (or dead) - [video RAM] 4116 bit D4 $4000-$7FFF
+    IC7:data0=0            IC7 LRAM1 dead: reads 0 at every address - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:data0=1            IC7 LRAM1 dead: reads 1 at every address - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:addr0              IC7 LRAM1 address line A0 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:addr1              IC7 LRAM1 address line A1 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:addr2              IC7 LRAM1 address line A2 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:addr5              IC7 LRAM1 address line A5 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:addr4              IC7 LRAM1 address line A4 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:flip@53E2          IC7 LRAM1 one bad cell (row $34, column $33) reads back wrong, CPU address $53E2 - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC7:addr6              IC7 LRAM1 address line A6 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC8:addr3              IC8 LRAM2 address line A3 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC7:weak               IC7 LRAM1 weak cells: about 1 in 64 forget what was written (read 0) - [video RAM] 4116 bit D1 $4000-$7FFF
+    IC8:addr5              IC8 LRAM2 address line A5 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:addr2              IC8 LRAM2 address line A2 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:data0=1            IC8 LRAM2 dead: reads 1 at every address - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:weak               IC8 LRAM2 weak cells: about 1 in 64 forget what was written (read 0) - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:data0=0            IC8 LRAM2 dead: reads 0 at every address - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:addr0              IC8 LRAM2 address line A0 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:addr4              IC8 LRAM2 address line A4 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:addr1              IC8 LRAM2 address line A1 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:flip@53E2          IC8 LRAM2 one bad cell (row $34, column $33) reads back wrong, CPU address $53E2 - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC8:addr6              IC8 LRAM2 address line A6 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D2 $4000-$7FFF
+    IC9:addr2              IC9 LRAM3 address line A2 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D3 $4000-$7FFF
+
+#15  cost 1.20, 2 readings off, 33 faults, likelihood 4.8%
+    off: IC2.19 /MREQ (CPU) reads low, this gives pulsing
+    off: IC2.27 /M1 (CPU) reads low, this gives pulsing
+    IC12:addr1             IC12 LRAM6 address line A1 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116 bit D6 $4000-$7FFF
+    IC15:removed           tests/zx-faults.sh uram_ic15 (expected: the copyright message (it boots as a 16K Spectrum)): IC15 URAM0 removed (or dead) - [RAM] 4532 bit D0 $8000-$FFFF
+    IC22:removed           IC22 URAM7 removed (or dead) - [RAM] 4532 bit D7 $8000-$FFFF
+    IC18:removed           IC18 URAM3 removed (or dead) - [RAM] 4532 bit D3 $8000-$FFFF
+    IC16:removed           IC16 URAM1 removed (or dead) - [RAM] 4532 bit D1 $8000-$FFFF
+    IC19:removed           IC19 URAM4 removed (or dead) - [RAM] 4532 bit D4 $8000-$FFFF
+    IC20:removed           IC20 URAM5 removed (or dead) - [RAM] 4532 bit D5 $8000-$FFFF
+    IC17:removed           IC17 URAM2 removed (or dead) - [RAM] 4532 bit D2 $8000-$FFFF
+    IC21:removed           IC21 URAM6 removed (or dead) - [RAM] 4532 bit D6 $8000-$FFFF
+    IC20:data0=1           IC20 URAM5 dead: reads 1 at every address - [RAM] 4532 bit D5 $8000-$FFFF
+    IC16:data0=1           IC16 URAM1 dead: reads 1 at every address - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr0             IC16 URAM1 address line A0 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:data0=0           IC16 URAM1 dead: reads 0 at every address - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr1             IC16 URAM1 address line A1 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr2             IC16 URAM1 address line A2 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr5             IC16 URAM1 address line A5 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr3             IC16 URAM1 address line A3 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr4             IC16 URAM1 address line A4 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:addr6             IC16 URAM1 address line A6 dead inside the chip: half of it is never reached, the other half answers twice - [RAM] 4532 bit D1 $8000-$FFFF
+    IC16:weak              IC16 URAM1 weak cells: about 1 in 64 forget what was written (read 0) - [RAM] 4532 bit D1 $8000-$FFFF
+    IC21:data0=1           IC21 URAM6 dead: reads 1 at every address - [RAM] 4532 bit D6 $8000-$FFFF
+    IC19:data0=1           IC19 URAM4 dead: reads 1 at every address - [RAM] 4532 bit D4 $8000-$FFFF
+    IC22:data0=1           IC22 URAM7 dead: reads 1 at every address - [RAM] 4532 bit D7 $8000-$FFFF
+    IC17:data0=1           IC17 URAM2 dead: reads 1 at every address - [RAM] 4532 bit D2 $8000-$FFFF
+    IC18:data0=1           IC18 URAM3 dead: reads 1 at every address - [RAM] 4532 bit D3 $8000-$FFFF
+    IC15:data0=1           IC15 URAM0 dead: reads 1 at every address - [RAM] 4532 bit D0 $8000-$FFFF
+    IC15:data0=0           IC15 URAM0 dead: reads 0 at every address - [RAM] 4532 bit D0 $8000-$FFFF
+    IC15:weak              IC15 URAM0 weak cells: about 1 in 64 forget what was written (read 0) - [RAM] 4532 bit D0 $8000-$FFFF
+    IC23.8:vcc             net Net-(IC25-S) stuck high: IC23 OR pin 8 (3Y) shorted to +5V, or the output dead inside the chip; also on the net: IC25.1(S), IC26.1(S) - [glue logic] 74LS32
+    IC23.6:vcc             net /UCAS stuck high: IC23 OR pin 6 (2Y) shorted to +5V, or the output dead inside the chip; also on the net: IC20.15(/CAS), IC16.15(/CAS), IC21.15(/CAS), IC19.15(/CAS), IC22.15(/CAS), IC17.15(/CAS), IC18.15(/CAS), IC15.15(/CAS) - [glue logic] 74LS32
+
+(809 more groups)
+
+Probe next: IC5.20 /CE (ROM), on the chip's leg (low 5, high 0, pulsing 790, floating 3, bad levels 5 groups); bench step: the ROM select
