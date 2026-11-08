@@ -1175,11 +1175,22 @@ Steps:
           refresh: a FAIL proves a fault, a pass doesn't prove the refresh.
       [x] 5. (2026-11-08, v3) The screen's ALIVE line showed 0000: test 3
           zeroed SAVE+0..7. It now writes VERSION at SAVE+2.
-      [ ] 3. Address-line check per bank (marker at base, writes at
-          base+2^k): a mask of aliasing lines naming the mux pin; maybe a
-          bad-byte count.
-      [ ] 4. EAR in (IN FE bit 6 after OUT 00/08/10/18; Issue 2 vs 3
-          differ; a plugged-in EAR changes it); HALT (low priority).
+      [x] 3. (2026-11-08 overnight, v5) Address lines per bank: results
+          9 (lower, A0-A13) and 10 (upper, A0-A14), right after each
+          bank's data walk, before its march. For line k: BASE and every
+          BASE+2^j to AA, 55 to BASE+2^k, read back in the walk's good
+          bits. +1 the bits, +2 +3 the lines. zx48_ram_addr_pins() gives
+          each DRAM pin's row/column line and mux output; verified with
+          IC3.4:gnd, IC3.2:open, IC3.3:open, IC25.7:gnd, IC25:removed,
+          IC6:addr2, IC15:addr3. No bad-byte count (not needed so far).
+          [ ] Run on the bench once the SteamCard has the v5 image.
+      [x] 4. (2026-11-08 overnight, v5) EAR in: result 11, after test 5's
+          result: bit 6 after OUT 00/08/10/18 in +1 bits 0-3, IN FE
+          after 00 and 18 in +2 +3. FAIL only if 00 reads 1 or 18 reads 0;
+          08/10 are printed, not judged (the simulator gives 0 0 1 1 on
+          every issue: the Issue 2/3 difference isn't modelled).
+          [ ] Note what a real Issue 2 and Issue 3 give for 08 and 10.
+          HALT: not done (low priority, nothing to diagnose with it yet).
       [x] 6. VERSION: the ROM's two strings come from the EQU (v3), the C
           side reads it from the table (v4; older images: rom[0x77]).
       [x] 7. (2026-11-08, v4) The constants in a table at 00A0: "ZTAB",

@@ -4,11 +4,13 @@
 ; ROM checksum patched in by patchsum.py).
 ;
 ; A 16K cartridge ROM (the SteamCard Pro's bank 3). It loops for ever
-; through nine tests. Each test:
+; through nine tests, and three more results inside tests 3, 4 and 5
+; (9-11). Each test:
 ;   - starts by writing its number to its marker, MARK+n (3FA0-3FA8): the
-;     analyser arms on that address;
+;     analyser arms on that address (9-11 have none: they come right after
+;     test 3's data walk, test 4's, and test 5's result);
 ;   - sets the border to its number;
-;   - ends by writing four result bytes to RES+4n (3FC0-3FE3):
+;   - ends by writing four result bytes to RES+4n (3FC0-3FEF):
 ;       +0 status: 00 OK, 01 FAIL, 02 none / skipped
 ;       +1 bits:   the data bits found wrong (RAM), or the test's flags
 ;       +2 +3:     an address or a count, high byte first
@@ -27,12 +29,13 @@
 ;               +2 +3 = the ROM's VERSION
 ;   1 address   reads with A0-A15 walking 1 then walking 0 (for the analyser)
 ;   2 ROM sum   16-bit sum of 0000-3F7F (bits 00, +2 +3 = the sum)
-;   3 lower RAM 4000-7FFF: data walk at 4000, then a march
-;               (w0 up, r0w1 up, r1w0 down, r0 down); +1 the bad bits,
-;               +2 +3 the first bad address
+;   3 lower RAM 4000-7FFF: data walk at 4000, the address lines (test 9),
+;               then a march (w0 up, r0w1 up, r1w0 down, r0 down); +1 the
+;               bad bits, +2 +3 the first bad address
 ;   4 upper RAM 8000-FFFF: there at all? (55 to 8000, AA to 8001; none:
 ;               status 02, +2 +3 the two bytes read back, FF FF on a 16K),
-;               then the same march
+;               then the same data walk (at 8000), address lines (test 10)
+;               and march
 ;   5 ULA ports OUT FE each border, MIC, EAR value; IN FE each keyboard
 ;               row, no key pressed: +1 key bits read low, +2 the rows they
 ;               were on, +3 IN FE with every row selected
@@ -50,6 +53,21 @@
 ;               test: the ULA's screen fetches refresh it.) DRAMs often
 ;               keep their data a second or more unrefreshed when cool, so
 ;               a pass doesn't prove the refresh; a fail does disprove it.
+;   9 lower RAM's address lines A0-A13 (in test 3, before its march): for
+;               each line k, BASE and every BASE+2^j set to AA, then 55 to
+;               BASE+2^k; any other of them not reading AA back (in the data
+;               bits the walk found good) = line k doesn't reach the chips
+;               as its own (stuck, open, or shorted to another line).
+;               +1 the data bits it showed in (all: a line common to the
+;               chips, the multiplexer; one: that chip's address pin),
+;               +2 +3 the lines (bit k = Ak). Status 02: not run (every
+;               data bit bad).
+;  10 upper RAM's address lines A0-A14 (in test 4), the same
+;  11 EAR in    IN FE's bit 6 after OUT 00, 08, 10, 18 (bits 0-3 of +1),
+;               +2 IN FE after OUT 00, +3 after OUT 18 (no keyboard row).
+;               FAIL if 00 reads 1 or 18 reads 0 (the same on every issue
+;               with nothing in the EAR socket; 08 and 10 are reported only:
+;               an Issue 2 and an Issue 3 are known to differ there).
 ; Then the results on the screen (if the lower RAM passed; test 8's line
 ; WAIT until it is read back), the border green (all OK), yellow (no upper
 ; RAM: right on a 16K only) or red, a beep, about 1.5 s to read it, test
@@ -61,7 +79,7 @@
 ; A new VERSION: keep the old zxtest.rom as carts/ and zxtest/zxtest-vN.rom
 ; (N the old version): captures of a cartridge not reprogrammed yet are
 ; compared with it.
-VERSION EQU     4               ; test 0's result +3, "ZXTEST n" at 0070, the title
+VERSION EQU     5               ; test 0's result +3, "ZXTEST n" at 0070, the title
 MARK    EQU     3FA0h           ; test n's marker
 RES     EQU     3FC0h           ; test n's four result bytes
 ALIVE   EQU     3F80h           ; test 0's writes
@@ -78,7 +96,7 @@ FRAME_N EQU     2912
 CONT_N  EQU     2209            ; measured on the simulated Issue 2
 NOCONT_N EQU    2254            ; the same loop with no contention (not used here: for the PC)
 NTOL    EQU     8
-NTESTS  EQU     9
+NTESTS  EQU     12              ; results 0-11 (9-11 within tests 3-5)
 
 ; shadow registers: B' bit 0 lower RAM OK, bit 1 upper RAM OK;
 ; C' test 2's status; HL' test 2's sum; D' the loop count.
@@ -177,6 +195,99 @@ NTESTS  EQU     9
         ld      c, pages
         ld      d, 0
         CALLX   read_down
+        ENDM
+
+; The next of BASE, BASE+1, BASE+2, BASE+4 ... BASE+2^k in HL (BASE 4000
+; or 8000: its one bit is above every offset). Uses A.
+        MACRO   NEXTADR base
+        ld      a, l
+        or      a
+        jr      nz, .dbl
+        ld      a, h
+        cp      base >> 8
+        jr      nz, .dbl
+        inc     l                   ; BASE -> BASE+1
+        jr      .done
+.dbl    add     hl, hl              ; 2 (BASE + off): the offset doubled,
+        IF base == 4000h            ; BASE's bit moved up one (or out)
+        res     7, h
+        set     6, h
+        ELSE
+        set     7, h
+        ENDIF
+.done
+        ENDM
+
+; Test SLOT: the address lines A0..A(NL-1) of the bank at BASE (see the
+; top). In: E the data bits the walk found bad. Out: E as it came, the
+; result written (RESULT SLOT), HL the lines (also in SP: no stack is in
+; use), A' the bits it showed in. Uses BC, D, IX, IY.
+        MACRO   ADDRTEST base, nl, slot
+        ld      a, e
+        cpl
+        ld      ixl, a              ; the good bits
+        ld      hl, 0
+        ld      de, 2 << 8          ; status 02, no bits: not run
+        or      a
+        jp      z, .res
+        ld      iy, 0               ; the lines
+        ld      c, 0                ; the bits
+        ld      de, 1               ; line k's offset, 2^k
+        ld      ixh, nl
+.k      ld      hl, base            ; BASE and each BASE+2^j: AA
+        ld      b, nl + 1
+.f      ld      (hl), 0AAh
+        NEXTADR base
+        djnz    .f
+        ld      hl, base            ; BASE+2^k: 55
+        add     hl, de
+        ld      (hl), 55h
+        ld      hl, base            ; read them back
+        ld      b, nl + 1
+.c      ld      a, l                ; this one BASE+2^k?
+        cp      e
+        jr      nz, .aa
+        ld      a, h
+        xor     base >> 8
+        cp      d
+        jr      nz, .aa
+        ld      a, 55h
+        jr      .x
+.aa     ld      a, 0AAh
+.x      xor     (hl)
+        and     ixl
+        jr      z, .ok
+        or      c                   ; wrong: the bits, and line k
+        ld      c, a
+        ld      a, iyl
+        or      e
+        ld      iyl, a
+        ld      a, iyh
+        or      d
+        ld      iyh, a
+.ok     NEXTADR base
+        djnz    .c
+        ex      de, hl              ; the next line
+        add     hl, hl
+        ex      de, hl
+        dec     ixh
+        jp      nz, .k
+        ld      a, iyh
+        ld      h, a
+        ld      a, iyl
+        ld      l, a
+        ld      e, c
+        ld      d, 0
+        or      h
+        jr      z, .res
+        inc     d                   ; FAIL
+.res    RESULT  slot
+        ld      sp, hl              ; the lines and the bits, for later
+        ld      a, e
+        ex      af, af'
+        ld      a, ixl              ; E as it came
+        cpl
+        ld      e, a
         ENDM
 
 ; ---- 0000 ----------------------------------------------------------------
@@ -344,6 +455,8 @@ t3:
         ld      e, a
         inc     ix
         djnz    .w
+        ADDRTEST 4000h, 14, 9       ; test 9: its result now, kept for SAVE
+        ld      iy, 0
         ld      a, e
         or      a
         jr      z, .m
@@ -382,6 +495,18 @@ t3:
         exx
         ld      (SAVE + 10), hl     ; test 2's sum (HL')
         exx
+        ; and test 9's (the lines in SP, the bits in A')
+        ld      hl, 0
+        add     hl, sp
+        ld      (SAVE + 4 * 9 + 2), hl
+        ex      af, af'
+        ld      (SAVE + 4 * 9), a
+        ld      a, h
+        or      l
+        jr      z, .s9
+        ld      a, 1
+.s9     ld      (SAVE + 4 * 9 + 1), a
+        ld      hl, 0               ; test 3's result again: passed
 .r
         RESULT  3
         jp      t4
@@ -410,11 +535,36 @@ t4:
         ld      a, l
         cp      0AAh
         jr      z, .yes
+        ld      b, h                ; test 10 not run (status 02)
+        ld      c, l
+        ld      de, 2 << 8
+        ld      hl, 0
+        RESULT  10
+        ld      h, b
+        ld      l, c
         ld      d, 2
         ld      e, 0
         jp      .r
-.yes    ld      e, 0
+.yes    ; the data lines at 8000, as test 3 at 4000
+        ld      e, 0
+        ld      hl, 8000h
+        ld      ix, walk_tab
+        ld      b, 18
+.w      ld      a, (ix + 0)
+        ld      (hl), a
+        ld      a, (hl)
+        xor     (ix + 0)
+        or      e
+        ld      e, a
+        inc     ix
+        djnz    .w
+        ADDRTEST 8000h, 15, 10      ; test 10
         ld      iy, 0
+        ld      a, e
+        or      a
+        jr      z, .m
+        ld      iy, 8000h
+.m
         MARCH   8000h, 128
         ld      d, 0
         ld      a, e
@@ -480,6 +630,42 @@ t5:
         ld      d, 1
 .r
         RESULT  5
+        ; test 11, EAR in: IN FE's bit 6 after OUT 00, 08, 10, 18
+        ld      e, 0                ; the bits read 1
+        ld      d, 1                ; this OUT's bit in E
+        ld      h, 0                ; the OUT
+.e      ld      a, h
+        out     (0FEh), a
+        ld      b, 0                ; about 1 ms to settle
+.ew     djnz    .ew
+        ld      a, 0FFh             ; no keyboard row
+        in      a, (0FEh)
+        ld      c, a
+        bit     6, a
+        jr      z, .e0
+        ld      a, e
+        or      d
+        ld      e, a
+.e0     ld      a, h
+        or      a
+        jr      nz, .e1
+        ld      iyl, c              ; after OUT 00
+.e1     sla     d
+        ld      a, h
+        add     a, 8
+        ld      h, a
+        cp      20h
+        jr      nz, .e
+        ld      a, iyl
+        ld      h, a
+        ld      l, c                ; after OUT 18
+        ld      d, 0
+        ld      a, e
+        and     9                   ; 00 low and 18 high on every issue
+        cp      8
+        jr      z, .eok
+        inc     d
+.eok    RESULT  11
         jp      t6
 
 ; ---- test 6: interrupts (0D00) -------------------------------------------
@@ -805,7 +991,7 @@ show:
 .t      call    line
         inc     b
         ld      a, b
-        cp      9
+        cp      NTESTS
         jr      nz, .t
 .noscr
         ; all OK? statuses 0 -> green; the upper RAM's 2 (none) -> yellow
@@ -833,6 +1019,16 @@ show:
         inc     l
         inc     l
         djnz    .ck
+        ld      hl, SAVE + 4 * 9 + 1
+        ld      b, 3                ; tests 9-11
+.c2     ld      a, (hl)
+        cp      1
+        jr      z, .bad
+        inc     l
+        inc     l
+        inc     l
+        inc     l
+        djnz    .c2
         ld      a, (SAVE + 4 * 4 + 1)
         cp      2
         jr      nz, .beep
@@ -1046,6 +1242,9 @@ names:  db      "ALIVE    ", 0
         db      "INTERRUPT", 0
         db      "CONTENTN ", 0
         db      "REFRESH  ", 0
+        db      "LOW ADDR ", 0
+        db      "UP ADDR  ", 0
+        db      "EAR IN   ", 0
 w_ok:   db      " OK  ", 0
 w_fail: db      " FAIL", 0
 w_none: db      " NONE", 0

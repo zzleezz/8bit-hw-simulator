@@ -29,7 +29,7 @@ JOBS=${LA_JOBS:-$(( NP / 2 > 1 ? NP / 2 : 1 ))}
 
 summary() {   # NAME OUTFILE
     local t
-    t=$(grep -E '^  Test [0-9]: ' "$2" | awk '{s = substr($3,1,1); if ($3 == "no") s = "-"; printf "%s", s}')
+    t=$(grep -E '^  Test [0-9]+: ' "$2" | grep -v 'given above' | awk '{s = substr($3,1,1); if ($3 == "no") s = "-"; printf "%s", s}')
     printf '%s  %s' "$1" "${t:-none}"
     grep -E '^  [0-9]+\. |^Nothing to look at|^No test' "$2" | sed 's/^  //' | cut -c1-110 | while IFS= read -r l; do printf ' | %s' "$l"; done
     echo
@@ -44,7 +44,7 @@ for d in "$LA"/zxtest-*; do
     cases+=("real_$n|--la-replay --board $b")
 done
 for f in healthy IC22:weak IC22:removed IC7.14:vcc IC8:data0=0 IC13:data0=0 IC6:addr2 IC15:addr3 IC3.4:gnd \
-         IC25:removed IC1:nocontention R26:removed IC2.16:gnd IC2.34:vcc IC23:removed IC15:data0=0+IC16:data0=0; do
+         IC3.2:open IC25.7:gnd IC25:removed IC1:nocontention R26:removed IC2.16:gnd IC2.34:vcc IC23:removed IC15:data0=0+IC16:data0=0; do
     n=sim_$(echo "$f" | tr ':.=@+' '_____')
     ff=; [ "$f" != healthy ] && ff="--fault $(echo "$f" | sed 's/+/ --fault /g')"
     cases+=("$n|--la-simulate --board issue2 $ff")

@@ -28,6 +28,17 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   healthy board no longer shows the test script's description.
 - tests/probe-file.sh: a file saved by the window's Save... read back by
   --probe-load must give the report it holds; the files Load must refuse.
+- The test ROM, version 5: each RAM bank's address lines (results 9 and
+  10, after the bank's data walk: the upper bank now has one too) and
+  the EAR input's level after OUT 00/08/10/18 (result 11). The
+  diagnosis names, from the board's own wiring, the multiplexer output
+  (both of a DRAM pin's lines wrong), the multiplexer input (one), the
+  multiplexer itself (several of its outputs), or one chip's address pin
+  (one or two data bits); the march's failure in the same bits then
+  points back to it. Eleven captures now (results in the ROM's order);
+  version 4's image is kept (carts/zxtest-v4.rom) and its captures are
+  read as before. tests/la-zxtest.sh: two more faults (IC3.2 open,
+  IC25.7 to GND).
 - A test ROM for 16K/48K Spectrums, made for the logic analyser
   (zxtest/, built with sjasmplus): nine tests in a loop (data and address
   lines, the ROM's sum, a march over the lower and upper RAM, the ULA's

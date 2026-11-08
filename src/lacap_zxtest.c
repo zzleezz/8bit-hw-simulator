@@ -2,7 +2,8 @@
  * test ROM (zxtest/zxtest.asm) from a cartridge, read off the edge
  * connector by the logic analyser.
  *
- * The ROM loops for ever through nine tests, each writing its result to
+ * The ROM loops for ever through nine tests (and, from version 5, three
+ * more results inside tests 3-5), each writing its result to
  * RES+4n in the ROM area (status 00 OK / 01 FAIL / 02 none, bits, then an
  * address or count, high byte first): the analyser is armed on that
  * address any time, no reset. The ROM judges its results itself (its
@@ -15,7 +16,7 @@
 #include "lacap_int.h"
 #include "filedialog.h"
 
-#define ZT_N 9                  /* the most tests (the arrays) */
+#define ZT_N 12                 /* the most results (the arrays): 9-11 come within tests 3-5 (version 5) */
 
 /* The ROM's constants, from its table at 00A0 ("ZTAB", version 4 on: see
  * zxtest.asm); an image without one (versions 1-3) had these. */
@@ -46,12 +47,21 @@ static void zt_consts(const uint8_t *rom) {
 static const char *const zt_name[ZT_N] = {
     "alive (the data lines)", "the address lines", "the ROM's sum", "the lower RAM (4000-7FFF)",
     "the upper RAM (8000-FFFF)", "the ULA's ports (keyboard)", "the interrupts", "contention (the ULA's timing)",
-    "the upper RAM's refresh" };
+    "the upper RAM's refresh", "the lower RAM's address lines", "the upper RAM's address lines", "the EAR input" };
 
+/* The order the results are judged and listed in: each bank's address
+ * lines before its march (an address line wrong fails the march too). */
+static const int zt_order[ZT_N] = { 0, 1, 2, 9, 3, 10, 4, 5, 11, 6, 7, 8 };
 /* The captures: the first from test 0's start (tests 0 and 1 and their
- * results fit in it), then each result of tests 2-8. */
-#define ZT_NCAP 8
-static int cap_test(int k) { return k == 0 ? 0 : k + 1; }
+ * results fit in it), then each result, in the order the ROM writes them
+ * (one turn of its loop can give them all). A capture's stage box in the
+ * window is its test's: 9 and 10 (the address lines) go with the RAM
+ * tests they run in, 11 (EAR) with the ULA's ports. Results 9-11 came with
+ * version 5: an older image's captures are the first eight. */
+#define ZT_NCAP 11
+static const struct { int test, box; } zt_cap[ZT_NCAP] = {
+    { 0, 0 }, { 2, 1 }, { 9, 2 }, { 3, 2 }, { 10, 3 }, { 4, 3 }, { 5, 4 }, { 11, 4 }, { 6, 5 }, { 7, 6 }, { 8, 7 } };
+static int cap_test(int k) { return zt_cap[k].test; }
 static int cap_trig(int k) { return k == 0 ? (int)zt.mark : (int)(zt.res + 4 * cap_test(k)); }
 static void cap_file(const char *dir, int k, char *out, int len) {
     if (k == 0) snprintf(out, len, "%s/zxtest-start.lac", dir);
@@ -224,11 +234,27 @@ static bool zt_16k(const machine_t *m) {
 }
 
 /* A RAM test's verdict: the bad bits as chips. */
+/* The data bits each bank's address lines test (9, 10) showed bad in
+ * (zt_addr, judged before the march). */
+static unsigned zt_addr_bits[2];
+
+static int nbits(unsigned m) {
+    int n = 0;
+    for (; m; m &= m - 1) n++;
+    return n;
+}
+
 static int zt_ram(int item, bool upper, const uint8_t r[4]) {
     const char *bank = upper ? "upper RAM" : "lower RAM", *chips = upper ? "URAM" : "LRAM";
     unsigned bits = r[1], addr = r[2] << 8 | r[3];
     char b[64], buf[400], res[200];
     bits_list(bits, 8, "D", b, sizeof(b));
+    /* An address line wrong fails the march in the same bits: said above */
+    if (r[0] == 1 && bits && !(bits & ~zt_addr_bits[upper])) {
+        printf("  %d. The %s's march fails in the same bits (%s, the first at %04X): explained by its\n"
+               "     address lines above.\n", ++item, bank, b, addr);
+        return item;
+    }
     int nb = 0;
     for (int i = 0; i < 8; i++) nb += bits >> i & 1;
     if (nb >= 3) {
@@ -255,8 +281,94 @@ static int zt_ram(int item, bool upper, const uint8_t r[4]) {
 }
 
 /* The captures' test ROM version (test 0's result): version 3 added test 8
- * and test 4's two bytes read back when it finds no upper RAM. */
+ * and test 4's two bytes read back when it finds no upper RAM; version 5
+ * results 9-11. */
 static int zt_capver;
+
+
+/* A 74LS157's input pin for a section's output Y: A (the column) or B
+ * (the row); 0 if Y isn't one. */
+static int mux_input(int y, bool row) {
+    static const int sec[4][3] = { {4, 2, 3}, {7, 5, 6}, {9, 11, 10}, {12, 14, 13} };
+    for (int k = 0; k < 4; k++) if (sec[k][0] == y) return sec[k][row ? 2 : 1];
+    return 0;
+}
+
+/* Results 9 and 10: a bank's address lines that alias (r[1] the data bits
+ * it showed in, r[2] r[3] the lines). The board's wiring says which pin of
+ * the chips each line reaches, as the row or the column, and from which
+ * multiplexer output: a pin with both its lines wrong is that pin's path;
+ * one line of the two, that line's way into the multiplexer. */
+static int zt_addr(int item, bool upper, const uint8_t r[4]) {
+    if (r[0] != 1) return item;
+    const char *bank = upper ? "upper RAM" : "lower RAM", *chips = upper ? "URAM" : "LRAM";
+    unsigned lines = (unsigned)(r[2] << 8 | r[3]), bits = r[1], left = lines;
+    zt_addr_bits[upper] = bits;
+    char ls[120], bs[64];
+    bits_list(lines, 16, "A", ls, sizeof(ls));
+    bits_list(bits, 8, "D", bs, sizeof(bs));
+    zx48_addr_pin_t ap[8];
+    int np = vboard ? zx48_ram_addr_pins(vboard, upper, ap) : 0;
+    const sim_t *s = vboard ? &vboard->sim : NULL;
+    if (nbits(bits) >= 3) {
+        printf("  %d. The %s's address line%s %s %s reach its chips as %s own: writing one address changed\n"
+               "     another too, in bits %s (every chip). What all the chips share:\n", ++item, bank,
+               nbits(lines) == 1 ? "" : "s", ls, nbits(lines) == 1 ? "doesn't" : "don't", nbits(lines) == 1 ? "its" : "their", bs);
+        for (int i = 0; i < np; i++) {
+            bool rw = ap[i].row >= 0 && (lines >> ap[i].row & 1), cl = ap[i].col >= 0 && (lines >> ap[i].col & 1);
+            if (!rw && !cl) continue;
+            const char *mux = ap[i].mux_part >= 0 ? s->parts[ap[i].mux_part].ref : NULL;
+            if (rw && cl) {
+                printf("     - the chips' A%d (pin %d) gets A%d as the row and A%d as the column, both wrong: that pin's\n"
+                       "       path, %s%s%d (the multiplexer's output), a resistor in series if any, or the trace\n",
+                       i, ap[i].pin, ap[i].row, ap[i].col, mux ? mux : "", mux ? " pin " : "pin ", ap[i].mux_pin);
+                left &= ~(1u << ap[i].row) & ~(1u << ap[i].col);
+            } else {
+                int a = rw ? ap[i].row : ap[i].col, in = ap[i].mux_part >= 0 ? mux_input(ap[i].mux_pin, rw) : 0;
+                printf("     - A%d only (the %s on the chips' A%d; the %s, A%d, is right): A%d's way into the multiplexer,\n"
+                       "       %s%s%d, or the trace to it from the CPU's A%d (the CPU drives A%d right: test 1)\n", a,
+                       rw ? "row" : "column", i, rw ? "column" : "row", rw ? ap[i].col : ap[i].row, a, mux ? mux : "",
+                       mux ? " pin " : "the multiplexer's input pin ", in, a, a);
+                left &= ~(1u << a);
+            }
+        }
+        /* several outputs of one multiplexer: that chip */
+        for (int i = 0; i < np; i++) {
+            int mp = ap[i].mux_part, cnt = 0, first = -1;
+            if (mp < 0) continue;
+            for (int j = 0; j < np; j++) {
+                bool bad = ap[j].mux_part == mp && ap[j].row >= 0 && ap[j].col >= 0 && (lines >> ap[j].row & 1) && (lines >> ap[j].col & 1);
+                if (bad && first < 0) first = j;
+                cnt += bad;
+            }
+            if (cnt >= 2 && first == i)
+                printf("     - %d of these from %s: more likely %s itself (its +5V or GND, its select, pin 1, or its\n"
+                       "       enable, pin 15), or not fitted\n", cnt, s->parts[mp].ref, s->parts[mp].ref);
+        }
+        if (left) {
+            bits_list(left, 16, "A", ls, sizeof(ls));
+            printf("     - %s: not on the chips' address pins by this board's wiring: the select logic of the bank\n", ls);
+        }
+        return item;
+    }
+    /* One or two bits: those chips' own address pins */
+    for (int b = 0; b < 8; b++) {
+        if (!(bits >> b & 1)) continue;
+        char lab[8], pins[160] = "";
+        snprintf(lab, sizeof(lab), "%s%d", chips, b);
+        const char *ic = ref_of(lab);
+        int n = 0;
+        for (int i = 0; i < np; i++) {
+            bool rw = ap[i].row >= 0 && (lines >> ap[i].row & 1), cl = ap[i].col >= 0 && (lines >> ap[i].col & 1);
+            if (rw || cl) n += snprintf(pins + n, sizeof(pins) - n, "%sA%d (pin %d)", n ? ", " : "", i, ap[i].pin);
+        }
+        printf("  %d. %s, the %s's bit D%d: address line%s %s alias%s in this chip only. Its address pin%s %s: the\n"
+               "     leg (not soldered, or broken inside), or its trace.\n", ++item, ic ? ic : "the chip", bank, b,
+               nbits(lines) == 1 ? "" : "s", ls, nbits(lines) == 1 ? "es" : "", n && strchr(pins, ',') ? "s" : "",
+               n ? pins : "(not found on this board's wiring)");
+    }
+    return item;
+}
 
 /* What test N's result says, as numbered items from ITEM. */
 static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m) {
@@ -269,6 +381,18 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
                "     between the CPU and the edge connector.\n", ++item, v16);
         return item;
     case 3: return zt_ram(item, false, r);
+    case 9: return zt_addr(item, false, r);
+    case 10: return zt_addr(item, true, r);
+    case 11: {
+        /* bits 0-3: bit 6 read 1 after OUT 00, 08, 10, 18 */
+        const char *ula = ref_of("ULA");
+        printf("  %d. The EAR input reads %d after OUT 00 and %d after OUT 18 (IN FE gave %02X and %02X), not 0 and 1, the\n"
+               "     same on every issue with nothing in the EAR socket. Take any lead out of the EAR socket. The ULA\n"
+               "     (%s) reads EAR on the pin it drives the speaker from: that pin, the resistors and capacitor between\n"
+               "     it, the EAR and MIC sockets and the speaker, or a short on them.\n", ++item, r[1] & 1, r[1] >> 3 & 1,
+               r[2], r[3], ula ? ula : "IC1");
+        return item;
+    }
     case 4:
         if (r[0] == 2) {
             if (zt_16k(m)) return item;
@@ -411,6 +535,7 @@ int zxtest_diagnose(const la_cli_t *o) {
         printf("The Spectrum just needs to be running the test ROM (the cartridge's slot for it): no reset. It goes\n"
                "round its tests every 6 s or so; each capture waits for its test.\n");
     vboard = la_new_board(m);
+    zt_addr_bits[0] = zt_addr_bits[1] = 0;
     uint8_t res[ZT_N][4];
     bool got[ZT_N] = { 0 };
     zt_bus_t bus = { 0 };
@@ -433,13 +558,27 @@ int zxtest_diagnose(const la_cli_t *o) {
             return 1;
         }
     }
+    bool boxbad[8] = { 0 }, shown_res[ZT_N] = { 0 };
+    int ncaps = zt.ntests > 9 ? ZT_NCAP : 8, shown = 0;
     for (int k = 0; k < ZT_NCAP; k++) {
         la_capture_t c;
         bool ok;
         cap_file(dir, k, path, sizeof(path));
-        int t = cap_test(k);
-        printf("\n%d of %d: %s\n", k + 1, ZT_NCAP, k == 0 ? "tests 0 and 1 (the data and address lines)" : zt_name[t]);
-        la_status(LA_EV_STAGE, k, LA_ST_RUN);
+        int t = cap_test(k), box = zt_cap[k].box;
+        /* Results 9-11: only from version 5 on (the image here, and the
+         * cartridge's own as test 0 said); a folder replayed from before
+         * them hasn't their files. */
+        if (t >= 9) {
+            int v = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
+            FILE *f = o->replay ? fopen(path, "rb") : NULL;
+            if (f) fclose(f);
+            if (zt.ntests <= 9 || v < 5 || (o->replay && !f)) continue;
+        }
+        /* this box's last capture? (then its state is final) */
+        bool last = true;
+        for (int j = k + 1; j < ZT_NCAP; j++) if (zt_cap[j].box == box) last = false;
+        printf("\n%d of %d: %s\n", ++shown, ncaps, k == 0 ? "tests 0 and 1 (the data and address lines)" : zt_name[t]);
+        la_status(LA_EV_STAGE, box, LA_ST_RUN);
         if (o->replay) ok = la_read(path, &c, err, sizeof(err));
         else if (o->simulate)
             ok = la_record_at(sim, 2000, k == 0 ? 194000 : 20000, cap_trig(k), 0, 8000, &c, err, sizeof(err));
@@ -451,7 +590,8 @@ int zxtest_diagnose(const la_cli_t *o) {
             ok = capture_real(&q, &c, err, sizeof(err));
         }
         if (!ok) {
-            la_status(LA_EV_STAGE, k, LA_ST_FAULT);
+            boxbad[box] = true;
+            la_status(LA_EV_STAGE, box, LA_ST_FAULT);
             printf("  Not seen: %s\n", err);
             if (!o->replay && !strstr(err, "no trigger") && !strstr(err, "never showed")) { la_err(err); break; }
             continue;
@@ -460,28 +600,43 @@ int zxtest_diagnose(const la_cli_t *o) {
         ncap++;
         la_cycle_t *cy;
         int n = la_cycles(&c, &cy);
+        /* Every result in it not had yet: the capture's own, and 9-11,
+         * which come early in the next test's capture or late in their
+         * own (version 5 on: the image's NTESTS). */
+        bool now[ZT_N] = { 0 };
+        for (int tt = 0; tt < zt.ntests; tt++)
+            if (!got[tt] && zt_result(cy, n, tt, res[tt])) got[tt] = now[tt] = true;
         if (k == 0) {
-            for (int tt = 0; tt < 2; tt++) got[tt] = zt_result(cy, n, tt, res[tt]);
             /* the cartridge holds an older version: its own image, if kept */
             int v = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
             if (v != img_ver && !zt_old_rom(rompath, v, rom, oldpath, sizeof(oldpath))) oldpath[0] = 0;
             zt_bus(cy, n, rom, &bus);
             have_bus = bus.have;
-        } else got[t] = zt_result(cy, n, t, res[t]);
+        }
         if (!got[t] && !where[0]) where_text(&c, where, sizeof(where));
         free(cy);
         la_free(&c);
         if (k == 0)
             printf("  %s\n", !have_bus ? "test 0's start not in the capture" :
                    bus.alive_wrong || bus.walk_seen < 32 || bus.a_wrong || bus.rom_bad ? "WRONG (below)" : "OK: every data and address line both ways");
-        for (int tt = k == 0 ? 0 : t; tt <= t + (k == 0); tt++) {
+        /* The capture's own tests, and the results 9-11 it held too. */
+        for (int tt = 0; tt < ZT_N; tt++) {
+            bool own = k == 0 ? tt <= 1 : tt == t;
+            if (!own && !(tt >= 9 && now[tt])) continue;
+            if (shown_res[tt]) {             /* 9-11: in an earlier capture */
+                if (own) printf("  Test %d: given above (the capture before held it)\n", tt);
+                continue;
+            }
+            shown_res[tt] = got[tt];
             if (!got[tt]) { printf("  Test %d: no result written%s\n", tt, k == 0 && tt == 0 && have_bus ? " (its writes were)" : ""); continue; }
             printf("  Test %d: %s  %02X %02X%02X\n", tt, res[tt][0] == 0 ? "OK  " : res[tt][0] == 1 ? "FAIL" : "none",
                    res[tt][1], res[tt][2], res[tt][3]);
         }
         bool bad = k == 0 ? !have_bus || bus.alive_wrong || bus.a_wrong || bus.rom_bad || !got[0] || !got[1] || res[0][0] == 1 || res[1][0] == 1
                           : !got[t] || res[t][0] == 1;
-        la_status(LA_EV_STAGE, k, bad ? LA_ST_FAULT : LA_ST_OK);
+        boxbad[box] |= bad;
+        if (boxbad[box]) la_status(LA_EV_STAGE, box, LA_ST_FAULT);
+        else if (last) la_status(LA_EV_STAGE, box, LA_ST_OK);
     }
     la_sim_cart = NULL;
     if (sim) board_destroy(sim);
@@ -501,7 +656,7 @@ int zxtest_diagnose(const la_cli_t *o) {
          * bytes can't be (its results still say what they say). */
         int cap_ver = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
         zt_capver = cap_ver;
-        int ntests = cap_ver >= 3 ? ZT_N : 8;    /* test 8 came with version 3 */
+        int ntests = cap_ver >= 5 ? ZT_N : cap_ver >= 3 ? 9 : 8;    /* test 8 came with version 3, 9-11 with 5 */
         if (have_bus && cap_ver != img_ver && oldpath[0])
             printf("(These captures are of version %d of the test ROM, compared with %s; %s is\n"
                    "version %d: program the cartridge with it when convenient.)\n\n", cap_ver, oldpath, rompath, img_ver);
@@ -553,7 +708,8 @@ int zxtest_diagnose(const la_cli_t *o) {
         for (int i = 0; got[3] && i < 8; i++) nb3 += res[3][1] >> i & 1;
         bool cont_first = cont_bad && res[3][0] == 1 && nb3 >= 3;
         if (cont_first) item = zt_verdict(item, 7, res[7], m);
-        for (int t = 2; t < ZT_N; t++) {
+        for (int o = 2; o < ZT_N; o++) {
+            int t = zt_order[o];
             if (!got[t] || (t == 7 && (int_bad || cont_first))) continue;
             if (t == 3 && cont_first && res[3][0] == 1)
                 printf("     The lower RAM fails as a whole as well: with the contention wrong, the CPU and the ULA use it\n"
@@ -563,20 +719,25 @@ int zxtest_diagnose(const la_cli_t *o) {
         /* The first test with no result: the program stopped there (or
          * before: the ones before it may be missing too). */
         int stop = -1;
-        for (int t = 0; t < ntests && stop < 0; t++) if (!got[t]) stop = t;
+        for (int o = 0; o < ZT_N && stop < 0; o++) if (zt_order[o] < ntests && !got[zt_order[o]]) stop = zt_order[o];
         if (stop >= 0) {
             printf("  %d. No result from test %d (%s)%s: the test ROM doesn't get there, or not every turn. It hangs\n"
                    "     or crashes in it or before it.%s%s\n", ++item, stop, zt_name[stop],
-                   stop >= 3 && stop <= 4 ? ", which runs from the RAM's results" : "",
+                   (stop >= 3 && stop <= 4) || stop == 10 ? ", which runs from the RAM's results" : "",
                    where[0] ? " Where the CPU was: " : "", where);
         }
         if (!any) {
             bool k16 = got[4] && res[4][0] == 2;
             printf("Nothing to look at: every test passed%s. The data and address lines go both ways, the ROM reads right, all of\n"
-                   "  the RAM keeps every bit both ways, the keyboard lines are high with no key pressed, the frame\n"
-                   "  interrupt and contention are timed as a working one's.\n"
-                   "  Not tested here: the picture (the ULA's own reads of the screen), the sound and the tape.\n",
-                   k16 ? " (no upper RAM: a 16K)" : "");
+                   "  the RAM keeps every bit both ways%s, the keyboard lines are high with no key\n"
+                   "  pressed, the frame interrupt and contention are timed as a working one's.\n"
+                   "  Not tested here: the picture (the ULA's own reads of the screen), the sound and the tape%s.\n",
+                   k16 ? " (no upper RAM: a 16K)" : "", ntests > 9 ? " (each address line its own)" : "",
+                   ntests > 9 ? " (only the EAR input's level)" : "");
+            if (ntests > 9 && got[11])
+                printf("  The EAR input after OUT 00, 08, 10, 18: %d %d %d %d (08 and 10 differ between issues; a lead in the\n"
+                       "  EAR socket changes them).\n", res[11][1] & 1, res[11][1] >> 1 & 1, res[11][1] >> 2 & 1,
+                       res[11][1] >> 3 & 1);
         }
     }
     board_destroy(vboard);

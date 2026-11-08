@@ -894,10 +894,16 @@ static int addr_bit_of_net(sim_t *s, int net) {
  * its net comes from a 74LS157 output (maybe through a series resistor);
  * that section's B input is the row (the mux select is high before /RAS
  * falls), its A input the column. */
-static void dram_pin_bits(board_t *b, int pin, int *row, int *col) {
+static void dram_pin_mux(board_t *b, int pin, int *row, int *col, int *mux_part, int *mux_pin);
+static void dram_pin_bits(board_t *b, int pin, int *row, int *col) { dram_pin_mux(b, pin, row, col, NULL, NULL); }
+
+/* The same, and the mux output that drives the pin (part, pin number; -1
+ * none found). */
+static void dram_pin_mux(board_t *b, int pin, int *row, int *col, int *mux_part, int *mux_pin) {
     sim_t *s = &b->sim;
     static const int sec[4][3] = { {4, 2, 3}, {7, 5, 6}, {9, 11, 10}, {12, 14, 13} };   /* Y, A, B */
     *row = *col = -1;
+    if (mux_part) *mux_part = *mux_pin = -1;
     int net = s->pins[pin].net;
     for (int hop = 0; hop < 2 && net >= 0; hop++) {
         int next = -1;
@@ -912,6 +918,7 @@ static void dram_pin_bits(board_t *b, int pin, int *row, int *col) {
                     if (part_pin(p, tab[k][0]) == i) {
                         *col = addr_bit_of_net(s, s->pins[part_pin(p, tab[k][1])].net);
                         *row = addr_bit_of_net(s, s->pins[part_pin(p, tab[k][2])].net);
+                        if (mux_part) { *mux_part = s->pins[i].part; *mux_pin = tab[k][0]; }
                         return;
                     }
             }
@@ -931,6 +938,20 @@ static int dram_wiring(board_t *b, int part, int rb[8], int cb[8]) {
     part_t *p = &b->sim.parts[part];
     int bits = p->commit == PT_4116.commit ? 7 : 8;
     for (int i = 0; i < bits; i++) dram_pin_bits(b, part_pin(p, addr_pins[i]), &rb[i], &cb[i]);
+    return bits;
+}
+
+int zx48_ram_addr_pins(board_t *b, bool upper, zx48_addr_pin_t out[8]) {
+    static const int addr_pins[8] = { 5, 7, 6, 12, 11, 10, 13, 9 };
+    int part = -1;
+    for (int i = 0; i < 8 && part < 0; i++) part = upper ? ZX(b)->uram_part[i] : ZX(b)->lram_part[i];
+    if (part < 0) return 0;
+    part_t *p = &b->sim.parts[part];
+    int bits = p->commit == PT_4116.commit ? 7 : 8;
+    for (int i = 0; i < bits; i++) {
+        out[i].pin = addr_pins[i];
+        dram_pin_mux(b, part_pin(p, addr_pins[i]), &out[i].row, &out[i].col, &out[i].mux_part, &out[i].mux_pin);
+    }
     return bits;
 }
 
