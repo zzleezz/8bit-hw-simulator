@@ -18,7 +18,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2 (RAM 16K): the CPU, the ROM and the start of BASIC are good, and
+All 6 stages are the same as a working ZX Spectrum 48K Issue 3B (RAM 16K): the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
 bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
 patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
@@ -41,7 +41,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 4004). Not one chip: what all its
-     chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
+     chips share: IC4 (MUX), IC3 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
 ######## real diagnosis-board
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   CLK: running (the analyser sees 85% of its pulses)
@@ -440,7 +440,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 The boot goes wrong at RAM test (1 stage before it is good).
 What to look at, most likely first:
   1. The lower RAM (4000-7FFF) as a whole: bits D0 D1 D2 D3 D4 D6 D7 wrong (the first at 4004). Not one chip: what all its
-     chips share: IC3 (MUX), IC4 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
+     chips share: IC4 (MUX), IC3 (MUX), IC1 (ULA); and for the data, the resistors to the CPU's data lines: R1 R2 R3 R4 R5 R6 R7 R8
 ######## real diagnosis-iss2-majorchip-1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
   Not in the folder (taken before there was this stage): on to the boot
@@ -636,7 +636,7 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
-All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
+All 6 stages are the same as a working ZX Spectrum 48K Issue 3B: the CPU, the ROM and the start of BASIC are good, and
 the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
 bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
 patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.

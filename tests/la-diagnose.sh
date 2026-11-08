@@ -28,6 +28,20 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 for d in "$LA"/[Dd]iagnosis-* "$LA"/Old/[Dd]iagnosis-*; do
     [ -d "$d" ] || continue
     n=$(basename "$d"); mkdir -p "$OUT/real_$n"; cp "$d"/*.lac "$OUT/real_$n/" 2>/dev/null
+    # The board the folder was taken from: its diagnosis.txt's first line
+    # ("Diagnosing a ZX Spectrum 48K Issue 3B (RAM 16K), ..."); a folder
+    # named 16k is a 16K board too (taken before the header said so).
+    head=$(head -1 "$d/diagnosis.txt" 2>/dev/null)
+    case $head in
+        *"Issue 1"*) board=issue1 ;;
+        *"Issue 3B"*) board=issue3b ;;
+        *"Issue 4B"*) board=issue4b ;;
+        *"Issue 6A"*) board=issue6a ;;
+        *) board=issue2 ;;
+    esac
+    opt=
+    case "$head $n" in *"RAM 16K"*|*16k*|*16K*) [ $board != issue1 ] && opt="--option ram=16k" ;; esac
+    echo "--board $board $opt" > "$OUT/real_$n.args"
     echo "real $n"
 done > "$OUT/jobs.txt"
 # Simulated: the healthy board; the CPU's inputs held (/RESET, /WAIT,
@@ -47,8 +61,8 @@ job() {
     kind=$1; f=$2
     if [ "$kind" = real ]; then
         n=real_$f
-        case $f in *16k*) opt="--option ram=16k";; *) opt=;; esac   # a 16K board, by its folder name
-        out=$("$EXE" --la-diagnose "$OUT/$n" --la-replay --la-all --board issue2 $opt 2>&1)
+        args=$(cat "$OUT/$n.args" 2>/dev/null || echo "--board issue2")
+        out=$("$EXE" --la-diagnose "$OUT/$n" --la-replay --la-all $args 2>&1)
     elif [ "$kind" = screen ]; then
         n=screen_$(echo "$f" | tr ':.=@' '____')
         mkdir -p "$OUT/$n"

@@ -8,6 +8,16 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- The regression (tests/la-diagnose.sh) replays each real capture folder
+  as the board it was taken from, read from its diagnosis.txt (Issue 1,
+  2, 3B, 4B, 6A, and RAM 16K), not always as an Issue 2. Four Issue 3B
+  folders now say Issue 3B; nothing else changed.
+- src/lacap.c (4,000 lines) is split by job into lacap.c (output,
+  options, command line), lacap_file.c, lacap_record.c,
+  lacap_compare.c, lacap_capture.c, lacap_rules.c, lacap_verdict.c and
+  lacap_diagnose.c, sharing lacap_int.h. No change in what it does: the
+  regression gives the same 73 verdicts.
+
 - Logic analyser window, after a run: what it found comes first, under
   the stage boxes, and the run stage by stage below it. The captures'
   folder is a short name with an **Open folder** button. The stages are
