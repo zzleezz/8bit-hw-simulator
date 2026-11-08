@@ -155,7 +155,7 @@ static void scan(const char *select_name) {
             if (!fk) continue;
         }
         fentry_t *e = add_entry();
-        snprintf(e->name, sizeof(e->name), "%s", de->d_name);
+        snprintf(e->name, sizeof(e->name), "%.255s", de->d_name);    /* shown cut if longer */
         e->kind = fk ? FE_FILE : FE_DIR;
         e->size = (long)st.st_size;
         e->fk = fk;
@@ -209,7 +209,8 @@ void browser_init(void) {
     char carts[PATH_MAX + 16];
     snprintf(carts, sizeof(carts), "%s/carts", B.start_dir);
     struct stat st;
-    if (stat(carts, &st) == 0 && S_ISDIR(st.st_mode)) snprintf(B.carts_dir, sizeof(B.carts_dir), "%s", carts);
+    if (strlen(carts) < sizeof(B.carts_dir) && stat(carts, &st) == 0 && S_ISDIR(st.st_mode))
+        snprintf(B.carts_dir, sizeof(B.carts_dir), "%.*s", (int)sizeof(B.carts_dir) - 1, carts);
     snprintf(B.dir, sizeof(B.dir), "%s", B.carts_dir[0] ? B.carts_dir : B.start_dir);
 }
 
@@ -263,7 +264,7 @@ static const char *open_selected(bool run, bool *runp) {
         return NULL;
     }
     if (e->bad) {
-        snprintf(B.error, sizeof(B.error), "%s: %s", e->name, e->info);
+        snprintf(B.error, sizeof(B.error), "%.200s: %.95s", e->name, e->info);
         return NULL;
     }
     snprintf(B.result, sizeof(B.result), "%s/%s", B.dir, e->name);
@@ -275,8 +276,12 @@ static const char *open_selected(bool run, bool *runp) {
 /* Enter on a path typed in the filter: go there, or open that file. */
 static const char *open_typed(bool run, bool *runp) {
     char path[PATH_MAX];
-    if (B.filter[0] == '~') snprintf(path, sizeof(path), "%s%s", B.home_dir, B.filter + 1);
-    else snprintf(path, sizeof(path), "%s", B.filter);
+    int pn = B.filter[0] == '~' ? snprintf(path, sizeof(path), "%s%s", B.home_dir, B.filter + 1)
+                                : snprintf(path, sizeof(path), "%s", B.filter);
+    if (pn < 0 || pn >= (int)sizeof(path)) {
+        snprintf(B.error, sizeof(B.error), "that path is too long");
+        return NULL;
+    }
     if (go(path)) return NULL;
     struct stat st;
     char info[96];

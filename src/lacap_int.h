@@ -268,6 +268,14 @@ bool idle_dead(const ev_t *e);
 int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev_t *ie);
 int diagnose(const la_cli_t *o);
 
+/* Allocation that can't come back empty: out of memory, it says so and
+ * stops, rather than crash later on a NULL (a capture is 5 MB, the
+ * timeline's tables a few more). */
+void *la_alloc_fail(size_t n);
+static inline void *xmalloc(size_t n) { void *p = malloc(n ? n : 1); return p ? p : la_alloc_fail(n); }
+static inline void *xcalloc(size_t k, size_t n) { void *p = calloc(k ? k : 1, n ? n : 1); return p ? p : la_alloc_fail(k * n); }
+static inline void *xrealloc(void *q, size_t n) { void *p = realloc(q, n ? n : 1); return p ? p : la_alloc_fail(n); }
+
 /* What the diagnosis prints goes to the window or the log (la_out). */
 #define printf la_out
 

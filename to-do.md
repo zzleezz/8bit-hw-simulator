@@ -915,11 +915,9 @@ diagnosis-i2-test3 (a working Issue 2, boards the right way round)):
       up on its first cycle. Now: reset OK, the lower RAM as a whole (IC3,
       IC4, IC1 ULA, R1-R8). i3-test5 gives the same: its ULA too? If a good
       ULA fixes it, put the ULA first in that verdict.
-- [ ] tests/la-diagnose.sh replays every real folder as an Issue 2: take
-      the board from the folder's diagnosis.txt ("Diagnosing a ...").
-      So far only RAM 16K is passed, for a folder with "16k" in its name
-      (2026-11-07); the folders from before then don't say "(RAM 16K)" in
-      their header.
+- [x] (Done 2026-11-08.) tests/la-diagnose.sh replays each real folder as
+      the board in its diagnosis.txt (Issue 1/2/3B/4B/6A, RAM 16K; a folder
+      named 16k is 16K too). The four Issue 3B folders now say Issue 3B.
 - [x] The reset stage on a working board (i2-test3): the button bounced on
       release, the CPU started again from 0000 (17 times in that capture,
       143 in i3-test5's) and it said FAULT, or wrong ROM reads. Fixed: the
@@ -1000,7 +998,9 @@ Later, software:
       majorchip-1) count 27 and 23 dead lines (13 and 9 before). Same
       verdict; check the count's wording.
 
-- [ ] (The user, 2026-11-07) The backslash problem: scripts sent inline to
+- [x] (Done 2026-11-08: every script with a backslash is written to a file
+      and run with py -I; none sent inline since, no breakage.)
+      (The user, 2026-11-07) The backslash problem: scripts sent inline to
       the Bash tool lose their backslashes (a C "\n" broke the build twice
       on 2026-11-07), and each time costs a fix-up and a rebuild. Look at
       avoiding it for good (always a Write'd script with backslashes, or a
@@ -1023,8 +1023,18 @@ Later, software:
   in probing (2026-10-30): the user's call, not a good diagnostic
   scenario on the bench. The open-leg faults stay in the atlas.
 
+- [x] (Done 2026-11-08, overnight.) lacap.c split into eight files by job
+      (lacap_int.h shared), same 73 verdicts. Allocations in them checked
+      (xmalloc: out of memory says so and stops). The build's last six
+      warnings fixed (a typed path too long for the file browser now says
+      so instead of opening a cut one). Static buffers commented.
+- [x] (Done 2026-11-08.) Results window: what it found first, Open folder,
+      stages named as the boxes; the Monitor shows the real Spectrum's
+      screenshot while the window is open.
+
 ## Notes
 - Work changed in c64-hw-simulator-main has to be copied to
-  ../github-upload before a new commit there.
+  ../github-upload before a new commit there: `bash ../sync-check.sh`
+  lists what differs.
 - Check with the user before anything that uses every core (atlas runs);
   tests run 4 at a time (JOBS=4 tests/mem-faults.sh).

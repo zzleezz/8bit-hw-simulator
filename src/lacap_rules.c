@@ -386,14 +386,14 @@ bool record_idle(const machine_t *m, const char *const *faults, int nfaults, la_
     fast->pre = c.pre < 2000 ? c.pre : 2000;
     fast->n = fast->pre + 194000 < c.n - (c.pre - fast->pre) ? fast->pre + 194000 : c.n - (c.pre - fast->pre);
     fast->trig_addr = -1;
-    fast->s = malloc((size_t)fast->n * sizeof(uint64_t));
+    fast->s = xmalloc((size_t)fast->n * sizeof(uint64_t));
     memcpy(fast->s, c.s + (c.pre - fast->pre), (size_t)fast->n * sizeof(uint64_t));
     *slow = c;
     slow->n = c.n / k;
     slow->pre = c.pre / k;
     slow->freq = c.freq / k;
     slow->trig_addr = -1;
-    slow->s = malloc((size_t)slow->n * sizeof(uint64_t));
+    slow->s = xmalloc((size_t)slow->n * sizeof(uint64_t));
     for (int i = 0; i < slow->n; i++) slow->s[i] = c.s[(size_t)i * k];
     la_free(&c);
     return true;

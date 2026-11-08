@@ -52,7 +52,7 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
     if ((c->have & need) != need) return 0;
     bool m1 = c->have >> LA_M1 & 1, rfsh = c->have >> LA_RFSH & 1, clk = c->have >> LA_CLK & 1;
     int cap = 1024, n = 0;
-    la_cycle_t *cy = malloc((size_t)cap * sizeof(la_cycle_t));
+    la_cycle_t *cy = xmalloc((size_t)cap * sizeof(la_cycle_t));
     int t = 0;
     bool in = false, mreq = false, saw_rd = false, saw_wr = false;
     int n_act = 0, n_m1 = 0, n_rfsh = 0;
@@ -121,7 +121,7 @@ int la_cycles(const la_capture_t *c, la_cycle_t **out) {
         cur.kind = (uint8_t)kind;
         if (best_n) cur.addr = (uint16_t)best_a;
         cur.data = (uint8_t)(kind == LA_WRITE || kind == LA_OUT ? wdata : kind == LA_REFRESH ? 0 : rdata);
-        if (n == cap) cy = realloc(cy, (size_t)(cap *= 2) * sizeof(la_cycle_t));
+        if (n == cap) cy = xrealloc(cy, (size_t)(cap *= 2) * sizeof(la_cycle_t));
         cy[n++] = cur;
     }
     if (m1_dead || !(c->have >> LA_M1 & 1))

@@ -212,11 +212,11 @@ static uint8_t *js_samples(js_t *j, int *n) {
     *n = 0;
     if (j->p < j->end && *j->p == '[') {
         int cap = 4096;
-        uint8_t *out = malloc((size_t)cap);
+        uint8_t *out = xmalloc((size_t)cap);
         j->p++;
         if (!js_is(j, ']')) {
             do {
-                if (*n == cap) out = realloc(out, (size_t)(cap *= 2));
+                if (*n == cap) out = xrealloc(out, (size_t)(cap *= 2));
                 out[(*n)++] = js_number(j) != 0;
             } while (js_is(j, ','));
             if (!js_is(j, ']')) j->bad = true;
@@ -228,7 +228,7 @@ static uint8_t *js_samples(js_t *j, int *n) {
     const char *q = j->p;
     while (q < j->end && *q != '"') q++;
     if (q >= j->end) { j->bad = true; return NULL; }
-    uint8_t *out = malloc((size_t)((q - j->p) / 4 * 3 + 3));
+    uint8_t *out = xmalloc((size_t)((q - j->p) / 4 * 3 + 3));
     unsigned acc = 0;
     int bits = 0;
     for (; j->p < q; j->p++) {
@@ -273,7 +273,7 @@ bool la_build(la_capture_t *c, rawchan_t *ch, int nch, char *err, int errlen) {
     if (n <= 0) { snprintf(err, errlen, "no channel with samples the signals could be told by"); return false; }
     c->n = n;
     c->have = 0;
-    c->s = calloc((size_t)n, sizeof(uint64_t));
+    c->s = xcalloc((size_t)n, sizeof(uint64_t));
     for (int s = 0; s < LA_NSIG; s++) {
         if (c->chan[s] < 0) continue;
         c->have |= 1ull << s;
@@ -333,7 +333,7 @@ static bool read_lac(const char *text, size_t len, la_capture_t *c, char *err, i
                 if (js_is(&j, ']')) continue;
                 do {
                     if (!js_is(&j, '{')) { j.bad = true; break; }
-                    ch = realloc(ch, (size_t)(nch + 1) * sizeof(rawchan_t));
+                    ch = xrealloc(ch, (size_t)(nch + 1) * sizeof(rawchan_t));
                     rawchan_t *r = &ch[nch++];
                     memset(r, 0, sizeof(*r));
                     r->number = -1;
@@ -374,7 +374,7 @@ static bool read_csv(char *text, la_capture_t *c, char *err, int errlen) {
     int nch = 0, skip = -1;
     for (char *f = line; ; ) {
         size_t len = strcspn(f, ",;");
-        ch = realloc(ch, (size_t)(nch + 1) * sizeof(rawchan_t));
+        ch = xrealloc(ch, (size_t)(nch + 1) * sizeof(rawchan_t));
         rawchan_t *r = &ch[nch];
         memset(r, 0, sizeof(*r));
         snprintf(r->name, sizeof(r->name), "%.*s", (int)len, f);
@@ -390,7 +390,7 @@ static bool read_csv(char *text, la_capture_t *c, char *err, int errlen) {
     while ((line = strtok(NULL, "\r\n"))) {
         if (n == cap) {
             cap = cap ? cap * 2 : 65536;
-            for (int k = 0; k < nch; k++) ch[k].v = realloc(ch[k].v, (size_t)cap);
+            for (int k = 0; k < nch; k++) ch[k].v = xrealloc(ch[k].v, (size_t)cap);
         }
         char *f = line;
         for (int k = 0; k < nch; k++) {
@@ -415,7 +415,7 @@ bool la_read(const char *path, la_capture_t *c, char *err, int errlen) {
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char *text = malloc((size_t)len + 1);
+    char *text = xmalloc((size_t)len + 1);
     size_t got = fread(text, 1, (size_t)len, f);
     fclose(f);
     text[got] = 0;
@@ -455,7 +455,7 @@ bool la_write(const char *path, const la_capture_t *c, char *err, int errlen) {
         fprintf(f, "{\"Settings\":{\"Frequency\":%d,\"PreTriggerSamples\":%d,\"PostTriggerSamples\":%d,"
                 "\"TotalSamples\":%d,\"LoopCount\":0,\"MeasureBursts\":false,\"CaptureChannels\":[",
                 c->freq, c->pre, c->n - c->pre, c->n);
-        uint8_t *v = malloc((size_t)c->n + 1);
+        uint8_t *v = xmalloc((size_t)c->n + 1);
         for (int k = 0; k < nout; k++) {
             for (int i = 0; i < c->n; i++) v[i] = c->s[i] >> sig[k] & 1;
             fprintf(f, "%s{\"TextualChannelNumber\":\"Channel %d\",\"ChannelNumber\":%d,\"ChannelName\":\"%s\","

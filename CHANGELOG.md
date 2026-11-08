@@ -8,6 +8,10 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- The build has no warnings left. Typing a path too long for the file
+  browser says so, instead of opening a cut-off path. The logic
+  analyser's allocations are checked: out of memory, it says so and stops.
+
 - The regression (tests/la-diagnose.sh) replays each real capture folder
   as the board it was taken from, read from its diagnosis.txt (Issue 1,
   2, 3B, 4B, 6A, and RAM 16K), not always as an Issue 2. Four Issue 3B

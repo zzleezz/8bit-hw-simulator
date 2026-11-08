@@ -82,8 +82,8 @@ bool la_record_at(board_t *b, int pre, int post, int trig_addr, int arm_ms, int 
                 .arm_step = (long long)arm_ms * (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000) };
     find_nets(b, r.net, c);
     if (r.net[LA_RESET] < 0) { snprintf(err, errlen, "no /RESET net on the edge connector"); return false; }
-    r.ring = calloc((size_t)(pre > 0 ? pre : 1), sizeof(uint64_t));
-    r.out = calloc((size_t)pre + (size_t)post, sizeof(uint64_t));
+    r.ring = xcalloc((size_t)(pre > 0 ? pre : 1), sizeof(uint64_t));
+    r.out = xcalloc((size_t)pre + (size_t)post, sizeof(uint64_t));
     if (!board_step_hook(b, rec_step, &r)) {
         free(r.ring); free(r.out);
         snprintf(err, errlen, "the board is busy (edge counting)");
@@ -246,21 +246,21 @@ int timeline(const la_cli_t *o) {
     const int need[] = { LA_RESET, LA_MREQ, LA_M1, LA_RD, LA_RFSH };
     for (size_t i = 0; i < sizeof(need) / sizeof(need[0]); i++)
         if (t.net[need[i]] < 0) { fprintf(stderr, "no %s net\n", sig_names[need[i]]); board_destroy(b); return 1; }
-    t.first_fetch = malloc(65536 * sizeof(float));
-    t.first_read = malloc(65536 * sizeof(float));
-    t.fetches = calloc(65536, sizeof(uint32_t));
-    t.held_first = malloc(65536 * sizeof(float));
-    pairs_seen = calloc((size_t)1 << PAIRS_BITS, sizeof(uint64_t));
+    t.first_fetch = xmalloc(65536 * sizeof(float));
+    t.first_read = xmalloc(65536 * sizeof(float));
+    t.fetches = xcalloc(65536, sizeof(uint32_t));
+    t.held_first = xmalloc(65536 * sizeof(float));
+    pairs_seen = xcalloc((size_t)1 << PAIRS_BITS, sizeof(uint64_t));
     if (getenv("LA_GLITCH_BAND")) glitch_band = (float)atof(getenv("LA_GLITCH_BAND"));
-    t.glitch_first = malloc(65536 * sizeof(float));
+    t.glitch_first = xmalloc(65536 * sizeof(float));
     for (int a = 0; a < 65536; a++) t.first_fetch[a] = t.first_read[a] = t.held_first[a] = t.glitch_first[a] = -1;
     for (const la_stage_t *st = la_stages; st->name && t.nw < 8; st++) {
         if (st->ms <= 1) continue;
         int w = t.nw++;
         t.w_from[w] = (float)st->ms - TL_ARMED;
         t.w_to[w] = (float)st->ms + 1;
-        t.w_held[w] = malloc(65536 * sizeof(float));
-        t.w_glitch[w] = malloc(65536 * sizeof(float));
+        t.w_held[w] = xmalloc(65536 * sizeof(float));
+        t.w_glitch[w] = xmalloc(65536 * sizeof(float));
         for (int a = 0; a < 65536; a++) t.w_held[w][a] = t.w_glitch[w][a] = -1;
     }
     int ms = o->ms > 0 ? o->ms : 3000;

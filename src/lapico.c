@@ -114,7 +114,7 @@ int lp_find(lp_port_t *out, int max) {
         if (CM_Get_Parent(&parent, d.DevInst, 0) == CR_SUCCESS &&
             CM_Get_Device_IDA(parent, pid, sizeof(pid), 0) == CR_SUCCESS) {
             const char *slash = strrchr(pid, '\\');
-            snprintf(p->serial, sizeof(p->serial), "%s", slash ? slash + 1 : pid);
+            snprintf(p->serial, sizeof(p->serial), "%.63s", slash ? slash + 1 : pid);
         }
         n++;
     }

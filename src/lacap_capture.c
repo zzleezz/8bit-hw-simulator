@@ -3,7 +3,9 @@
  * AI-generated (Claude Code). */
 #include "lacap_int.h"
 
-/* When the CPU went another way: at the capture's first bus cycle or after N. */
+/* When the CPU went another way: at the capture's first bus cycle or after N.
+ * The text is in one static buffer: use it before the next call (not two in
+ * one printf). */
 const char *went_when(int cycle) {
     static char b[64];
     if (cycle <= 0) return "from the capture's first bus cycle";

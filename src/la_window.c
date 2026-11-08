@@ -300,6 +300,9 @@ static char atlas_path[1100];
  * taken away) then. */
 static void *screen_worker(void *arg) {
     (void)arg;
+    /* Static: kept for the run, and only one worker runs at a time (start()
+     * and after_run() refuse while L.running, and join the last thread).
+     * Likewise in the workers below. */
     static char screen[1300];
     pthread_mutex_lock(&L.mu);
     size_t bl = bus_text_len();
@@ -848,7 +851,7 @@ static void screen_row(struct nk_context *ctx, float cw, const machine_t *machin
         }
     } else nk_spacing(ctx, 1);
     nk_layout_row_end(ctx);
-    static char tried[1100];
+    static char tried[1100];                    /* the screenshot last loaded, across frames */
     if (L.screen[0] && !L.screen_tex.live && strcmp(tried, L.screen)) {    /* given before the window drew */
         snprintf(tried, sizeof(tried), "%s", L.screen);
         load_thumb(L.screen);
@@ -1214,7 +1217,7 @@ static void heading(struct nk_context *ctx, const char *t, float *y) {
  * the paragraph at text offset JUMP (when not NULL and JUMP >= 0). */
 static void draw_text(struct nk_context *ctx, const char *t, size_t from, size_t to, float avail, long jump, float *y,
                       float *jump_y) {
-    static char para[8192];
+    static char para[8192];                     /* one paragraph at a time; drawing is one thread */
     const struct nk_user_font *f = ctx->style.font;
     float lh = 16, gap = ctx->style.window.spacing.y;
     for (const char *line = t + from; line < t + to; ) {

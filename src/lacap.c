@@ -17,6 +17,10 @@ bool la_screen = true;           /* false: to the log alone */
 void (*la_text_hook)(const char *text);
 bool (*la_ask_hook)(const char *prompt);
 void (*la_status_hook)(int kind, int stage, int state);
+void *la_alloc_fail(size_t n) {
+    fprintf(stderr, "c64-hw-sim: out of memory (wanted %zu bytes for the logic analyser)\n", n);
+    exit(3);
+}
 void la_status(int kind, int stage, int state) {
     if (la_status_hook) la_status_hook(kind, stage, state);
 }
@@ -32,7 +36,7 @@ static void vtext_add(const char *fmt, va_list a) {
     if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1;
     if (vtext_n + (size_t)n + 1 > vtext_cap) {
         size_t cap = (vtext_cap ? vtext_cap * 2 : 16384) + (size_t)n;
-        char *p = realloc(vtext, cap);
+        char *p = xrealloc(vtext, cap);
         if (!p) return;
         vtext = p;
         vtext_cap = cap;

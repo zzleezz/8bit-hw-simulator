@@ -263,8 +263,8 @@ static bool record_stages(const machine_t *m, const char *spec, const la_capture
                         .arm_step = (long long)arm * (ZX_FREQ * ZX_STEPS_PER_CYCLE / 1000) };
         memset(&out[s], 0, sizeof(out[s]));
         find_nets(b, r[s].net, &out[s]);
-        r[s].ring = calloc((size_t)pre, sizeof(uint64_t));
-        r[s].out = calloc((size_t)pre + (size_t)post, sizeof(uint64_t));
+        r[s].ring = xcalloc((size_t)pre, sizeof(uint64_t));
+        r[s].out = xcalloc((size_t)pre + (size_t)post, sizeof(uint64_t));
     }
     r[n].pre = -1;
     bool hooked = board_step_hook(b, multi_step, r);
@@ -398,7 +398,7 @@ int la_check(const la_cli_t *o) {
     nc++;
     /* The stages the analyser captured (not those that never came). */
     la_capture_t d[DIAG_NSTAGES];
-    static char paths[DIAG_NSTAGES][1100];
+    static char paths[DIAG_NSTAGES][1100];     /* static for the size; one diagnosis runs at a time */
     const char *pp[DIAG_NSTAGES];
     int nst = 0;
     char err[300];

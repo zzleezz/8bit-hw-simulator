@@ -157,7 +157,7 @@ static void part_name(int machine, const char *ref, char *out, int len) {
     for (int i = 0; i < m->nparts; i++)
         if (!strcmp(m->parts[i].ref, ref)) {
             char l[64];
-            snprintf(out, (size_t)len, "%s (%s)", ref, one_line(l, sizeof(l), m->parts[i].label));
+            snprintf(out, (size_t)len, "%.15s (%.47s)", ref, one_line(l, sizeof(l), m->parts[i].label));
             return;
         }
     snprintf(out, (size_t)len, "%s", ref);
