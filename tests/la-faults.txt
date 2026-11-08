@@ -1,0 +1,60 @@
+# tests/la-faults.txt - the faults really found, for tests/la-score.py.
+#
+#   CASE  PART [PART...]   # what it was, how it was found
+#
+# CASE: a real capture folder's name (diagnosis-NAME, as la-diagnose.sh
+# lists it), or a simulated case as "sim FAULT" / "screen FAULT" /
+# "check FAULT". PART: the part(s) that were at fault, as the board names
+# them (IC22, R26, TR3); "none" for a board that works. A verdict is
+# right when its first item names one of them.
+#
+# Simulated faults inside a chip (removed, dataN, addrN, flip@) and the
+# healthy board are scored without being listed here.
+#
+# The real folders: fill in each one's fault once it's known (the part
+# that was replaced and fixed it). Unknown ones stay commented out and
+# aren't scored. The four filled in come from the commits named: check
+# them.
+#
+# diagnosis-16k-i3b
+# diagnosis-bad-ula-i3
+# diagnosis-board
+# diagnosis-i1-test1
+# diagnosis-i1-test4
+# diagnosis-i2-cpu1
+# diagnosis-i2-cpu2
+# diagnosis-i2-log1
+# diagnosis-i2-log2
+# diagnosis-i2-log3
+# diagnosis-i2-log4
+# diagnosis-i2-lr1
+# diagnosis-i2-test2
+# diagnosis-i2-test3
+# diagnosis-i2-ula1
+# diagnosis-i2-ula2
+# diagnosis-i2-ula3
+# diagnosis-i2-ula4
+# diagnosis-i2-um1
+# diagnosis-i3-test5
+# diagnosis-issue1-dead
+# diagnosis-issue2-busreq
+diagnosis-issue2-has-clk-and-addr15  IC1    # the ULA: 1.4 V on its clock output, a new ULA fixed it (commit 1841652)
+# diagnosis-issue2-wait
+diagnosis-issue3-ic22-bad  IC22             # ZX Diagnostics fails the upper RAM at IC22 (D7) (commit 5456f0e)
+# diagnosis-newtest1
+# diagnosis-newtest2
+diagnosis-swap-test  none                  # a working Spectrum, the analyser's boards swapped (commit e3f2263)
+# diagnosis-test1
+# diagnosis-i2-mc-3
+# diagnosis-i2-mc-4
+# diagnosis-i2-mc-5
+diagnosis-i2-mc-6  IC1                     # a real faulty ULA (commit 97ea84d)
+# diagnosis-iss2-majorchip-1
+# diagnosis-iss2-majorchip-2
+# diagnosis-issue2
+# diagnosis-issue2-faulty-chip-test
+# diagnosis-issue2-one-pulled-chip
+# diagnosis-issue2again
+# diagnosis-issue2pulledchip3
+#
+# AI-generated (Claude Code).

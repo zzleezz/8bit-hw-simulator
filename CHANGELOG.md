@@ -8,6 +8,21 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Logic analyser diagnosis, each thing said once: a dead board's idle
+  stage says "it isn't running", and the summary why the boot's stages
+  weren't taken (it said both twice). A board that passes says so in one
+  line; the window keeps what the boot doesn't test (the same at every
+  pass) behind **More**. The window leaves out the ROM routine's address
+  in a stage's heading ("11E2") and "P-RAMT"; the terminal and
+  diagnosis.txt keep them.
+- tests/la-score.py says how many verdicts name the real fault in their
+  first item, from the faults known: each simulated fault inside a chip,
+  and the real folders listed in tests/la-faults.txt (four so far, from
+  the records). The regression prints the score at the end. Now: 23 of
+  26 in the first item, 2 right passes, 1 missed (IC22, which the ROM's
+  own RAM test can't see). Each rule in the verdict notes which board it
+  came from.
+
 - "Diagnose by probing", on a Spectrum: **Import capture...** takes a
   logic analyser capture's lines (best idle.lac) as readings, low, high
   or pulsing; the analyser's "low" also fits floating (it reads 1.2 V

@@ -89,6 +89,9 @@ static struct {
      * captures' folder (shown as a row with "Open folder" instead). */
     bool has_verdict, has_folder;
     size_t verdict_off, folder_off;
+    /* The standing note (LA_EV_NOTE): shown only after "More". */
+    bool has_note, show_note;
+    size_t note_on, note_end;
     float width;                    /* the window's width as the user left it (0: not yet) */
 
     /* The screen: a picture of the monitor (the user's file; "" none), shown
@@ -110,7 +113,10 @@ static void init_sync(void) {
 
 /* ---- from the diagnosis's thread ---------------------------------------- */
 
-/* The console's "press Enter" / "type n, Enter" as this window's buttons.
+/* The console's "press Enter" / "type n, Enter" as this window's buttons,
+ * and without the code's own names: the ROM routine's address in a
+ * stage's heading ("(11E2, 0.45 s after the reset)" is "(0.45 s after the
+ * reset)") and " (P-RAMT)". The terminal and diagnosis.txt keep them.
  * Returns a malloc'd copy. */
 static char *button_words(const char *t) {
     static const char *const from[] = { "press Enter here", "type n, Enter", "press Enter", "Press Enter" };
@@ -123,6 +129,14 @@ static char *button_words(const char *t) {
         int f = -1;
         for (int i = 0; i < 4 && f < 0; i++)
             if (!strncmp(t, from[i], strlen(from[i]))) f = i;
+        if (!strncmp(t, " (P-RAMT)", 9)) { t += 9; continue; }
+        if (t[0] == '(' && isxdigit((unsigned char)t[1]) && isxdigit((unsigned char)t[2]) &&
+            isxdigit((unsigned char)t[3]) && isxdigit((unsigned char)t[4]) && t[5] == ',' && t[6] == ' ' &&
+            isdigit((unsigned char)t[7])) {
+            o[k++] = '(';
+            t += 7;
+            continue;
+        }
         if (f >= 0) {
             memcpy(o + k, to[f], strlen(to[f]));
             k += strlen(to[f]);
@@ -201,6 +215,9 @@ static void status_hook(int kind, int stage, int state) {
     } else if (kind == LA_EV_FOLDER) {
         L.has_folder = true;
         L.folder_off = L.len;
+    } else if (kind == LA_EV_NOTE) {
+        if (stage) { L.has_note = true; L.note_on = L.note_end = L.len; }
+        else L.note_end = L.len;
     } else if (kind == LA_EV_TRIGGERED) {
         L.sign = 2;
         snprintf(L.doing, sizeof(L.doing), "Reading the samples, then comparing with a working board");
@@ -441,6 +458,8 @@ static void clear_results(void) {
     L.jump = -1;
     L.has_verdict = L.has_folder = false;
     L.verdict_off = L.folder_off = 0;
+    L.has_note = L.show_note = false;
+    L.note_on = L.note_end = 0;
     pthread_mutex_unlock(&L.mu);
 }
 
@@ -1082,7 +1101,7 @@ static void big_text(struct nk_command_buffer *cv, struct nk_context *ctx, struc
 }
 
 /* The stages as boxes along the window: grey to come, blue now, green
- * OK, red wrong, dark crossed out skipped. A click shows its text. */
+ * OK, red wrong, dark skipped. A click shows its text. */
 static void stage_strip(struct nk_context *ctx, const int *st, int cur, bool running) {
     static int frame;
     frame++;
@@ -1541,7 +1560,16 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
                 fe = nl ? (size_t)(nl - t) + 1 : tl;
             }
             heading(ctx, "What it found", &y);
-            draw_text(ctx, t, L.verdict_off, fs, avail, -1, &y, NULL);
+            if (L.has_note && L.note_on >= L.verdict_off && L.note_end >= L.note_on && L.note_end <= fs) {
+                draw_text(ctx, t, L.verdict_off, L.note_on, avail, -1, &y, NULL);
+                nk_layout_row_static(ctx, 26, 300, 1);
+                if (nk_button_label(ctx, L.show_note ? "Less" : "More: what the boot doesn't test"))
+                    L.show_note = !L.show_note;
+                y += 26 + ctx->style.window.spacing.y;
+                if (L.show_note) draw_text(ctx, t, L.note_on, L.note_end, avail, -1, &y, NULL);
+                draw_text(ctx, t, L.note_end, fs, avail, -1, &y, NULL);
+            } else
+                draw_text(ctx, t, L.verdict_off, fs, avail, -1, &y, NULL);
             draw_text(ctx, t, fe, tl, avail, -1, &y, NULL);
             heading(ctx, "The run, stage by stage", &y);
             draw_text(ctx, t, 0, L.verdict_off, avail, jump, &y, &jump_y);

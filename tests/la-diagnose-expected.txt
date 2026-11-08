@@ -19,9 +19,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 3B (RAM 16K): the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-bad-ula-i3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -63,9 +64,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i1-test1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -73,8 +75,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low all through
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with
      /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The
@@ -86,8 +88,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The CPU (IC2): its outputs look dead or floating. Every address line A0-A15 reads low and
      /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,
@@ -163,9 +165,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-log3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -216,9 +219,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-mc-4
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -252,9 +256,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-mc-6
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -284,8 +289,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: goes low 18 times in 49 ms
   /INT: low 12937 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: halted (HALT low): it ran into a HALT, so it went astray before
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with
      /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The
@@ -312,9 +317,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-ula1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -352,9 +358,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-ula3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -392,9 +399,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-i2-um1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -484,8 +492,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The CPU (IC2): its outputs look dead or floating. Every address line A0-A15 reads low and
      /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,
@@ -500,8 +508,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. /BUSRQ (IC2 pin 25) is low all through: the CPU hands the bus over and stops. It's the CPU's input, from the
      edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.
@@ -565,8 +573,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. /WAIT (IC2 pin 24) is low all through: the CPU waits for ever in its bus cycle. It's the CPU's input, from the
      edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.
@@ -595,9 +603,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
 6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
   OK: the same as a working one
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-issue2pulledchip3
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -639,9 +648,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 3B: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## real diagnosis-newtest1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
@@ -649,8 +659,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 3 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The CPU isn't running: 24 lines a working board changes all the time are still (they never
      change, or only a few times). What it needs is right, left running: its clock, /RESET high, /WAIT
@@ -683,8 +693,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: low all through
   /INT: low all through
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with
      /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The
@@ -871,8 +881,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low all through
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. No clock: CLK (IC2's pin 6) is stuck high. It comes from IC1 (the ULA, from the 14 MHz crystal): the ULA, the
      crystal, or a short on the line. Nothing runs without it.
@@ -1022,8 +1032,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. /WAIT (IC2 pin 24) is low all through: the CPU waits for ever in its bus cycle. It's the CPU's input, from the
      edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.
@@ -1033,8 +1043,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. /BUSRQ (IC2 pin 25) is low all through: the CPU hands the bus over and stops. It's the CPU's input, from the
      edge connector (anything plugged in?) and a pull-up: a short to 0 V on the line, or the CPU itself.
@@ -1044,8 +1054,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: low all through
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. /RESET is low all through, left running with nobody at the button, so the CPU never starts.
      Something holds /RESET low: the CPU (IC2 pin 26: a faulty Z80 can short its input), the reset
@@ -1121,8 +1131,8 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   /RESET: high
   /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
   The CPU: no instruction fetches at all: the CPU isn't running (its clock, /RESET, /WAIT or /BUSRQ, its power)
-  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)
-Left running, it isn't working, so the boot's stages weren't taken.
+  FAULT: it isn't running
+The boot's stages weren't taken: they need a running CPU, and left running this one isn't.
 What to look at, most likely first:
   1. The CPU (IC2): its outputs look dead or floating. Every address line A0-A15 reads low and
      /BUSACK is low though nothing asks for the bus (/BUSRQ is high): a working Z80 never does that,
@@ -1340,9 +1350,10 @@ First, idle: what it does left running, before any reset (the clock, /RESET, the
   OK: the same as a working one
 Left running before the boot, it does as a working one: the clock, /RESET and the frame interrupt.
 All 6 stages are the same as a working ZX Spectrum 48K Issue 2: the CPU, the ROM and the start of BASIC are good, and
-the RAM passes the ROM's own test. That test is weak: it writes only 02, 01 and 00 to each byte, so
-bits D2-D7 never hold a 1, and a RAM chip for one of them that can't hold a 1 (or fails only on some
-patterns) passes it, and the machine can boot. A full RAM test (ZX Diagnostics) finds those.
+the RAM passes the ROM's own test.
+That test is weak: it writes only 02, 01 and 00 to each byte, so bits D2-D7 never hold a 1, and a
+RAM chip for one of them that can't hold a 1 (or fails only on some patterns) passes it, and the
+machine can boot. A full RAM test (ZX Diagnostics) finds those.
 This doesn't test the picture, the keyboard, the sound or the tape.
 ######## screen IC13:data0=1
 First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)

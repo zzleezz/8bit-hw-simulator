@@ -13,7 +13,8 @@
 #
 # Then: tests/la-compare.py tests/la-diagnose-expected.txt OUT/all.txt
 # prints what changed. When every change is meant, make OUT/all.txt the
-# new expected file.
+# new expected file. tests/la-score.py then says how many verdicts name
+# the real fault first (the faults known: tests/la-faults.txt).
 #
 # AI-generated (Claude Code).
 cd "$(dirname "$0")/.."
@@ -96,5 +97,8 @@ if [ ! -f tests/la-diagnose-expected.txt ]; then
     echo "No tests/la-diagnose-expected.txt yet: copy $OUT/all.txt there to compare against it next time"
     exit 0
 fi
-if command -v py >/dev/null; then py -I tests/la-compare.py tests/la-diagnose-expected.txt "$OUT/all.txt"
-else python3 -I tests/la-compare.py tests/la-diagnose-expected.txt "$OUT/all.txt"; fi
+PY=python3; command -v py >/dev/null && PY="py"
+$PY -I tests/la-compare.py tests/la-diagnose-expected.txt "$OUT/all.txt"
+echo
+echo "Scored against the known faults (tests/la-faults.txt):"
+$PY -I tests/la-score.py "$OUT/all.txt" tests/la-faults.txt | tail -1

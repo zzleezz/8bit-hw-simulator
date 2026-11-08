@@ -193,7 +193,14 @@ static void mux_for_addr(const char *bank, const char *chips, int k, char *out, 
     (void)chips;
 }
 
-/* What it points at, most likely first. */
+/* What it points at, most likely first.
+ *
+ * Each rule says where it came from ("From:"): most come from one real
+ * board, and their order decides which wins when two fit. The regression
+ * (tests/la-diagnose.sh) replays every board so that one rule can't
+ * quietly break another's; tests/la-score.py says how many verdicts name
+ * the real fault (tests/la-faults.txt). A rule with no "From:" came from
+ * the simulated faults. */
 int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, const cmp_out_t *co, const char *where) {
     vboard = la_new_board(m);
     const char *cpu = ref_of("CPU"), *rom = ref_of("ROM"), *ula = ref_of("ULA");
@@ -206,13 +213,16 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
         printf("\nNote: /RESET was low all through that capture: it was taken while the reset button was held (or /RESET\n"
                "is stuck low), when the CPU drives nothing; what it shows isn't the boot.\n");
     printf("\nWhat to look at, most likely first:\n");
-    /* Most of the lines dead: the CPU isn't running at all. */
+    /* Most of the lines dead: the CPU isn't running at all.
+     * From: two real faulty Z80s (commit 099b9ef, 2026-11-06). */
     int nstuck = 0, nctl = 0;
     for (int s = 0; s < LA_NSIG; s++)
         if (e->stuck[s]) { nstuck++; nctl += s == LA_MREQ || s == LA_RD || s == LA_WR || s == LA_M1 || s == LA_RFSH; }
     /* The analyser's two boards the wrong way round: each line is read from
      * another, and a working Spectrum looks dead. CLK stopped with /WAIT and
-     * /BUSRQ both held low (each has a pull-up) is that, not a fault. */
+     * /BUSRQ both held low (each has a pull-up) is that, not a fault.
+     * From: the bench, the boards plugged in the wrong way round
+     * (diagnosis-swap-test; commit e3f2263, 2026-11-07). */
     if (idle_st && e->stuck[LA_CLK] && e->held[LA_WAIT] && e->held[LA_BUSRQ]) {
         printf("  %d. The analyser's two boards look the wrong way round, not a fault on the Spectrum: CLK stopped with\n"
                "     /WAIT and /BUSRQ both low all through (each has a pull-up) is how a working one reads then. The\n"
@@ -245,7 +255,9 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
     /* A CPU whose outputs are dead or floating: every address line low,
      * /BUSACK low though nothing asks for the bus (/BUSRQ high), which a
      * working Z80 never does. A real Issue 1 read so, its address lines at
-     * about 1.2 V on a scope, its clock there at the CPU: the CPU first. */
+     * about 1.2 V on a scope, its clock there at the CPU: the CPU first.
+     * From: the dead Issue 1 (diagnosis-i1-test4, diagnosis-issue1-dead;
+     * commit 6949e54, 2026-11-07). */
     {
         bool addr_low = true;
         for (int k = LA_A0; k <= LA_A15; k++) addr_low = addr_low && e->lvl[k] == 1;
@@ -407,7 +419,8 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
     unsigned mr = ev_mask(e, AR_ROM), ml = ev_mask(e, AR_LRAM), mu = ev_mask(e, AR_URAM);
     unsigned shared = (mr & ml) | (mr & mu) | (ml & mu);
     /* The ROM's wrong reads are its own bytes from the address with one
-     * bit the other way: that address line, not the data. */
+     * bit the other way: that address line, not the data.
+     * From: the real captures of 2026-11-06 (commit f0509e8). */
     int abit = -1;
     for (int k = 0; k < 14; k++)
         if (e->rom_abit[k] >= 8 && 2 * e->rom_abit[k] >= e->nbad[AR_ROM] && (abit < 0 || e->rom_abit[k] > e->rom_abit[abit])) abit = k;
@@ -481,7 +494,8 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
                            e->bad[AR_ROM][i], e->bad[AR_ROM][i] == 1 ? "" : "s", e->first[AR_ROM]);
     }
     /* The lower RAM wrong only where the ULA was fetching the screen: its
-     * timing (contention), whichever chips show it. */
+     * timing (contention), whichever chips show it.
+     * From: a real faulty ULA (diagnosis-i2-mc-6; commit 97ea84d, 2026-11-06). */
     bool timing = e->c_have && e->c_bad >= 2 && e->c_bad_win == e->c_bad && e->c_good > e->c_good_win && ml;
     if (timing) {
         bits_text(ml, bits, sizeof(bits));
@@ -583,6 +597,9 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
         }
     }
 done:
+    /* The ULA's clock output weak: the edge connector's CLK stuck while
+     * the CPU runs. From: a real Issue 2 with 1.4 V there, fixed by a new
+     * ULA (diagnosis-issue2-has-clk-and-addr15; commit 1841652, 2026-11-07). */
     if (e->clk_edge && !e->stuck[LA_CLK]) {
         printf("  %d. %s, the ULA: its clock output is weak. The edge connector's CLK (B8) is the ULA's pin 32 and reads\n"
                "     stuck %s, though the CPU ran the ROM's code (it gets its clock through a transistor, so it runs).\n"
@@ -597,6 +614,8 @@ done:
             if (e->idle_still[k] && m2 < (int)sizeof(still) - 20)
                 m2 += snprintf(still + m2, sizeof(still) - m2, "%s%s (always %s)", ns++ ? ", " : "", la_signal_name(k),
                                e->idle_still[k] == 1 ? "low" : "high");
+        /* The stack in the ROM, and the lines still while the ROM runs (the
+         * Note below): from the same Issue 2 (commit 1841652). */
         if (e->rom_writes >= 50)
             printf("  %d. Left running, the CPU writes to the ROM (0000-3FFF) %d times: its stack is there. The ROM's RAM\n"
                    "     test sets the top of RAM below the first byte that fails it, so the RAM failed it at or near its\n"
@@ -703,7 +722,7 @@ int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev_t *ie)
     if (!bad && ie->rom_writes >= 50) bad = true;      /* its stack in the ROM: never on a working one */
     if (!bad && (strstr(ie->idle_where, "astray") || strstr(ie->idle_where, "not running") || strstr(ie->idle_where, "not one instruction"))) bad = true;
     if (!bad) { printf("  OK: the same as a working one\n"); return 0; }
-    if (dead) { printf("  FAULT: it isn't running, so the boot's stages can't be taken (they need a reset and a running CPU)\n"); return 2; }
+    if (dead) { printf("  FAULT: it isn't running\n"); return 2; }
     printf("  FAULT: something's wrong (below); the boot's stages next show more\n");
     return 1;
 }

@@ -1019,6 +1019,30 @@ Later, software:
       avoiding it for good (always a Write'd script with backslashes, or a
       small patch tool in the scratchpad that takes old/new text from
       files).
+- [x] (Done 2026-11-08; from the 2026-11-07 review.) Say each thing
+      once: a dead board's idle stage "it isn't running", the summary why
+      the stages weren't taken. A passing board: one line, and the window
+      keeps the standing caveats behind "More".
+- [x] (Done 2026-11-08; review.) The window leaves out the ROM routine's
+      address in a stage heading (11E2) and "P-RAMT"; the terminal and
+      diagnosis.txt keep them. RAM addresses (4000-7FFF, "the first at
+      4004") stay: they say which chips.
+- [x] (Done 2026-11-08; review.) Verdicts scored: tests/la-score.py,
+      the faults known in tests/la-faults.txt (kept in the repo, not in
+      the capture folders), the score printed after the regression. Each
+      rule in lacap_verdict.c has a "From:" note.
+- [ ] **(The user.) Fill in tests/la-faults.txt:** the real fault of each
+      capture folder once known (the part replaced). Four are filled in
+      from the commit records (issue2-has-clk-and-addr15 IC1,
+      issue3-ic22-bad IC22, i2-mc-6 IC1, swap-test none): check them.
+- [ ] (Review, needs the fault.txt files.) How sure is each verdict:
+      after 20-30 boards with known faults, say how often each rule was
+      right.
+- [ ] (Review.) A follow-up after the verdict: ask for one measurement
+      ("put the probe on the CPU's pin 6"), as the probing window does,
+      and use the answer.
+- [x] (Done 2026-11-08.) la_window.c's comment on the stage boxes said
+      skipped ones are "crossed out".
 - [ ] **V1.2 release page on GitHub (the user, 2026-11-08).** Tag V1.2
       (b8d2ac1) is pushed. At github.com/zzleezz/8bit-hw-simulator/releases/new:
       tag V1.2, title V1.2, paste github-release/release-description.txt,
