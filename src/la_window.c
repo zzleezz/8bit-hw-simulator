@@ -29,14 +29,14 @@
 #include <stdio.h>
 
 #define MAX_MARKS 48
-#define NSTAGES 7                   /* idle, then the boot's six */
+#define NSTAGES 8                   /* the most: the test ROM's eight captures (the boot: idle, then its six) */
 
 static const char *const stage_label[NSTAGES] = { "Idle", "Reset", "RAM test", "RAM done", "Copyright", "Main loop",
-                                                  "Interrupt" };
+                                                  "Interrupt", "" };
 static const char *stage_name(int k);
-/* With the test ROM (--la-zxtest): its seven captures. */
+/* With the test ROM (--la-zxtest): its eight captures. */
 static const char *const zxtest_label[NSTAGES] = { "Lines", "ROM sum", "Lower RAM", "Upper RAM", "Keyboard", "Interrupts",
-                                                   "Contention" };
+                                                   "Contention", "Refresh" };
 
 enum { MODE_ANALYSER, MODE_REPLAY, MODE_SIMULATE };
 
@@ -447,6 +447,7 @@ static bool is_zx48(const machine_t *m) {
 
 /* A stage box's name: the boot's, or the test ROM's. */
 static const char *stage_name(int k) { return L.zxtest ? zxtest_label[k] : stage_label[k]; }
+static int nstages(void) { return L.zxtest ? 8 : 7; }      /* boxes shown */
 
 /* Everything a run left: its text, verdict, outlines, stages. */
 static void clear_results(void) {
@@ -1118,8 +1119,8 @@ static void big_text(struct nk_command_buffer *cv, struct nk_context *ctx, struc
 static void stage_strip(struct nk_context *ctx, const int *st, int cur, bool running) {
     static int frame;
     frame++;
-    nk_layout_row_dynamic(ctx, 44, NSTAGES);
-    for (int k = 0; k < NSTAGES; k++) {
+    nk_layout_row_dynamic(ctx, 44, nstages());
+    for (int k = 0; k < nstages(); k++) {
         bool clicked = nk_widget_is_mouse_clicked(ctx, NK_BUTTON_LEFT);
         if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, "Show this stage's text below");
         struct nk_rect r;

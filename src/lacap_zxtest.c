@@ -2,7 +2,7 @@
  * test ROM (zxtest/zxtest.asm) from a cartridge, read off the edge
  * connector by the logic analyser.
  *
- * The ROM loops for ever through eight tests, each writing its result to
+ * The ROM loops for ever through nine tests, each writing its result to
  * RES+4n in the ROM area (status 00 OK / 01 FAIL / 02 none, bits, then an
  * address or count, high byte first): the analyser is armed on that
  * address any time, no reset. The ROM judges its results itself (its
@@ -18,18 +18,19 @@
 #define ZT_MARK 0x3FA0          /* test n's start: a write of n to MARK+n */
 #define ZT_RES 0x3FC0           /* test n's result: four writes at RES+4n */
 #define ZT_ALIVE 0x3F80         /* test 0's 20 writes */
-#define ZT_N 8
+#define ZT_N 9
 #define ZT_FRAME 2912           /* zxtest.asm's FRAME_N, CONT_N */
 #define ZT_CONT 2209
 #define ZT_NOCONT 2254          /* the contended loop with no contention */
 
 static const char *const zt_name[ZT_N] = {
     "alive (the data lines)", "the address lines", "the ROM's sum", "the lower RAM (4000-7FFF)",
-    "the upper RAM (8000-FFFF)", "the ULA's ports (keyboard)", "the interrupts", "contention (the ULA's timing)" };
+    "the upper RAM (8000-FFFF)", "the ULA's ports (keyboard)", "the interrupts", "contention (the ULA's timing)",
+    "the upper RAM's refresh" };
 
 /* The captures: the first from test 0's start (tests 0 and 1 and their
- * results fit in it), then each result of tests 2-7. */
-#define ZT_NCAP 7
+ * results fit in it), then each result of tests 2-8. */
+#define ZT_NCAP 8
 static int cap_test(int k) { return k == 0 ? 0 : k + 1; }
 static int cap_trig(int k) { return k == 0 ? ZT_MARK : ZT_RES + 4 * cap_test(k); }
 static void cap_file(const char *dir, int k, char *out, int len) {
@@ -212,6 +213,10 @@ static int zt_ram(int item, bool upper, const uint8_t r[4]) {
     return item;
 }
 
+/* The captures' test ROM version (test 0's result): version 3 added test 8
+ * and test 4's two bytes read back when it finds no upper RAM. */
+static int zt_capver;
+
 /* What test N's result says, as numbered items from ITEM. */
 static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m) {
     char buf[600], b[64];
@@ -226,12 +231,54 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
     case 4:
         if (r[0] == 2) {
             if (zt_16k(m)) return item;
+            /* Version 3 on: +2 +3 = what 8000 and 8001 read back (55 and AA
+             * written). FF FF: nothing drives the bus there. Else the bits
+             * wrong in both: one or two of them are chips stuck. */
+            unsigned bad = (0x55u ^ r[2]) | (0xAAu ^ r[3]);
+            int nb = 0;
+            for (int i = 0; i < 8; i++) nb += bad >> i & 1;
+            if (zt_capver >= 3 && v16 != 0xFFFF && nb <= 2) {
+                uint8_t f[4] = { 1, (uint8_t)bad, 0x80, 0x00 };
+                printf("  %d. No upper RAM found at first sight: 8000 and 8001 read back %02X %02X, not 55 AA, so the march\n"
+                       "     didn't run. Bits wrong in both:\n", ++item, r[2], r[3]);
+                return zt_ram(item, true, f);
+            }
             bank_parts("upper RAM", "URAM", buf, sizeof(buf));
-            printf("  %d. No upper RAM found at all (8000-8001 read back nothing written there). A 16K Spectrum has\n"
-                   "     none: if this one is a 48K, the upper RAM as a whole: %s\n", ++item, buf[0] ? buf : "its select and multiplexers");
+            char got[80] = "nothing written there";
+            if (zt_capver >= 3)
+                snprintf(got, sizeof(got), "%02X %02X, not 55 AA%s", r[2], r[3],
+                         v16 == 0xFFFF ? ": nothing drives the data bus there" : "");
+            printf("  %d. No upper RAM found at all (8000 and 8001 read back %s). A 16K Spectrum has\n"
+                   "     none: if this one is a 48K, the upper RAM as a whole: %s\n", ++item, got,
+                   buf[0] ? buf : "its select and multiplexers");
             return item;
         }
         return zt_ram(item, true, r);
+    case 8: {
+        /* The march passed it: what was lost, was lost unread for ~1.6 s */
+        unsigned bits = r[1];
+        int nb = 0;
+        for (int i = 0; i < 8; i++) nb += bits >> i & 1;
+        bits_list(bits, 8, "D", b, sizeof(b));
+        if (nb >= 3) {
+            bank_parts("upper RAM", "URAM", buf, sizeof(buf));
+            printf("  %d. The upper RAM forgets what it holds when nothing reads it for about 1.6 s (bits %s, the first\n"
+                   "     at %04X), though it passed the march: its refresh. The CPU (IC2) makes it (/RFSH, pin 28, with\n"
+                   "     /MREQ and the row on A0-A6); what passes it to the upper RAM's /RAS: %s\n", ++item, b, v16,
+                   buf[0] ? buf : "its select logic");
+            return item;
+        }
+        for (int i = 0; i < 8; i++) {
+            if (!(bits >> i & 1)) continue;
+            char lab[8];
+            snprintf(lab, sizeof(lab), "URAM%d", i);
+            const char *ic = ref_of(lab);
+            printf("  %d. %s, the upper RAM's bit D%d: it passed the march but lost what it held after about 1.6 s\n"
+                   "     unread (the first wrong at %04X): it leaks faster than the refresh keeps it.\n", ++item,
+                   ic ? ic : "the chip", i, v16);
+        }
+        return item;
+    }
     case 5: {
         bits_list(r[1], 5, "KB", b, sizeof(b));
         char rows[64];
@@ -318,7 +365,7 @@ int zxtest_diagnose(const la_cli_t *o) {
     }
     if (!o->replay && !o->simulate)
         printf("The Spectrum just needs to be running the test ROM (the cartridge's slot for it): no reset. It goes\n"
-               "round its tests every 4.5 s or so; each capture waits for its test.\n");
+               "round its tests every 6 s or so; each capture waits for its test.\n");
     vboard = la_new_board(m);
     uint8_t res[ZT_N][4];
     bool got[ZT_N] = { 0 };
@@ -326,7 +373,22 @@ int zxtest_diagnose(const la_cli_t *o) {
     bool have_bus = false;
     int ncap = 0;
     char where[200] = "";
-    if (o->simulate) la_sim_cart = rompath;
+    /* Simulated: one board left running, each capture waiting for its test
+     * as the analyser does on a real one (not a power on per capture: the
+     * last test comes about 5 s in). */
+    board_t *sim = NULL;
+    if (o->simulate) {
+        la_sim_cart = rompath;
+        sim = sim_board(m, o->faults, o->nfaults, err, sizeof(err));
+        if (!sim) {
+            la_sim_cart = NULL;
+            la_err(err);
+            board_destroy(vboard);
+            vboard = NULL;
+            if (own && la_logf) { fclose(la_logf); la_logf = NULL; }
+            return 1;
+        }
+    }
     for (int k = 0; k < ZT_NCAP; k++) {
         la_capture_t c;
         bool ok;
@@ -336,7 +398,7 @@ int zxtest_diagnose(const la_cli_t *o) {
         la_status(LA_EV_STAGE, k, LA_ST_RUN);
         if (o->replay) ok = la_read(path, &c, err, sizeof(err));
         else if (o->simulate)
-            ok = record_sim(m, o->faults, o->nfaults, 2000, k == 0 ? 194000 : 20000, cap_trig(k), 0, &c, err, sizeof(err));
+            ok = la_record_at(sim, 2000, k == 0 ? 194000 : 20000, cap_trig(k), 0, 8000, &c, err, sizeof(err));
         else {
             la_cli_t q = *o;
             char trig[16];
@@ -375,6 +437,7 @@ int zxtest_diagnose(const la_cli_t *o) {
         la_status(LA_EV_STAGE, k, bad ? LA_ST_FAULT : LA_ST_OK);
     }
     la_sim_cart = NULL;
+    if (sim) board_destroy(sim);
 
     /* The verdict */
     printf("\n");
@@ -389,6 +452,8 @@ int zxtest_diagnose(const la_cli_t *o) {
         /* Captures of another version of the test ROM than the image here:
          * its bytes can't be compared (its results still say what they say). */
         int img_ver = rom[0x77] - '0', cap_ver = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
+        zt_capver = cap_ver;
+        int ntests = cap_ver >= 3 ? ZT_N : 8;    /* test 8 came with version 3 */
         if (have_bus && cap_ver != img_ver) {
             printf("(These captures are of version %d of the test ROM, %s is version %d: the cartridge's reads aren't\n"
                    "compared with it. Program the cartridge with the newer one.)\n\n", cap_ver, rompath, img_ver);
@@ -396,7 +461,7 @@ int zxtest_diagnose(const la_cli_t *o) {
         }
         /* Is there anything to say? */
         bool any = (have_bus && (bus.rom_bad || bus.alive_wrong || bus.a_wrong));
-        for (int t = 0; t < ZT_N; t++)
+        for (int t = 0; t < ntests; t++)
             any |= !got[t] || res[t][0] == 1 || (t == 4 && res[t][0] == 2 && !zt_16k(m));
         if (any) printf("What to look at:\n");
         if (have_bus && bus.rom_bad) {
@@ -447,7 +512,7 @@ int zxtest_diagnose(const la_cli_t *o) {
         /* The first test with no result: the program stopped there (or
          * before: the ones before it may be missing too). */
         int stop = -1;
-        for (int t = 0; t < ZT_N && stop < 0; t++) if (!got[t]) stop = t;
+        for (int t = 0; t < ntests && stop < 0; t++) if (!got[t]) stop = t;
         if (stop >= 0) {
             printf("  %d. No result from test %d (%s)%s: the test ROM doesn't get there, or not every turn. It hangs\n"
                    "     or crashes in it or before it.%s%s\n", ++item, stop, zt_name[stop],

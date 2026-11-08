@@ -9,11 +9,15 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 ## Unreleased
 
 - A test ROM for 16K/48K Spectrums, made for the logic analyser
-  (zxtest/, built with sjasmplus): eight tests in a loop (data and address
+  (zxtest/, built with sjasmplus): nine tests in a loop (data and address
   lines, the ROM's sum, a march over the lower and upper RAM, the ULA's
-  ports, the interrupts, contention), each writing its result to an
-  address in the ROM area the analyser triggers on, and the results on
-  the screen. Unlike the ROM's own RAM test it holds a 1 in every bit: a
+  ports, the interrupts, contention, the upper RAM's refresh), each
+  writing its result to an address in the ROM area the analyser triggers
+  on, and the results on the screen. Version 3: the refresh test (the
+  upper RAM filled, read back after 1.6 s untouched); the border yellow,
+  not green, when no upper RAM answers (right on a 16K only), with the
+  two bytes read back in the result (FF FF: nothing there; else the stuck
+  chips are named); the ALIVE line shows the version (it showed 0000). Unlike the ROM's own RAM test it holds a 1 in every bit: a
   simulated weak IC22 (D7) passes all six boot stages and fails it. Run
   on a real Issue 2 from a SteamCard Pro cartridge: every result the same
   as the simulated board's. zxtest/zxbench.rom: the cartridge's bench
@@ -22,10 +26,10 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   simulated board.
 - The test ROM's diagnosis: --la-diagnose DIR --la-zxtest, and in the
   logic analyser window "It runs: the test ROM (a cartridge)". No reset:
-  seven captures in about 25 s, each test's result put into parts (the
+  eight captures in about 30 s, each test's result put into parts (the
   RAM chip of each bad bit, the bank as a whole, /INT held low, the ULA's
   contention first when it breaks the lower RAM too). tests/la-zxtest.sh
-  checks it on real captures and 16 simulated faults.
+  checks it on real captures and 18 simulated faults.
 
 ## V1.2 (2026-11-08)
 

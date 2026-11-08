@@ -4,11 +4,11 @@
 ; ROM checksum patched in by patchsum.py).
 ;
 ; A 16K cartridge ROM (the SteamCard Pro's bank 3). It loops for ever
-; through eight tests. Each test:
-;   - starts by writing its number to its marker, MARK+n (3FA0-3FA7): the
+; through nine tests. Each test:
+;   - starts by writing its number to its marker, MARK+n (3FA0-3FA8): the
 ;     analyser arms on that address;
 ;   - sets the border to its number;
-;   - ends by writing four result bytes to RES+4n (3FC0-3FDF):
+;   - ends by writing four result bytes to RES+4n (3FC0-3FE3):
 ;       +0 status: 00 OK, 01 FAIL, 02 none / skipped
 ;       +1 bits:   the data bits found wrong (RAM), or the test's flags
 ;       +2 +3:     an address or a count, high byte first
@@ -30,7 +30,9 @@
 ;   3 lower RAM 4000-7FFF: data walk at 4000, then a march
 ;               (w0 up, r0w1 up, r1w0 down, r0 down); +1 the bad bits,
 ;               +2 +3 the first bad address
-;   4 upper RAM 8000-FFFF: there at all?, then the same march
+;   4 upper RAM 8000-FFFF: there at all? (55 to 8000, AA to 8001; none:
+;               status 02, +2 +3 the two bytes read back, FF FF on a 16K),
+;               then the same march
 ;   5 ULA ports OUT FE each border, MIC, EAR value; IN FE each keyboard
 ;               row, no key pressed: +1 key bits read low, +2 the rows they
 ;               were on, +3 IN FE with every row selected
@@ -40,13 +42,23 @@
 ;               frame's length out of range
 ;   7 contention the same count with a read of 4000 in the loop (the ULA
 ;               holds the CPU's clock while it fetches the screen)
-; Then the results on the screen (if the lower RAM passed), the border
-; green (all OK) or red, a beep, about 1.5 s to read it, and again.
-; MARK+0F (3FAF) = the loop's end, data = the loop count.
+;   8 refresh   the upper RAM (if it passed) filled with 00 and FF in
+;               turns of 128 bytes (every row both ways) before the screen,
+;               read back after the 1.5 s hold: nothing touched it in
+;               between, only the CPU's refresh kept it. +1 the bad bits,
+;               +2 +3 the first bad address. (The lower RAM needs no such
+;               test: the ULA's screen fetches refresh it.) DRAMs often
+;               keep their data a second or more unrefreshed when cool, so
+;               a pass doesn't prove the refresh; a fail does disprove it.
+; Then the results on the screen (if the lower RAM passed; test 8's line
+; WAIT until it is read back), the border green (all OK), yellow (no upper
+; RAM: right on a 16K only) or red, a beep, about 1.5 s to read it, test
+; 8's read-back (red, the low beep and 1.5 s more if it failed, else 0.5
+; s), and again. MARK+0F (3FAF) = the loop's end, data = the loop count.
 
         OUTPUT  "zxtest.rom"
 
-VERSION EQU     2               ; test 0's result +3, and "ZXTEST 2" at 0070
+VERSION EQU     3               ; test 0's result +3, "ZXTEST n" at 0070, the title
 MARK    EQU     3FA0h           ; test n's marker
 RES     EQU     3FC0h           ; test n's four result bytes
 ALIVE   EQU     3F80h           ; test 0's writes
@@ -90,10 +102,14 @@ NTOL    EQU     8
         jp      addr
         ENDM
 
-; A test's start: the marker write and the border.
+; A test's start: the marker write and the border (n AND 7: 8 is black,
+; not MIC).
         MACRO   START n
         ld      a, n
         ld      (MARK + n), a
+        IF n > 7
+        ld      a, n & 7
+        ENDIF
         out     (0FEh), a
         ENDM
 
@@ -166,7 +182,7 @@ int_im1:                        ; test 6/7 only: back to where IX says
         jp      reset           ; NMI: start again
 
         ds      70h - $, 0FFh
-        db      "ZXTEST 2 - logic analyser test ROM", 0
+        db      "ZXTEST ", '0' + VERSION, " - logic analyser test ROM", 0
 
         ds      100h - $, 0FFh
 reset:
@@ -334,9 +350,10 @@ t3:
         set     0, b
         exx
         ; the lower RAM is good: keep tests 0-2's results now
+        ld      bc, VERSION         ; test 0's +2 +3 (L, H)
+        ld      (SAVE + 2), bc
         ld      bc, 0
         ld      (SAVE + 0), bc
-        ld      (SAVE + 2), bc
         ld      (SAVE + 4), bc
         ld      (SAVE + 6), bc
         exx
@@ -359,20 +376,25 @@ t4:
         exx
         res     1, b
         exx
-        ; there at all? 55 to 8000, AA to 8001: one read back right is enough
+        ; there at all? 55 to 8000, AA to 8001: one read back right is enough.
+        ; None: the two bytes read are the result's +2 +3 (FF FF: nothing
+        ; drives the bus, a 16K; else a dead bank, or two chips stuck)
         ld      a, 55h
         ld      (8000h), a
         cpl
         ld      (8001h), a
         ld      a, (8000h)
+        ld      h, a
+        ld      a, (8001h)
+        ld      l, a
+        ld      a, h
         cp      55h
         jr      z, .yes
-        ld      a, (8001h)
+        ld      a, l
         cp      0AAh
         jr      z, .yes
         ld      d, 2
         ld      e, 0
-        ld      hl, 0
         jp      .r
 .yes    ld      e, 0
         ld      iy, 0
@@ -650,6 +672,71 @@ read_down:
 .f      FAILBITS
         jr      .c
 
+; test 8: HL from, C halves of 128 bytes (0 = 256), 00 and FF in turns
+ref_fill:
+        ld      d, 0
+.l      ld      b, 128
+.h      ld      (hl), d
+        inc     hl
+        djnz    .h
+        ld      a, d
+        cpl
+        ld      d, a
+        dec     c
+        jr      nz, .l
+        jp      (ix)
+
+; the same read back: the bad bits into E, the first bad address into IY
+ref_check:
+        ld      d, 0
+.l      ld      b, 128
+.h      ld      a, (hl)
+        cp      d
+        jr      nz, .f
+.c      inc     hl
+        djnz    .h
+        ld      a, d
+        cpl
+        ld      d, a
+        dec     c
+        jr      nz, .l
+        jp      (ix)
+.f      FAILBITS
+        jr      .c
+
+; the border C, a beep (high and short, or low and long for red: C = 2),
+; then D times about 0.5 s; no RAM, no stack: JP (IX) back
+beephold:
+        ld      a, c
+        out     (0FEh), a
+        ld      hl, 200             ; cycles (even: C ends as it was)
+        ld      e, 60               ; half period
+        cp      2
+        jr      nz, .bp
+        ld      hl, 300
+        ld      e, 200
+.bp     ld      a, c
+        xor     10h
+        ld      c, a
+        out     (0FEh), a
+        ld      b, e
+.bd     djnz    .bd
+        dec     hl
+        ld      a, h
+        or      l
+        jr      nz, .bp
+        ld      a, c
+        and     7
+        out     (0FEh), a
+hold:   ld      hl, 0
+.l      dec     hl
+        ld      a, h
+        or      l
+        jr      nz, .l
+        dec     d
+        jr      nz, .l
+        jp      (ix)
+
 walk_tab:
         db      01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
         db      0FEh, 0FDh, 0FBh, 0F7h, 0EFh, 0DFh, 0BFh, 07Fh
@@ -658,12 +745,30 @@ walk_tab:
 ; ---- the results on the screen (1400) ------------------------------------
         ds      1400h - $, 0FFh
 show:
+        ; test 8's first half: the upper RAM filled now, read back after the hold
+        START   8
         exx
+        ld      a, b
+        exx
+        bit     1, a
+        jr      z, .nofill
+        ld      hl, 8000h
+        ld      c, 0                ; 256 halves: 8000-FFFF
+        CALLX   ref_fill
+.nofill exx
         ld      a, b
         exx
         bit     0, a
         jp      z, .noscr
         ld      sp, STACKL
+        ; test 8's line: WAIT till it's read back (NONE with no upper RAM)
+        ld      a, 2
+        exx
+        bit     1, b
+        exx
+        jr      z, .w8
+        inc     a
+.w8     ld      (SAVE + 4 * 8 + 1), a
         ; the march left the screen's pixels 0: white ink, black paper
         ld      hl, 5800h
         ld      de, 5801h
@@ -680,9 +785,102 @@ show:
         call    hex
         ; one line per test
         ld      b, 0
-.t      push    bc
+.t      call    line
+        inc     b
         ld      a, b
-        add     a, 3                ; row 3 + n
+        cp      9
+        jr      nz, .t
+.noscr
+        ; all OK? statuses 0 -> green; the upper RAM's 2 (none) -> yellow
+        ; (right on a 16K only); a FAIL -> red
+        exx
+        ld      a, c                ; test 2's status
+        exx
+        ld      e, a
+        exx
+        ld      a, b                ; the RAM flags
+        exx
+        ld      c, 4                ; green
+        bit     0, a
+        jr      z, .bad
+        ld      a, e
+        or      a
+        jr      nz, .bad
+        ld      hl, SAVE + 4 * 4 + 1
+        ld      b, 4                ; tests 4-7
+.ck     ld      a, (hl)
+        cp      1
+        jr      z, .bad
+        inc     l
+        inc     l
+        inc     l
+        inc     l
+        djnz    .ck
+        ld      a, (SAVE + 4 * 4 + 1)
+        cp      2
+        jr      nz, .beep
+        ld      c, 6                ; yellow: no upper RAM
+        jr      .beep
+.bad    ld      c, 2                ; red
+.beep   ; a beep, then about 1.5 s to read it (no RAM, no stack)
+        ld      d, 3
+        CALLX   beephold
+
+; ---- test 8, the second half: the upper RAM read back ---------------------
+t8:
+        exx
+        ld      a, b
+        exx
+        bit     1, a
+        jr      nz, .st
+        ld      d, 2                ; the upper RAM failed or isn't there
+        ld      e, 0
+        ld      hl, 0
+        jp      .r
+.st     ld      e, 0
+        ld      iy, 0
+        ld      hl, 8000h
+        ld      c, 0
+        CALLX   ref_check
+        ld      d, 0
+        ld      a, e
+        or      a
+        jr      z, .ok
+        ld      d, 1
+.ok     ld      a, iyh
+        ld      h, a
+        ld      a, iyl
+        ld      l, a
+.r
+        RESULT  8
+        ld      c, d                ; the status (the line keeps BC)
+        exx
+        ld      a, b
+        exx
+        bit     0, a
+        jr      z, .ns
+        ld      b, 8
+        call    line                ; WAIT -> OK / FAIL
+.ns     ld      a, c
+        dec     a
+        ld      d, 1                ; OK or none: 0.5 s to see it
+        jr      nz, .h
+        ld      c, 2                ; FAIL: red, the low beep, 1.5 s
+        ld      d, 3
+        CALLX   beephold
+        jr      .end
+.h      CALLX   hold
+.end    exx
+        inc     d
+        ld      a, d
+        exx
+        ld      (MARK + 0Fh), a     ; the loop's end
+        jp      t0
+
+; test B's line on the screen (row 3 + B) from SAVE + 4B; keeps BC
+line:   push    bc
+        ld      a, b
+        add     a, 3
         call    rowaddr             ; DE = the row's first cell
         inc     e
         ld      a, b
@@ -711,14 +909,21 @@ show:
         ; L -> SAVE + 4n: (E bits, D status, L, H)
         push    hl
         inc     l
-        ld      a, (hl)             ; the status
+        ld      a, (hl)             ; the status, and the row's paper (C)
         ld      hl, w_ok
+        ld      c, 07h              ; white ink, black paper
         or      a
         jr      z, .st
         ld      hl, w_fail
+        ld      c, 17h              ; red paper
         dec     a
         jr      z, .st
         ld      hl, w_none
+        ld      c, 30h              ; yellow paper, black ink
+        dec     a
+        jr      z, .st
+        ld      hl, w_wait
+        ld      c, 07h
 .st     call    print
         pop     hl
         ld      a, (hl)             ; the bits
@@ -733,16 +938,6 @@ show:
         dec     l
         ld      a, (hl)
         call    hex
-        ; a failed line on red paper
-        ld      a, b
-        add     a, a
-        add     a, a
-        ld      l, a
-        inc     l
-        ld      h, SAVE >> 8
-        ld      a, (hl)
-        dec     a
-        jr      nz, .nored
         ld      a, b
         add     a, 3
         call    rowaddr
@@ -752,83 +947,14 @@ show:
         rrca
         rrca
         or      58h
-        ld      d, a
-        ld      h, d
+        ld      h, a
         ld      l, e
-        ld      c, 32
-.red    ld      (hl), 17h
+        ld      b, 32
+.a      ld      (hl), c
         inc     hl
-        dec     c
-        jr      nz, .red
-.nored  pop     bc
-        inc     b
-        ld      a, b
-        cp      8
-        jp      nz, .t
-.noscr
-        ; all OK? statuses 0 (or 2 for the upper RAM: a 16K) -> green
-        exx
-        ld      a, c                ; test 2's status
-        exx
-        ld      e, a
-        exx
-        ld      a, b                ; the RAM flags
-        exx
-        ld      c, 4                ; green
-        bit     0, a
-        jr      z, .bad
-        ld      a, e
-        or      a
-        jr      nz, .bad
-        ld      hl, SAVE + 4 * 4 + 1
-        ld      b, 4                ; tests 4-7
-.ck     ld      a, (hl)
-        cp      1
-        jr      z, .bad
-        inc     l
-        inc     l
-        inc     l
-        inc     l
-        djnz    .ck
-        jr      .beep
-.bad    ld      c, 2                ; red
-.beep   ; a beep: high and short if OK, low and long if not
-        ld      a, c
-        out     (0FEh), a
-        ld      hl, 200             ; cycles
-        ld      e, 60               ; half period (OK)
-        cp      4
-        jr      z, .bp
-        ld      hl, 300
-        ld      e, 200
-.bp     ld      a, c
-        xor     10h
-        ld      c, a
-        out     (0FEh), a
-        ld      b, e
-.bd     djnz    .bd
-        dec     hl
-        ld      a, h
-        or      l
-        jr      nz, .bp
-        ld      a, c
-        and     7
-        out     (0FEh), a
-        ; about 1.5 s to read it (no RAM, no stack)
-        ld      hl, 0
-        ld      d, 3
-.hold   dec     hl
-        ld      a, h
-        or      l
-        jr      nz, .hold
-        dec     d
-        jr      nz, .hold
-        exx
-        inc     d
-        ld      a, d
-        exx
-        ld      (MARK + 0Fh), a     ; the loop's end
-        jp      t0
+        djnz    .a
+        pop     bc
+        ret
 
 ; DE = the first cell of text row A (0-23)
 rowaddr:
@@ -893,7 +1019,7 @@ putc:   push    hl
         pop     hl
         ret
 
-title:  db      "ZX LA TEST 2         LOOP", 0
+title:  db      "ZX LA TEST ", '0' + VERSION, "         LOOP", 0
 names:  db      "ALIVE    ", 0
         db      "ADDRESS  ", 0
         db      "ROM SUM  ", 0
@@ -902,9 +1028,11 @@ names:  db      "ALIVE    ", 0
         db      "ULA PORTS", 0
         db      "INTERRUPT", 0
         db      "CONTENTN ", 0
+        db      "REFRESH  ", 0
 w_ok:   db      " OK  ", 0
 w_fail: db      " FAIL", 0
 w_none: db      " NONE", 0
+w_wait: db      " WAIT", 0
 
 ; ---- the font (2000) -----------------------------------------------------
         ds      2000h - $, 0FFh

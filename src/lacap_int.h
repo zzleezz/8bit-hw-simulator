@@ -254,6 +254,7 @@ bool cpu_busy(const la_capture_t *c);
 int line_state(const la_capture_t *c, int s);
 void gather(ev_t *e, const la_capture_t *d, const la_capture_t *r);
 void where_text(const la_capture_t *c, char *out, int len);
+board_t *sim_board(const machine_t *m, const char *const *faults, int nfaults, char *err, int errlen);
 bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int pre, int post, int trig, int arm_ms,
                        la_capture_t *c, char *err, int errlen);
 bool capture_now(const la_cli_t *o, double at_ms, const char *save, la_capture_t *c, char *err, int errlen);

@@ -334,24 +334,32 @@ void where_text(const la_capture_t *c, char *out, int len) {
 
 /* A simulated board's capture: with FAULTS, triggered at TRIG (-1 the
  * reset, -2 ARM_MS after the reset, else the address from ARM_MS after
- * power on). */
+ * power on; 8 s with a cartridge: the test ROM's loop takes 6). */
 const char *la_sim_cart;
 
-bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int pre, int post, int trig, int arm_ms,
-                       la_capture_t *c, char *err, int errlen) {
+/* The simulated board under test: M with FAULTS, la_sim_cart plugged in
+ * (NULL and ERR set if a fault or the cartridge is bad). */
+board_t *sim_board(const machine_t *m, const char *const *faults, int nfaults, char *err, int errlen) {
     board_t *b = la_new_board(m);
     for (int i = 0; i < nfaults; i++)
         if (!board_apply_fault_spec(b, faults[i])) {
             snprintf(err, errlen, "bad fault spec: %s", faults[i]);
             board_destroy(b);
-            return false;
+            return NULL;
         }
     if (la_sim_cart && !board_load(b, la_sim_cart, false, err, errlen)) {
         board_destroy(b);
-        return false;
+        return NULL;
     }
+    return b;
+}
+
+bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int pre, int post, int trig, int arm_ms,
+                       la_capture_t *c, char *err, int errlen) {
+    board_t *b = sim_board(m, faults, nfaults, err, errlen);
+    if (!b) return false;
     bool ok = trig == -1 ? la_record(b, pre, post, c, err, errlen)
-                         : la_record_at(b, pre, post, trig, arm_ms, trig == -2 ? arm_ms + 1000 : arm_ms + 4000, c, err, errlen);
+                         : la_record_at(b, pre, post, trig, arm_ms, trig == -2 ? arm_ms + 1000 : arm_ms + (la_sim_cart ? 8000 : 4000), c, err, errlen);
     board_destroy(b);
     return ok;
 }

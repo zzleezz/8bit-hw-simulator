@@ -7,8 +7,10 @@
 #
 # Captures dir: where the zxtest-NAME folders are (default ../Logic
 # Analyser); they stay out of git. Each line of the result: the case, the
-# eight tests (O ok, F fail, n none, - no result), then the verdict's
-# numbered items' first lines. LA_JOBS=N cases at a time (default 8).
+# nine tests (eight in captures of version 2: O ok, F fail, n none, - no
+# result), then the verdict's numbered items' first lines. Faults joined
+# by + go on one board. LA_JOBS=N cases at a time (default: half the
+# logical processors).
 # A changed line is printed; when every change is meant, copy OUT/all.txt
 # over the expected file.
 #
@@ -20,7 +22,10 @@ EXE=./c64-hw-sim.exe
 [ -x "$EXE" ] || EXE=./c64-hw-sim
 EXE=$(pwd)/${EXE#./}
 rm -rf "$OUT"; mkdir -p "$OUT"
-JOBS=${LA_JOBS:-8}
+# half the logical processors: more gains little (the simulations share
+# the caches and slow each other down)
+NP=$(nproc 2>/dev/null || echo 8)
+JOBS=${LA_JOBS:-$(( NP / 2 > 1 ? NP / 2 : 1 ))}
 
 summary() {   # NAME OUTFILE
     local t
@@ -39,18 +44,19 @@ for d in "$LA"/zxtest-*; do
     cases+=("real_$n|--la-replay --board $b")
 done
 for f in healthy IC22:weak IC22:removed IC7.14:vcc IC8:data0=0 IC13:data0=0 IC6:addr2 IC15:addr3 IC3.4:gnd \
-         IC25:removed IC1:nocontention R26:removed IC2.16:gnd IC2.34:vcc; do
-    n=sim_$(echo "$f" | tr ':.=@' '____')
-    ff=; [ "$f" != healthy ] && ff="--fault $f"
+         IC25:removed IC1:nocontention R26:removed IC2.16:gnd IC2.34:vcc IC23:removed IC15:data0=0+IC16:data0=0; do
+    n=sim_$(echo "$f" | tr ':.=@+' '_____')
+    ff=; [ "$f" != healthy ] && ff="--fault $(echo "$f" | sed 's/+/ --fault /g')"
     cases+=("$n|--la-simulate --board issue2 $ff")
 done
 cases+=("sim_issue1|--la-simulate --board issue1" "sim_issue2_16k|--la-simulate --board issue2 --option ram=16k")
 
-i=0
+# a pool: the next case starts as soon as one ends (the simulated ones
+# take 40 s alone, the real captures' replays a moment)
 for c in "${cases[@]}"; do
     n=${c%%|*}; a=${c#*|}
+    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
     ( "$EXE" --la-diagnose "$OUT/$n" --la-zxtest $a > "$OUT/$n.out" 2>&1 ) &
-    i=$((i + 1)); [ $((i % JOBS)) = 0 ] && wait
 done
 wait
 for c in "${cases[@]}"; do n=${c%%|*}; summary "$n" "$OUT/$n.out"; done > "$OUT/all.txt"

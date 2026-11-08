@@ -1158,6 +1158,51 @@ Steps:
       [ ] More real faulty boards (and which part was replaced, for
           tests/la-faults.txt).
 - [ ] 6. ZX Diagnostics v0.37 stages from its source, as a cross-check.
+- [ ] 7. The review of 2026-11-08 (commits d0d2477..70257e2), in order:
+      [x] 1. (2026-11-08, v3) Test 4's "none": 55@8000 and AA@8001 both
+          wrong also when a 48K's upper RAM is dead or two chips are stuck
+          (an odd and an even bit); the screen said NONE on a green border.
+          Now the border is yellow for none, +2 +3 = the two bytes read
+          (FF FF on a 16K / a dead bank; IC15+IC16 data0=0 reads 54 A8 and
+          the verdict names both chips; IC23 removed: FF FF, the bank).
+      [x] 2. (2026-11-08, v3) Refresh: test 8. The march walks the rows
+          itself, so it never tested the refresh. After test 7 the upper
+          RAM gets 00/FF in turns of 128 bytes (every row both ways), read
+          back after the screen's 1.5 s hold (about 1.6 s untouched); RES
+          3FE0, MARK 3FA8. The window has an eighth box (Refresh). The
+          simulator doesn't model DRAM decay, so no simulated fault fails
+          it; a cool real chip may also hold its data that long without
+          refresh: a FAIL proves a fault, a pass doesn't prove the refresh.
+      [x] 5. (2026-11-08, v3) The screen's ALIVE line showed 0000: test 3
+          zeroed SAVE+0..7. It now writes VERSION at SAVE+2.
+      [ ] 3. Address-line check per bank (marker at base, writes at
+          base+2^k): a mask of aliasing lines naming the mux pin; maybe a
+          bad-byte count.
+      [ ] 4. EAR in (IN FE bit 6 after OUT 00/08/10/18; Issue 2 vs 3
+          differ; a plugged-in EAR changes it); HALT (low priority).
+      [~] 6. VERSION: the ROM's two strings now come from the EQU (v3);
+          the C side still reads rom[0x77]-'0' (one digit).
+      [ ] 7. Constants duplicated in C and asm (MARK, RES, FRAME_N,
+          CONT_N): a table at a fixed ROM address, read by lacap_zxtest.c
+          (replaces the symbols-file item in step 2).
+      [ ] 8. Hand-counted $+n jumps in RESULT/FAILBITS/INTBACK: sjasmplus
+          1.24 makes `.label` local to each macro instance; then drop
+          patchsum.py's guarding asserts.
+      [ ] 9. ROM sum is additive (misses byte order); CRC-16; low priority.
+      [ ] 10. Frame 2912 / contention 2209 confirmed on real Issue 2 and
+          3B only; run good Issues 1, 4, 6A. (v3's simulated counts are
+          0B5D/08A0, one turn less than v2's: where the first interrupt
+          lands moved with the code before it; NTOL is 8.)
+      [ ] 11. The picture (the matcher for the test ROM's screen: step 3).
+      [x] (2026-11-08) tests/la-zxtest.sh 8:17 -> 5:19: a simulated
+          diagnosis keeps one board running for its eight captures (it
+          powered on for each: 67 -> 40 s a case), and the cases run as a
+          pool, half the logical processors at once (were waves of 8).
+          The real captures' replays take 0.2 s: not worth dropping. Same
+          code path twice (could go): IC8/IC13 data0=0 as IC7.14:vcc (one
+          lower RAM bit), IC2.16:gnd as R26 removed (/INT held).
+      [ ] Reprogram the SteamCard Pro (ROMs/steamcard-test.bin, bank 3)
+          with v3 and capture the good Issue 2 and the IC22 board again.
 
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
