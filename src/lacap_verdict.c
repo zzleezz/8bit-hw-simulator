@@ -13,7 +13,7 @@ const char *ref_of(const char *label) {
 
 /* The parts that serve one bank of RAM as a whole (their description
  * says "lower RAM" or "upper RAM"), but its chips. */
-static void bank_parts(const char *bank, const char *chips, char *out, int len) {
+void bank_parts(const char *bank, const char *chips, char *out, int len) {
     int n = 0;
     out[0] = 0;
     for (int i = 0; vboard && i < vboard->sim.nparts && n < len; i++) {
@@ -25,11 +25,15 @@ static void bank_parts(const char *bank, const char *chips, char *out, int len) 
 
 /* The resistors between the CPU's data lines and the chips labelled
  * CHIPS* (the lower RAM's: the ULA's side of the bus). */
-static void data_resistors(const char *chips, char *out, int len) {
+void data_resistors(const char *chips, char *out, int len) { data_resistors_of(chips, 0xFF, out, len); }
+
+/* Those of the data bits in MASK only. */
+void data_resistors_of(const char *chips, unsigned mask, char *out, int len) {
     sim_t *s = &vboard->sim;
     int n = 0;
     out[0] = 0;
     for (int bit = 0; bit < 8; bit++) {
+        if (!(mask >> bit & 1)) continue;
         char nm[4];
         snprintf(nm, sizeof(nm), "D%d", bit);
         int dn = sim_find_net(s, nm);
@@ -67,7 +71,7 @@ static int z80_pin(int s) {
 
 /* The chips on the signal's line, the CPU apart (and those through a
  * resistor from it, not a pull-up): "IC26 pin 2, IC5 pin 9". How many. */
-static int line_chips(int sig, char *out, int len) {
+int line_chips(int sig, char *out, int len) {
     out[0] = 0;
     if (!vboard) return 0;
     int net[LA_NSIG];

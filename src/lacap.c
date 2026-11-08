@@ -302,7 +302,7 @@ int la_cli(const la_cli_t *o) {
     int count = o->count > 0 ? o->count : 20;
     la_capture_t c;
     if (o->devices) { list_devices(); return 0; }
-    if (o->diagnose) return diagnose(o);
+    if (o->diagnose) return o->zxtest ? zxtest_diagnose(o) : diagnose(o);
     if (o->timeline) return timeline(o);
     if (o->capture) {
         if (!capture_real(o, &c, err, sizeof(err))) { la_err(err); return 1; }

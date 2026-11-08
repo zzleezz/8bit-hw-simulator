@@ -124,6 +124,7 @@ typedef struct {
      * simulated board one by one and compared with the captures, stage by
      * stage (LA_JOBS threads, else half the processors). */
     int check;
+    bool zxtest;                /* --la-zxtest: the test ROM's results, not the boot */
 } la_cli_t;
 #define CHECK_DEFAULT 24
 /* The check alone, on DIAGNOSE's captures (O->screen, O->machine): 1 it

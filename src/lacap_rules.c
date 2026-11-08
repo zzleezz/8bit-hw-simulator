@@ -335,6 +335,8 @@ void where_text(const la_capture_t *c, char *out, int len) {
 /* A simulated board's capture: with FAULTS, triggered at TRIG (-1 the
  * reset, -2 ARM_MS after the reset, else the address from ARM_MS after
  * power on). */
+const char *la_sim_cart;
+
 bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int pre, int post, int trig, int arm_ms,
                        la_capture_t *c, char *err, int errlen) {
     board_t *b = la_new_board(m);
@@ -344,6 +346,10 @@ bool record_sim(const machine_t *m, const char *const *faults, int nfaults, int 
             board_destroy(b);
             return false;
         }
+    if (la_sim_cart && !board_load(b, la_sim_cart, false, err, errlen)) {
+        board_destroy(b);
+        return false;
+    }
     bool ok = trig == -1 ? la_record(b, pre, post, c, err, errlen)
                          : la_record_at(b, pre, post, trig, arm_ms, trig == -2 ? arm_ms + 1000 : arm_ms + 4000, c, err, errlen);
     board_destroy(b);

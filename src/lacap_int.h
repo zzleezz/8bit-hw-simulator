@@ -266,6 +266,16 @@ bool low_all(const la_capture_t *c, int sg);
 void slow_ev(ev_t *e, const la_capture_t *d, const la_capture_t *r);
 bool idle_dead(const ev_t *e);
 int idle_stage(const la_cli_t *o, const machine_t *m, const char *dir, ev_t *ie);
+/* The parts serving a RAM bank as a whole; the resistors to its chips'
+ * data lines; the chips on a signal's line (lacap_verdict.c). */
+void bank_parts(const char *bank, const char *chips, char *out, int len);
+void data_resistors(const char *chips, char *out, int len);
+void data_resistors_of(const char *chips, unsigned mask, char *out, int len);
+int line_chips(int sig, char *out, int len);
+/* A ROM image plugged into the boards record_sim makes (NULL: none). */
+extern const char *la_sim_cart;
+/* --la-diagnose --la-zxtest: the test ROM's results (lacap_zxtest.c). */
+int zxtest_diagnose(const la_cli_t *o);
 int diagnose(const la_cli_t *o);
 
 /* Allocation that can't come back empty: out of memory, it says so and

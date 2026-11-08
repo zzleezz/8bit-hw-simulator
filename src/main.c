@@ -56,7 +56,7 @@
  *   --browse            open the file browser
  *   --diagnose PICTURE  diagnose a screenshot (as if dropped on the window)
  *   --probe             open "Diagnose by probing"
- *   --la-window replay:FOLDER | simulate:FAULT|FOLDER
+ *   --la-window [zxtest-]replay:FOLDER | [zxtest-]simulate:FAULT|FOLDER
  *                       open "Diagnose with the logic analyser" and start it
  *   --browse-atlas[=N]  open "Browse the atlas" (its Nth picture picked)
  *   --ui-stats          print the interface's frame times every second
@@ -150,6 +150,12 @@
  *       board one by one, every stage compared with the captures: the
  *       fault that does what the board did (LA_JOBS threads at a time,
  *       else half the processors).
+ *   --la-diagnose DIR --la-zxtest [--board B] [--la-replay | --la-simulate --fault SPEC...] [zxtest.rom]
+ *       The Spectrum running our test ROM (zxtest/, from a cartridge) instead
+ *       of booting: no reset, each test's result captured off the bus (the
+ *       data and address lines, the ROM's sum, all of the RAM both ways, the
+ *       keyboard lines, the interrupts, contention) and put into parts.
+ *       The ROM is found in carts/ or zxtest/ (here or beside the program).
  *   --la-bootsel [--la-ports P,...]
  *       Restart the boards into the Pico's USB drive mode, to copy firmware
  *       (a .uf2) onto the RP2350 drive (la-firmware/README.md).
@@ -754,6 +760,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--la-replay")) args.la.replay = true;
         else if (!strcmp(argv[i], "--la-simulate")) args.la.simulate = true;
         else if (!strcmp(argv[i], "--la-all")) args.la.all = true;
+        else if (!strcmp(argv[i], "--la-zxtest")) args.la.zxtest = true;
         else if (!strcmp(argv[i], "--la-screen") && i + 1 < argc) args.la.screen = argv[++i];
         else if (!strcmp(argv[i], "--la-check")) {
             args.la.check = CHECK_DEFAULT;

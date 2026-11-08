@@ -33,6 +33,10 @@
 
 static const char *const stage_label[NSTAGES] = { "Idle", "Reset", "RAM test", "RAM done", "Copyright", "Main loop",
                                                   "Interrupt" };
+static const char *stage_name(int k);
+/* With the test ROM (--la-zxtest): its seven captures. */
+static const char *const zxtest_label[NSTAGES] = { "Lines", "ROM sum", "Lower RAM", "Upper RAM", "Keyboard", "Interrupts",
+                                                   "Contention" };
 
 enum { MODE_ANALYSER, MODE_REPLAY, MODE_SIMULATE };
 
@@ -46,6 +50,7 @@ static struct {
     char save[700], saved[900];     /* "Save the diagnosis": where to, and how it went */
     int run_mode;
     bool all;
+    bool zxtest;                    /* the Spectrum runs our test ROM (a cartridge), not its boot */
     bool start_pending;             /* --la-window: start on the next frame */
     char boards[400];               /* "Find boards": what was found */
     lp_port_t bp[8];                /* the boards found, the master first */
@@ -206,7 +211,7 @@ static void status_hook(int kind, int stage, int state) {
         L.sign = 1;
         if (++L.arms == 1 && L.expect_release) snprintf(L.doing, sizeof(L.doing), "LET GO OF RESET");
         else if (L.cur_stage == 0) snprintf(L.doing, sizeof(L.doing), "Waiting for the Spectrum (left running: don't touch it)");
-        else snprintf(L.doing, sizeof(L.doing), "Waiting for %s", stage_label[L.cur_stage]);
+        else snprintf(L.doing, sizeof(L.doing), "Waiting for %s", stage_name(L.cur_stage));
     } else if (kind == LA_EV_PROGRESS) {
         snprintf(L.doing, sizeof(L.doing), "Checking the faults against the captures: %d of %d simulated", stage, state);
     } else if (kind == LA_EV_VERDICT) {
@@ -390,6 +395,7 @@ static void *worker(void *arg) {
     if (L.mode != MODE_REPLAY) snprintf(folder, sizeof(folder), "%s", L.work);
     o.machine = L.m;
     o.all = L.all;
+    o.zxtest = L.zxtest;
     if (L.mode == MODE_ANALYSER) o.ports = ports[0] ? ports : NULL;
     else if (L.mode == MODE_REPLAY) o.replay = true;
     else {
@@ -402,7 +408,8 @@ static void *worker(void *arg) {
     char given[1100];
     snprintf(given, sizeof(given), "%s", L.screen);
     pthread_mutex_unlock(&L.mu);
-    if (L.mode != MODE_REPLAY) o.screen = screen_into(folder, given, screen, sizeof(screen));
+    if (L.zxtest) o.screen = NULL;     /* the atlas has the boot's screens, not the test ROM's */
+    else if (L.mode != MODE_REPLAY) o.screen = screen_into(folder, given, screen, sizeof(screen));
     else if (given[0]) o.screen = given;
     else {                      /* the folder's own, shown in the Screen row */
         static const char *const ext[] = { "png", "jpg", "jpeg", "bmp" };
@@ -437,6 +444,9 @@ static bool is_zx48(const machine_t *m) {
     return m == &machine_zx48 || m == &machine_zx48i2 || m == &machine_zx48i1 || m == &machine_zx48i4b ||
            m == &machine_zx48i6a;
 }
+
+/* A stage box's name: the boot's, or the test ROM's. */
+static const char *stage_name(int k) { return L.zxtest ? zxtest_label[k] : stage_label[k]; }
 
 /* Everything a run left: its text, verdict, outlines, stages. */
 static void clear_results(void) {
@@ -924,6 +934,9 @@ static void test_screen(const char *path) {
 
 void la_window_open_test(const char *spec) {
     la_window_open();
+    /* "zxtest-replay:..." and so on: the same with the test ROM */
+    L.zxtest = !strncmp(spec, "zxtest-", 7);
+    if (L.zxtest) spec += 7;
     if (!strncmp(spec, "replay:", 7)) {
         L.mode = MODE_REPLAY;
         const char *b = strchr(spec + 7, '|');
@@ -1131,7 +1144,7 @@ static void stage_strip(struct nk_context *ctx, const int *st, int cur, bool run
         nk_fill_rect(cv, r, 4, fill);
         if (st[k] == LA_ST_SKIP) nk_stroke_rect(cv, nk_rect(r.x + 1, r.y + 1, r.w - 2, r.h - 2), 4, 1.0f, nk_rgb(110, 110, 110));
         float fh = ctx->style.font->height;
-        text_centered(cv, ctx, nk_rect(r.x, r.y + 4, r.w, fh + 2), stage_label[k], fg);
+        text_centered(cv, ctx, nk_rect(r.x, r.y + 4, r.w, fh + 2), stage_name(k), fg);
         if (what[0]) text_centered(cv, ctx, nk_rect(r.x, r.y + r.h - fh - 6, r.w, fh + 2), what, fg);
         if (clicked) {
             pthread_mutex_lock(&L.mu);
@@ -1178,7 +1191,7 @@ static bool starts_new(const char *l, const char *e) {
     }
     static const char *const heads[] = { "OK", "FAULT", "Wrong too", "It never", "Not in", "Note", "Also on it",
                                          "CLK:", "/RESET:", "/INT:", "/HALT:", "The CPU:", "In the atlas",
-                                         "It agrees", "The nearest", "From the screen" };
+                                         "It agrees", "The nearest", "From the screen", "Test ", "Not seen" };
     for (size_t k = 0; k < sizeof(heads) / sizeof(heads[0]); k++)
         if (!strncmp(q, heads[k], strlen(heads[k]))) return true;
     return false;
@@ -1326,6 +1339,20 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tips[k]);
             if (nk_option_label(ctx, modes[k], L.mode == k)) L.mode = k;
         }
+        /* What the Spectrum runs: its own ROM's boot, or our test ROM */
+        nk_layout_row_begin(ctx, NK_STATIC, 22, 3);
+        nk_layout_row_push(ctx, 70);
+        nk_label(ctx, "It runs", NK_TEXT_LEFT);
+        nk_layout_row_push(ctx, 210);
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "Its own ROM: the boot is captured stage by stage (you hold the reset button for each)");
+        if (nk_option_label(ctx, "Its own ROM (the boot)", !L.zxtest)) L.zxtest = false;
+        nk_layout_row_push(ctx, 260);
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "Our test ROM (zxtest.rom) from a cartridge: all the RAM both ways, the data and address lines, "
+                            "the keyboard, the interrupts, contention. No reset: it loops, each test's result is captured");
+        if (nk_option_label(ctx, "The test ROM (a cartridge)", L.zxtest)) L.zxtest = true;
+        nk_layout_row_end(ctx);
         if (L.mode == MODE_REPLAY)
             field(ctx, "Folder", L.folder, sizeof(L.folder), 70, cw,
                   "A folder of captures a run took and saved (diagnosis-NAME)");
@@ -1361,13 +1388,15 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
         } else if (L.mode == MODE_SIMULATE)
             field(ctx, "Fault", L.fault, sizeof(L.fault), 70, cw,
                   "As --fault: IC26:removed, IC2.26:gnd, IC12:data0=1... (empty: the working board)");
-        screen_row(ctx, cw, machine);
-        nk_layout_row_dynamic(ctx, 24, 1);
-        nk_bool all = L.all;
-        if (nk_widget_is_hovered(ctx))
-            nk_tooltip(ctx, "After a stage that's wrong, capture the later ones too: more to go on (one that never comes "
-                            "ends it)");
-        if (nk_checkbox_label(ctx, "After a wrong stage, take the rest too", &all)) L.all = all;
+        if (!L.zxtest) {        /* the test ROM: every test taken, no screen to match */
+            screen_row(ctx, cw, machine);
+            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_bool all = L.all;
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "After a stage that's wrong, capture the later ones too: more to go on (one that never comes "
+                                "ends it)");
+            if (nk_checkbox_label(ctx, "After a wrong stage, take the rest too", &all)) L.all = all;
+        }
         nk_layout_row_dynamic(ctx, 8, 1);
         nk_spacing(ctx, 1);
         nk_layout_row_static(ctx, 34, 160, 2);
@@ -1436,7 +1465,7 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             char t[220];
             if (doing[0] && !stopping) snprintf(t, sizeof(t), "%s...", doing);
             else
-            snprintf(t, sizeof(t), "%s: %s", stage_label[cur],
+            snprintf(t, sizeof(t), "%s: %s", stage_name(cur),
                      stopping ? "stopping, at its next question or when this capture or simulation ends..."
                               : L.run_mode == MODE_ANALYSER ? "working..." : "simulating and comparing...");
             nk_layout_row_dynamic(ctx, 22, 1);
@@ -1477,11 +1506,14 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
             nk_label_colored(ctx, L.saved[0] ? L.saved : "Not saved: the next run starts afresh (Save keeps this one)",
                              NK_TEXT_LEFT, !strncmp(L.saved, "Saved", 5) ? COL_TRACE : COL_DIMTEXT);
         }
-        screen_row(ctx, cw, machine);
+        /* The test ROM's diagnosis: no screen (the atlas has the boot's) and no
+         * check (it simulates the boot's stages). */
+        if (!L.zxtest) screen_row(ctx, cw, machine);
         pthread_mutex_lock(&L.mu);
         bool had_screen = L.screen[0] || (L.text && strstr(L.text, "\nThe screen ("));
         pthread_mutex_unlock(&L.mu);
-        if (had_screen && L.rc != 1) {
+        if (L.zxtest) {
+        } else if (had_screen && L.rc != 1) {
             nk_layout_row_static(ctx, 30, 330, 1);
             if (nk_widget_is_hovered(ctx))
                 nk_tooltip(ctx, "Put each of the screen's faults (24 at most) on the simulated board and compare every "

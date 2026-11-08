@@ -20,6 +20,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   check.
 - --la-record plugs a ROM image named on the command line into the
   simulated board.
+- The test ROM's diagnosis: --la-diagnose DIR --la-zxtest, and in the
+  logic analyser window "It runs: the test ROM (a cartridge)". No reset:
+  seven captures in about 25 s, each test's result put into parts (the
+  RAM chip of each bad bit, the bank as a whole, /INT held low, the ULA's
+  contention first when it breaks the lower RAM too). tests/la-zxtest.sh
+  checks it on real captures and 16 simulated faults.
 
 ## V1.2 (2026-11-08)
 

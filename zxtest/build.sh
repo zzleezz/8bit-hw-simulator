@@ -16,3 +16,5 @@ if [ -f "$DUMP" ]; then
 else
     py -I patchsum.py zxtest.rom
 fi
+# the patched ROM where --la-diagnose --la-zxtest finds it
+cp zxtest.rom ../carts/zxtest.rom

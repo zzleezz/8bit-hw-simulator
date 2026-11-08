@@ -1130,13 +1130,29 @@ Steps:
           walking addresses seen, 5310 ROM-area reads right, 0 wrong.
       [ ] The signpost/mailbox addresses into a file the C code reads
           (zxtest.sym has them now).
-- [ ] 3. Simulator: a ROM mode like MODE_ZXDIAG running our image; the
-      atlas/screen matcher for it later.
-- [ ] 4. --la-diagnose test-ROM mode: arm on each signpost in turn,
-      compare with the simulated board, read the mailbox results, name
-      parts (bit -> chip per issue).
-- [ ] 5. Regression: simulated faults (IC22 D7 first: must now fail) in
-      tests/la-diagnose.sh; then the user's real faulty boards.
+- [x] 3. (2026-11-08) Simulated with the ROM in: record_sim plugs
+      la_sim_cart (--la-record a ROM named on the command line).
+      [ ] Later: the atlas and screen matcher for the test ROM's screen
+          (a MODE like MODE_ZXDIAG); the window hides the Screen row for now.
+- [x] 4. (2026-11-08) --la-diagnose DIR --la-zxtest (src/lacap_zxtest.c),
+      and in the window "It runs: the test ROM (a cartridge)" (the boxes
+      Lines, ROM sum, Lower RAM, Upper RAM, Keyboard, Interrupts,
+      Contention; IC22 etc. outlined). Seven captures, no reset, ~25 s on
+      the real Issue 2. No working board simulated to compare: the ROM
+      judges itself; tests 0/1 read off the bus (every alive write's data,
+      the 32 walking addresses, every cartridge read). The verdict: bad
+      bits -> chip (ref_of LRAMn/URAMn), 3+ bits -> the bank as a whole
+      (bank_parts), the one resistor of a lower RAM bit; /INT held low
+      (count < 100) rather than "frame wrong"; no contention + lower RAM
+      as a whole -> the ULA first; 16K (no upper RAM fitted) is no fault.
+      Logic Analyser/zxdiagnose.bat. Folders zxtest-NAME (not diagnosis-:
+      tests/la-diagnose.sh would replay them as boots).
+- [x] 5. tests/la-zxtest.sh + la-zxtest-expected.txt: the real zxtest-*
+      folders and 16 simulated cases (IC22 weak/removed, IC7/8/13 bits,
+      IC6/IC15 addr, IC3/IC25 banks, no contention, R26, /INT held, a dead
+      address line, Issue 1, Issue 2 16K).
+      [ ] The user's real faulty boards (RAM first: one that passed the
+          boot stages, like the IC22 board).
 - [ ] 6. ZX Diagnostics v0.37 stages from its source, as a cross-check.
 
 ## Left over from earlier work
