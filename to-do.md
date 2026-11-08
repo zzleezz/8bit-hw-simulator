@@ -1054,6 +1054,16 @@ Later, software:
       power-path faults (F1, L4, L5 said "CPU running"). Rebuilt with item 1.
 
 ## Dropped
+- Jailbars measured in the border and taken off the picture (tried
+  2026-11-08, discarded). On real Spectrum screenshots the lines show on
+  dark areas, not on the border's color: the dead Issue 1's cyan border
+  read flat while its black bars had them, so the border can't measure
+  them. Taken off at the border's strength they drew stripes on a black
+  screen; limited to the border's color they changed nothing (200-screen
+  --match-test with simulated jailbars: the same scores; jailbars of that
+  size didn't hurt the matcher anyway). Only u12_1.jpg (C64, lines over
+  the border too) triggered it, its real fault unknown. The bar matcher's
+  own jailbar handling (6949e54) stays.
 - Intermittent faults (bad sockets, faults that appear once the board is warm):
   too vague to model well.
 - A "legs to check" list or "check every leg of chip X" step for open legs
