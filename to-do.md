@@ -973,9 +973,14 @@ The screen in the diagnosis (2026-11-07):
 - [x] Pick a type: the atlas's screens of the board by kind (9 kinds),
       their pictures to pick from; the picked one is matched like a
       screenshot.
-- [ ] The check's candidates come from the screen only. With no screen,
-      faults could come from the bus's verdict (a named RAM chip: its
-      data stuck 0/1, removed; a stuck line: the chips on it).
+- [x] (Done 2026-11-08.) The check's candidates with no screen: the
+      atlas's faults of the parts the verdict names (the first item's
+      parts first; each removed, its data bits, then the rest; 24 at
+      most). Simulated IC8 data0=0: found exactly; IC12 and IC17 data
+      faults: the chip (removed or the fault itself) first; IC6 addr2:
+      IC6 first but as addr0 (addr2 not among the 24 tried). i3-test5:
+      nothing better than a working board (its fault isn't simulated).
+      A stuck line's chips aren't taken yet unless the verdict names them.
 - [ ] The ULA inside (the atlas's "ULA (inside)") can't be checked: it's
       named, not simulated.
 Later, software:
@@ -993,10 +998,11 @@ Later, software:
 - [ ] The idle capture's stuck lines are left out of the verdict (a faulty
       board left running is in other code: they misled on simulated RAM
       faults); a longer or repeated idle capture could make them usable.
-- [ ] A line that changes a few times where a working one's changes
-      thousands now counts as stuck: the no-clock boards (mc-4,
-      majorchip-1) count 27 and 23 dead lines (13 and 9 before). Same
-      verdict; check the count's wording.
+- [x] (Done 2026-11-08: "N lines a working board changes all the time
+      are still (they never change, or only a few times)".) A line that
+      changes a few times where a working one's changes thousands now
+      counts as stuck: the no-clock boards (mc-4, majorchip-1) count 27
+      and 23 dead lines (13 and 9 before). Same verdict; the wording.
 
 - [x] (Done 2026-11-08: every script with a backslash is written to a file
       and run with py -I; none sent inline since, no breakage.)

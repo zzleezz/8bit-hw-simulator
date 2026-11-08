@@ -285,7 +285,8 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
         goto done;
     }
     if (nstuck >= 8 && e->stuck[LA_CLK]) {
-        printf("     So the CPU isn't running (%d of the lines a running Z80 changes never change): that follows from the clock.\n",
+        printf("     So the CPU isn't running (%d lines a working board changes all the time are still: they never change, or only\n"
+               "     a few times): that follows from the clock.\n",
                nstuck - 1);
         goto done;
     }
@@ -301,18 +302,20 @@ int verdict(const ev_t *e, const machine_t *m, const char *stage, bool missing, 
                      !e->held[LA_WAIT] && !e->held[LA_BUSRQ];
     if (nstuck >= 8 && inputs_ok) {
         bool together = e->stuck[LA_RD] == 1 && e->stuck[LA_WR] == 1;
-        printf("  %d. The CPU isn't running: %d of the lines a running Z80 changes all the time never change. What it\n"
-               "     needs is right, left running: its clock, /RESET high, /WAIT and /BUSRQ high. So it's the CPU (%s)\n"
-               "     itself, or its power: measure 5 V on pin 11 and 0 V on pin 29 at the chip's legs.\n", ++n, nstuck, cpu);
+        printf("  %d. The CPU isn't running: %d lines a working board changes all the time are still (they never\n"
+               "     change, or only a few times). What it needs is right, left running: its clock, /RESET high, /WAIT\n"
+               "     and /BUSRQ high. So it's the CPU (%s) itself, or its power: measure 5 V on pin 11 and 0 V on\n"
+               "     pin 29 at the chip's legs.\n", ++n, nstuck, cpu);
         if (together)
             printf("     /RD and /WR are both low all through, which a working Z80 never does: it drives nothing right,\n"
                    "     as a dead or unpowered one.\n");
         goto done;
     }
     if (nstuck >= 8) {
-        printf("  %d. The CPU isn't running: %d of the lines a running Z80 changes all the time never change. Check what it\n"
-               "     needs: its clock (pin 6), /RESET (pin 26) high, /WAIT (24) and /BUSRQ (25) high, 5 V on pin 11, 0 V on\n"
-               "     pin 29; then the CPU (%s) itself.\n", ++n, nstuck, cpu);
+        printf("  %d. The CPU isn't running: %d lines a working board changes all the time are still (they never\n"
+               "     change, or only a few times). Check what it needs: its clock (pin 6), /RESET (pin 26) high,\n"
+               "     /WAIT (24) and /BUSRQ (25) high, 5 V on pin 11, 0 V on pin 29; then the CPU (%s) itself.\n",
+               ++n, nstuck, cpu);
         goto done;
     }
     /* Two of the CPU's own outputs stuck, the rest of the bus going: one

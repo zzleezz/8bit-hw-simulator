@@ -194,8 +194,7 @@ static void status_hook(int kind, int stage, int state) {
         else if (L.cur_stage == 0) snprintf(L.doing, sizeof(L.doing), "Waiting for the Spectrum (left running: don't touch it)");
         else snprintf(L.doing, sizeof(L.doing), "Waiting for %s", stage_label[L.cur_stage]);
     } else if (kind == LA_EV_PROGRESS) {
-        snprintf(L.doing, sizeof(L.doing), "Checking the screen's faults against the captures: %d of %d simulated", stage,
-                 state);
+        snprintf(L.doing, sizeof(L.doing), "Checking the faults against the captures: %d of %d simulated", stage, state);
     } else if (kind == LA_EV_VERDICT) {
         L.has_verdict = true;
         L.verdict_off = L.len;
@@ -331,7 +330,8 @@ static void *screen_worker(void *arg) {
     return NULL;
 }
 
-/* After a run: the screen's faults checked against its captures. */
+/* After a run: the screen's faults (with no screen, those of the parts the
+ * verdict names) checked against its captures. */
 static void *check_worker(void *arg) {
     (void)arg;
     static char screen[1300], folder[700];
@@ -340,7 +340,7 @@ static void *check_worker(void *arg) {
     if (t) { *t = 0; L.len = (size_t)(t - L.text); }
     snprintf(screen, sizeof(screen), "%s", L.screen);
     snprintf(folder, sizeof(folder), "%s", L.run_mode == MODE_REPLAY ? L.folder : L.work);
-    snprintf(L.doing, sizeof(L.doing), "Checking the screen's faults against the captures");
+    snprintf(L.doing, sizeof(L.doing), "Checking the faults against the captures");
     int was = L.rc;
     pthread_mutex_unlock(&L.mu);
     la_cli_t o;
@@ -927,8 +927,8 @@ void la_window_open_test(const char *spec) {
         L.stage_st[1] = LA_ST_OK;
         L.stage_st[2] = LA_ST_RUN;
         L.cur_stage = 2;
-        text_put("First, idle: what it does left running\n  OK: the same as a working one\n\n1 of 6, reset: ...\n"
-                 "  OK: the same as a working one\n\n2 of 6, ramcheck: the RAM test reading back\n");
+        text_put("First, idle: what it does left running\n  OK: the same as a working one\n\n1 of 6, Reset: ...\n"
+                 "  OK: the same as a working one\n\n2 of 6, RAM test: the RAM test reading back\n");
         atomic_store(&L.running, true);
         if (!strcmp(spec + 5, "ask")) {
             L.asking = true;
@@ -1469,6 +1469,15 @@ void la_window(struct nk_context *ctx, struct nk_rect area, const machine_t *mac
                                 "stage with the analyser's captures: the fault that does what this board did. A minute or "
                                 "two, on half the processors");
             if (nk_button_label(ctx, "Check the screen's faults against the captures")) after_run(check_worker);
+        } else if (L.rc == 2) {
+            /* No screen, a fault found: the faults of the parts it names. */
+            nk_layout_row_static(ctx, 30, 420, 1);
+            if (nk_widget_is_hovered(ctx))
+                nk_tooltip(ctx, "Put the faults of the parts named above (24 at most: each removed, its data bits, "
+                                "then the rest) on the simulated board and compare every stage with the analyser's "
+                                "captures: the fault that does what this board did. A minute or two, on half the "
+                                "processors");
+            if (nk_button_label(ctx, "Check the named parts' faults against the captures")) after_run(check_worker);
         }
         nk_layout_row_static(ctx, 34, 160, 3);
         if (nk_widget_is_hovered(ctx))

@@ -144,7 +144,8 @@
  *       against the atlas (--atlas): whether it agrees with the bus, and
  *       what it points at when the bus finds nothing (a replay uses
  *       DIR/screen.png, .jpg or .bmp by itself). --la-check [N]: then
- *       the screen's faults (N, 24 unless given) put on the simulated
+ *       the screen's faults (with no screen, after a fault: those of the
+ *       parts the verdict names) (N, 24 unless given) put on the simulated
  *       board one by one, every stage compared with the captures: the
  *       fault that does what the board did (LA_JOBS threads at a time,
  *       else half the processors).

@@ -503,7 +503,9 @@ From the command line:
   `diagnosis.txt` (every comparison) go in DIR, replacing the ones from an
   earlier run there. `--la-screen PICTURE` adds the screen;
   `--la-check [N]` then checks its faults (N, 24 unless given) against
-  the captures. `--option ram=16k` for a 16K board (the window takes the
+  the captures; with no screen, after a fault, it checks the faults of
+  the parts the verdict names (each removed, its data bits, then the
+  rest). `--option ram=16k` for a 16K board (the window takes the
   board's options from the Controls): it is compared with a working 16K.
 - `--la-devices` lists the boards; `--la-capture FILE --la-trigger STAGE`
   takes one capture; `--la-info`, `--la-cycles`, `--la-compare FILE`

@@ -376,6 +376,100 @@ static int screen_candidates(const la_cli_t *o, const machine_t *m, cand_t *c, i
     return n;
 }
 
+/* With no screen: the faults of the parts the bus's verdict names (its
+ * "What to look at", the first item's parts first), from the atlas: each
+ * part's removal first, then its data bits, then the rest, a part at a
+ * time, at most MAX. TEXT: the diagnosis (diagnosis.txt). */
+static int bus_candidates(const la_cli_t *o, const machine_t *m, const char *text, cand_t *c, int max) {
+    char ref[32][16];
+    int level[32];
+    /* Only the bus's own verdict: not a screen's or an earlier check's. */
+    size_t tl = strlen(text);
+    const char *cut = strstr(text, "\nThe screen (");
+    const char *cut2 = strstr(text, "\nChecked against the captures:");
+    if (cut2 && (!cut || cut2 < cut)) cut = cut2;
+    char *own = xmalloc(tl + 1);
+    size_t ol = cut ? (size_t)(cut - text) : tl;
+    memcpy(own, text, ol);
+    own[ol] = 0;
+    int np = la_text_parts(m, own, ref, level, 32);
+    free(own);
+    if (!np) return 0;
+    int order[32], no = 0;
+    for (int lev = 2; lev >= 1; lev--)
+        for (int i = 0; i < np; i++) if (level[i] == lev) order[no++] = i;
+    atlas_t a;
+    memset(&a, 0, sizeof(a));
+    bool exists = false;
+    int am = atlas_machine_of(m);
+    if (am < 0 || !atlas_load(&a, o->atlas ? o->atlas : "fault_atlas.bin", &exists) || !a.nfaults) {
+        atlas_free(&a);
+        return 0;
+    }
+    /* Each part's faults, best first: the board's own atlas machine, else
+     * one with the same parts. */
+    int *fl[32], nf[32];
+    for (int k = 0; k < no; k++) {
+        const char *r = ref[order[k]];
+        size_t rl = strlen(r);
+        fl[k] = xmalloc((size_t)a.nfaults * sizeof(int));
+        nf[k] = 0;
+        for (int pass = 0; pass < 2 && !nf[k]; pass++)
+            for (int rank = 0; rank < 3; rank++)
+                for (int f = 0; f < a.nfaults; f++) {
+                    const atlas_fault_t *x = &a.faults[f];
+                    if (x->h.mode != 0 || !x->spec) continue;
+                    if (pass == 0 ? x->h.machine != am : !atlas_same_refs(x->h.machine, am) || x->h.machine == am) continue;
+                    if (strncmp(x->spec, r, rl) || !strchr(".:", x->spec[rl]) || strchr(x->spec, ' ')) continue;
+                    int fr = strstr(x->spec, ":removed") ? 0 : strstr(x->spec, ":data") ? 1 : 2;
+                    if (fr != rank) continue;
+                    int dup = 0;
+                    for (int i = 0; i < nf[k] && !dup; i++) dup = !strcmp(a.faults[fl[k][i]].spec, x->spec);
+                    if (!dup) fl[k][nf[k]++] = f;
+                }
+    }
+    int n = 0;
+    for (int depth = 0; n < max; depth++) {
+        bool any = false;
+        for (int k = 0; k < no && n < max; k++) {
+            if (depth >= nf[k]) continue;
+            any = true;
+            const atlas_fault_t *x = &a.faults[fl[k][depth]];
+            int dup = 0;
+            for (int i = 0; i < n && !dup; i++) dup = !strcmp(c[i].spec, x->spec);
+            if (dup) continue;
+            memset(&c[n], 0, sizeof(c[n]));
+            snprintf(c[n].spec, sizeof(c[n].spec), "%s", x->spec);
+            const char *dd = x->desc ? x->desc : "";
+            size_t l = strcspn(dd, "\n");
+            snprintf(c[n].desc, sizeof(c[n].desc), "%.*s", (int)(l < 300 ? l : 300), dd);
+            n++;
+        }
+        if (!any) break;
+    }
+    for (int k = 0; k < no; k++) free(fl[k]);
+    atlas_free(&a);
+    return n;
+}
+
+/* The folder's diagnosis.txt, whole (NULL if none). */
+static char *folder_text(const char *dir) {
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/diagnosis.txt", dir);
+    if (la_logf) fflush(la_logf);
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len <= 0) { fclose(f); return NULL; }
+    char *t = xmalloc((size_t)len + 1);
+    size_t got = fread(t, 1, (size_t)len, f);
+    fclose(f);
+    t[got] = 0;
+    return t;
+}
+
 static const char *folder_screen(const char *dir, char *out, int len);
 int la_check(const la_cli_t *o) {
     const machine_t *m = o->machine ? o->machine : &machine_zx48;
@@ -384,15 +478,29 @@ int la_check(const la_cli_t *o) {
     la_cli_t q = *o;
     if (!q.screen && dir) q.screen = folder_screen(dir, sp, sizeof(sp));
     o = &q;
-    if (!o->screen || !dir) return -1;
+    if (!dir) return -1;
     static cand_t c[CHECK_MAX + 1];
     int max = o->check > 0 && o->check < CHECK_MAX ? o->check : CHECK_MAX;
     /* c[0]: a working board, what the others are measured against. */
     memset(&c[0], 0, sizeof(c[0]));
-    int nc = screen_candidates(o, m, c + 1, max);
+    /* The screen's faults; with no screen, those of the parts the bus's
+     * verdict names. */
+    bool from_bus = !o->screen;
+    int nc = 0;
+    if (!from_bus) nc = screen_candidates(o, m, c + 1, max);
+    else {
+        char *t = folder_text(dir);
+        if (t) nc = bus_candidates(o, m, t, c + 1, max);
+        free(t);
+    }
+    const char *whose = from_bus ? "the verdict's parts" : "the screen";
     if (!nc) {
-        printf("\nChecked against the captures: the screen has no faults to check (a working board's picture, or\n"
-               "none read).\n");
+        if (from_bus)
+            printf("\nChecked against the captures: the verdict names no parts with faults to check (or there's no\n"
+                   "diagnosis.txt, or no atlas).\n");
+        else
+            printf("\nChecked against the captures: the screen has no faults to check (a working board's picture, or\n"
+                   "none read).\n");
         return 0;
     }
     nc++;
@@ -412,8 +520,8 @@ int la_check(const la_cli_t *o) {
     if (!nst) { printf("\nChecked against the captures: no captures in %s to check with.\n", dir); return 0; }
     int nt = check_threads();
     if (nt > nc) nt = nc;
-    printf("\nChecked against the captures: %d fault%s of the screen's, each put on the simulated board and\n"
-           "its %d stage%s compared with the analyser's (%d at a time).\n", nc - 1, nc == 2 ? "" : "s", nst,
+    printf("\nChecked against the captures: %d fault%s of %s, each put on the simulated board and\n"
+           "its %d stage%s compared with the analyser's (%d at a time).\n", nc - 1, nc == 2 ? "" : "s", whose, nst,
            nst == 1 ? "" : "s", nt);
     check_t k = { .m = m, .c = c, .nc = nc, .d = d, .path = pp, .nst = nst, .total = nc };
     pthread_mutex_init(&k.mu, NULL);
@@ -440,8 +548,8 @@ int la_check(const la_cli_t *o) {
     for (int i = 1; i < nc; i++)
         better += !c[i].bad && (c[i].same > w.same || (c[i].same == w.same && c[i].cycles > w.cycles));
     if (!better) {
-        printf("  None of the screen's faults does more of what the board did than a working board: they don't\n"
-               "  explain the captures.\n");
+        printf("  None of %s faults does more of what the board did than a working board: they don't\n"
+               "  explain the captures.\n", from_bus ? "the verdict's parts'" : "the screen's");
         return 0;
     }
     printf("From the check, what to look at, most likely first:\n");
@@ -480,7 +588,8 @@ int diagnose(const la_cli_t *o) {
     vtext_on = q.screen != NULL;
     int rc = diagnose_run(&q);
     vtext_on = false;
-    if (q.check && q.screen && la_check(&q) > 0 && rc == 0) rc = 2;
+    /* With no screen, only after a fault (a working board's verdict names no parts). */
+    if (q.check && (q.screen || rc == 2) && la_check(&q) > 0 && rc == 0) rc = 2;
     if (own && la_logf) { fclose(la_logf); la_logf = NULL; }
     return rc;
 }

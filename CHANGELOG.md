@@ -8,6 +8,16 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- The check against the captures works without a screenshot: after a
+  fault, **Check the named parts' faults against the captures** (or
+  `--la-check` with no `--la-screen`) puts the atlas's faults of the
+  parts the verdict names on the simulated board (each part removed
+  first, then its data bits, then the rest) and compares every stage.
+  On simulated RAM faults it finds the right chip (IC8 data 0: exactly,
+  6 of 6 stages).
+- The "CPU isn't running" count says the lines are still (never
+  changing, or only a few times), not that they never change.
+
 - The build has no warnings left. Typing a path too long for the file
   browser says so, instead of opening a cut-off path. The logic
   analyser's allocations are checked: out of memory, it says so and stops.
