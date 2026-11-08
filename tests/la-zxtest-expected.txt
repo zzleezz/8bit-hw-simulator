@@ -11,7 +11,7 @@ sim_IC6_addr2  OOOFOOOO | 1. IC6, the lower RAM's bit D0: it didn't keep what wa
 sim_IC15_addr3  OOOOFOOO | 1. IC15, the upper RAM's bit D0: it didn't keep what was written (the first wrong at 8008).
 sim_IC3_4_gnd  OOOFOOOO | 1. The lower RAM as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 4020). Not one chip: what all it
 sim_IC25_removed  OOOOFOOO | 1. The upper RAM as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 8008). Not one chip: what all it
-sim_IC1_nocontention  OOOFOOOF | 1. Contention is wrong: 2252 loop turns a frame with reads of 4000, not 2209 (with no contention at | 2. The lower RAM as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 4000). Not one chip: what all it
+sim_IC1_nocontention  OOOFOOOF | 1. Contention is wrong: 2251 loop turns a frame with reads of 4000, not 2209 (with no contention at | 2. The lower RAM as a whole: bits D0 D1 D2 D3 D4 D5 D6 D7 wrong (the first at 4000). Not one chip: what all it
 sim_R26_removed  OOOOOOFF | 1. /INT is held low: an interrupt came at once each time it was let in (1 loop turn between
 sim_IC2_16_gnd  OOOOOOFF | 1. /INT is held low: an interrupt came at once each time it was let in (1 loop turn between
 sim_IC2_34_vcc  none | No test of the test ROM was seen. Is the cartridge in, set to the test ROM, and the Spectrum on?

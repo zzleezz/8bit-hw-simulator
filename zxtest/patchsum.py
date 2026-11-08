@@ -13,6 +13,9 @@ assert len(d) == 16384, len(d)
 assert d.count(bytes([0xD9, 0xCB, 0x40, 0xD9, 0x28, 0x07, 0x22])) == 8, "RESULT"
 assert d.count(bytes([0xFD, 0xB5, 0x20, 0x06, 0x7C, 0xFD, 0x67, 0x7D, 0xFD, 0x6F])) == 3, "FAILBITS"
 assert all(b == 0xFF for b in d[0x3F80:]), "something at 3F80-3FFF"
+# INTBACK's hand-counted jumps, at 0038 and 3A3A: jr z,$+9 / jr z,$+5 land on JP (IX)
+for at in (0x38, 0x3A3A):
+    assert d[at + 6] == 0x28 and d[at + 7] == 7 and d[at + 10] == 0x28 and d[at + 11] == 3 and d[at + 15:at + 17] == bytes([0xDD, 0xE9]), "INTBACK at %04X" % at
 d[CSUM] = d[CSUM + 1] = 0
 s = sum(d[:0x3F80]) & 0xFFFF      # test 2 sums 0000-3F7F
 d[CSUM], d[CSUM + 1] = s & 0xFF, s >> 8

@@ -107,6 +107,12 @@ static void zt_bus(const la_cycle_t *cy, int n, const uint8_t *rom, zt_bus_t *b)
     b->rom_first = -1;
     int i0 = zt_first(cy, n);
     for (int i = i0; i < n; i++) {
+        /* test 1's reads are of the address lines, not the ROM's bytes:
+         * LD A,(nn) at 0300-03FF reads its operands from there */
+        bool walk = cy[i].kind == LA_READ && !(cy[i].addr >= 0x0300 && cy[i].addr < 0x0400) && i >= 2 &&
+                    cy[i - 1].kind == LA_READ && cy[i - 1].addr >= 0x0300 && cy[i - 1].addr < 0x0400 &&
+                    cy[i - 2].kind == LA_READ && cy[i - 2].addr >= 0x0300 && cy[i - 2].addr < 0x0400;
+        if (walk) continue;
         if ((cy[i].kind == LA_FETCH || cy[i].kind == LA_READ) && cy[i].addr < 0x3F80) {
             if (rom[cy[i].addr] == cy[i].data) b->rom_ok++;
             else {
@@ -380,6 +386,14 @@ int zxtest_diagnose(const la_cli_t *o) {
                "If it is: the CPU can't run it. Diagnose the boot (without the cartridge) first.%s%s\n",
                ncap ? " (the captures came, but no result was written)" : "", where[0] ? "\nWhere the CPU was: " : "", where);
     } else {
+        /* Captures of another version of the test ROM than the image here:
+         * its bytes can't be compared (its results still say what they say). */
+        int img_ver = rom[0x77] - '0', cap_ver = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
+        if (have_bus && cap_ver != img_ver) {
+            printf("(These captures are of version %d of the test ROM, %s is version %d: the cartridge's reads aren't\n"
+                   "compared with it. Program the cartridge with the newer one.)\n\n", cap_ver, rompath, img_ver);
+            bus.rom_bad = 0;
+        }
         /* Is there anything to say? */
         bool any = (have_bus && (bus.rom_bad || bus.alive_wrong || bus.a_wrong));
         for (int t = 0; t < ZT_N; t++)

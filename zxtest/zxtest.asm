@@ -23,7 +23,8 @@
 ; interrupts): in the lower RAM if it passed, else in the upper; skipped if
 ; neither did. The screen (results as text) needs the lower RAM.
 ;
-;   0 alive     20 writes: 00 FF 55 AA, walking 1, walking 0 (3F80-3F93)
+;   0 alive     20 writes: 00 FF 55 AA, walking 1, walking 0 (3F80-3F93);
+;               +2 +3 = the ROM's VERSION
 ;   1 address   reads with A0-A15 walking 1 then walking 0 (for the analyser)
 ;   2 ROM sum   16-bit sum of 0000-3F7F (bits 00, +2 +3 = the sum)
 ;   3 lower RAM 4000-7FFF: data walk at 4000, then a march
@@ -45,6 +46,7 @@
 
         OUTPUT  "zxtest.rom"
 
+VERSION EQU     2               ; test 0's result +3, and "ZXTEST 2" at 0070
 MARK    EQU     3FA0h           ; test n's marker
 RES     EQU     3FC0h           ; test n's four result bytes
 ALIVE   EQU     3F80h           ; test 0's writes
@@ -65,6 +67,23 @@ NTOL    EQU     8
 ; C' test 2's status; HL' test 2's sum; D' the loop count.
 
 ; ---- macros ---------------------------------------------------------------
+; An interrupt's end (IM 1 at 0038, IM 2 at 3A3A): drop its return address
+; and go where IX says - but only if IX is in test 6 or 7, which wait for
+; it. Anything else got here by mistake: an FF (RST 38) read at power on
+; before the cartridge drove the bus, with IX still random (a real Issue
+; 3B hung for ever in 0038 -> IX=0020, an FF -> 0038). Then start again.
+        MACRO   INTBACK
+        inc     sp
+        inc     sp
+        ld      a, ixh
+        cp      t6 >> 8
+        jr      z, $ + 9            ; to the JP (IX)
+        cp      t7 >> 8
+        jr      z, $ + 5
+        jp      reset
+        jp      (ix)
+        ENDM
+
 ; Call a subroutine that returns with JP (IX) (no stack).
         MACRO   CALLX addr
         ld      ix, $ + 7
@@ -141,15 +160,13 @@ NTOL    EQU     8
 
         ds      38h - $, 0FFh
 int_im1:                        ; test 6/7 only: back to where IX says
-        inc     sp
-        inc     sp
-        jp      (ix)
+        INTBACK
 
         ds      66h - $, 0FFh
         jp      reset           ; NMI: start again
 
         ds      70h - $, 0FFh
-        db      "ZXTEST 1 - logic analyser test ROM", 0
+        db      "ZXTEST 2 - logic analyser test ROM", 0
 
         ds      100h - $, 0FFh
 reset:
@@ -189,7 +206,7 @@ t0:
 .n      = .n + 1
         EDUP
         ld      de, 0
-        ld      hl, 0
+        ld      hl, VERSION         ; which ROM this is (version 1 wrote 0000)
         RESULT  0
         jp      t1
 
@@ -876,7 +893,7 @@ putc:   push    hl
         pop     hl
         ret
 
-title:  db      "ZX LA TEST 1         LOOP", 0
+title:  db      "ZX LA TEST 2         LOOP", 0
 names:  db      "ALIVE    ", 0
         db      "ADDRESS  ", 0
         db      "ROM SUM  ", 0
@@ -897,9 +914,7 @@ font:
 ; ---- the IM 2 handler and table ------------------------------------------
         ds      (IM2V << 8 | IM2V) - $, 0FFh
 int_im2:
-        inc     sp
-        inc     sp
-        jp      (ix)
+        INTBACK
         ds      IM2TAB - $, 0FFh
         ds      257, IM2V
 
