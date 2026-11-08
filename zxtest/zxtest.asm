@@ -58,7 +58,10 @@
 
         OUTPUT  "zxtest.rom"
 
-VERSION EQU     3               ; test 0's result +3, "ZXTEST n" at 0070, the title
+; A new VERSION: keep the old zxtest.rom as carts/ and zxtest/zxtest-vN.rom
+; (N the old version): captures of a cartridge not reprogrammed yet are
+; compared with it.
+VERSION EQU     4               ; test 0's result +3, "ZXTEST n" at 0070, the title
 MARK    EQU     3FA0h           ; test n's marker
 RES     EQU     3FC0h           ; test n's four result bytes
 ALIVE   EQU     3F80h           ; test 0's writes
@@ -72,8 +75,10 @@ WAITN   EQU     6000            ; a wait loop's count: about 2 frames
 ; The counts of a working 48K (from the simulator; the wait loop is 24 T
 ; a turn, so a 69888 T frame is 2912 turns): +-8 allowed.
 FRAME_N EQU     2912
-CONT_N  EQU     2209            ; measured on the simulated Issue 2 (no contention: 2254)
+CONT_N  EQU     2209            ; measured on the simulated Issue 2
+NOCONT_N EQU    2254            ; the same loop with no contention (not used here: for the PC)
 NTOL    EQU     8
+NTESTS  EQU     9
 
 ; shadow registers: B' bit 0 lower RAM OK, bit 1 upper RAM OK;
 ; C' test 2's status; HL' test 2's sum; D' the loop count.
@@ -188,6 +193,13 @@ int_im1:                        ; test 6/7 only: back to where IX says
 
         ds      70h - $, 0FFh
         db      "ZXTEST ", '0' + VERSION, " - logic analyser test ROM", 0
+
+; The constants the PC side (lacap_zxtest.c) needs, read from this image
+; (version 4 on): "ZTAB", then bytes VERSION, NTESTS, then words, low byte
+; first. Nothing reads it here.
+        ds      0A0h - $, 0FFh
+        db      "ZTAB", VERSION, NTESTS
+        dw      MARK, RES, ALIVE, CSUM, t1, FRAME_N, CONT_N, NOCONT_N, NTOL
 
         ds      100h - $, 0FFh
 reset:

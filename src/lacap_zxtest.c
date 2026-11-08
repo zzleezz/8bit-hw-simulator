@@ -15,13 +15,33 @@
 #include "lacap_int.h"
 #include "filedialog.h"
 
-#define ZT_MARK 0x3FA0          /* test n's start: a write of n to MARK+n */
-#define ZT_RES 0x3FC0           /* test n's result: four writes at RES+4n */
-#define ZT_ALIVE 0x3F80         /* test 0's 20 writes */
-#define ZT_N 9
-#define ZT_FRAME 2912           /* zxtest.asm's FRAME_N, CONT_N */
-#define ZT_CONT 2209
-#define ZT_NOCONT 2254          /* the contended loop with no contention */
+#define ZT_N 9                  /* the most tests (the arrays) */
+
+/* The ROM's constants, from its table at 00A0 ("ZTAB", version 4 on: see
+ * zxtest.asm); an image without one (versions 1-3) had these. */
+static struct {
+    int version, ntests;
+    unsigned mark;              /* test n's start: a write of n to MARK+n */
+    unsigned res;               /* test n's result: four writes at RES+4n */
+    unsigned alive;             /* test 0's 20 writes; the reads below it are the image's */
+    unsigned csum;              /* the ROM's stored sum (not used here) */
+    unsigned t1;                /* test 1's page: its LD A,(nn) operands */
+    int frame, cont, nocont, ntol;
+} zt = { 3, 9, 0x3FA0, 0x3FC0, 0x3F80, 0x3F7E, 0x0300, 2912, 2209, 2254, 8 };
+
+static void zt_consts(const uint8_t *rom) {
+    if (memcmp(rom + 0xA0, "ZTAB", 4)) {
+        zt.version = rom[0x77] - '0';
+        return;
+    }
+    const uint8_t *t = rom + 0xA4;
+#define W(i) (unsigned)(t[2 + 2 * (i)] | t[3 + 2 * (i)] << 8)
+    zt.version = t[0];
+    zt.ntests = t[1] < ZT_N ? t[1] : ZT_N;
+    zt.mark = W(0); zt.res = W(1); zt.alive = W(2); zt.csum = W(3); zt.t1 = W(4);
+    zt.frame = (int)W(5); zt.cont = (int)W(6); zt.nocont = (int)W(7); zt.ntol = (int)W(8);
+#undef W
+}
 
 static const char *const zt_name[ZT_N] = {
     "alive (the data lines)", "the address lines", "the ROM's sum", "the lower RAM (4000-7FFF)",
@@ -32,7 +52,7 @@ static const char *const zt_name[ZT_N] = {
  * results fit in it), then each result of tests 2-8. */
 #define ZT_NCAP 8
 static int cap_test(int k) { return k == 0 ? 0 : k + 1; }
-static int cap_trig(int k) { return k == 0 ? ZT_MARK : ZT_RES + 4 * cap_test(k); }
+static int cap_trig(int k) { return k == 0 ? (int)zt.mark : (int)(zt.res + 4 * cap_test(k)); }
 static void cap_file(const char *dir, int k, char *out, int len) {
     if (k == 0) snprintf(out, len, "%s/zxtest-start.lac", dir);
     else snprintf(out, len, "%s/zxtest%d.lac", dir, cap_test(k));
@@ -65,11 +85,32 @@ static bool zt_rom(const la_cli_t *o, uint8_t *rom, char *path, int plen) {
     return false;
 }
 
+/* An older version V of the test ROM, zxtest-vV.rom beside the image at
+ * PATH (kept so that captures of a cartridge not yet reprogrammed are
+ * still compared byte for byte): into ROM, its path into OUT. */
+static bool zt_old_rom(const char *path, int v, uint8_t *rom, char *out, int olen) {
+    char dir[900];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *sl = strrchr(dir, '/'), *bs = strrchr(dir, '\\');
+    if (bs > sl) sl = bs;
+    if (sl) *sl = 0;
+    else snprintf(dir, sizeof(dir), ".");
+    snprintf(out, olen, "%.800s/zxtest-v%d.rom", dir, v);
+    FILE *f = fopen(out, "rb");
+    if (!f) return false;
+    static uint8_t buf[16384];
+    size_t got = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    if (got != sizeof(buf) || memcmp(buf + 0x70, "ZXTEST", 6) || buf[0x77] - '0' != v) return false;
+    memcpy(rom, buf, sizeof(buf));
+    return true;
+}
+
 /* Test N's four result bytes: the first write to RES+4N followed by
  * writes to the next three (a fetch or read there is not a result: a lost
  * CPU sliding through memory shows those addresses too). */
 static bool zt_result(const la_cycle_t *cy, int n, int test, uint8_t r[4]) {
-    unsigned a = ZT_RES + 4 * test;
+    unsigned a = zt.res + 4 * test;
     for (int i = 0; i < n; i++) {
         if (cy[i].kind != LA_WRITE || cy[i].addr != a) continue;
         int got = 0;
@@ -110,11 +151,11 @@ static void zt_bus(const la_cycle_t *cy, int n, const uint8_t *rom, zt_bus_t *b)
     for (int i = i0; i < n; i++) {
         /* test 1's reads are of the address lines, not the ROM's bytes:
          * LD A,(nn) at 0300-03FF reads its operands from there */
-        bool walk = cy[i].kind == LA_READ && !(cy[i].addr >= 0x0300 && cy[i].addr < 0x0400) && i >= 2 &&
-                    cy[i - 1].kind == LA_READ && cy[i - 1].addr >= 0x0300 && cy[i - 1].addr < 0x0400 &&
-                    cy[i - 2].kind == LA_READ && cy[i - 2].addr >= 0x0300 && cy[i - 2].addr < 0x0400;
+#define T1(x) ((x) >= zt.t1 && (x) < zt.t1 + 0x100)
+        bool walk = cy[i].kind == LA_READ && !T1(cy[i].addr) && i >= 2 && cy[i - 1].kind == LA_READ &&
+                    T1(cy[i - 1].addr) && cy[i - 2].kind == LA_READ && T1(cy[i - 2].addr);
         if (walk) continue;
-        if ((cy[i].kind == LA_FETCH || cy[i].kind == LA_READ) && cy[i].addr < 0x3F80) {
+        if ((cy[i].kind == LA_FETCH || cy[i].kind == LA_READ) && cy[i].addr < zt.alive) {
             if (rom[cy[i].addr] == cy[i].data) b->rom_ok++;
             else {
                 if (!b->rom_bad++) b->rom_first = cy[i].addr;
@@ -128,16 +169,16 @@ static void zt_bus(const la_cycle_t *cy, int n, const uint8_t *rom, zt_bus_t *b)
     int s0 = -1, s1 = -1, e1 = -1;
     for (int i = i0; i < n; i++) {
         if (cy[i].kind != LA_WRITE) continue;
-        if (cy[i].addr == ZT_MARK && s0 < 0) s0 = i;
-        if (cy[i].addr == ZT_MARK + 1 && s0 >= 0 && s1 < 0) s1 = i;
-        if (cy[i].addr == ZT_RES + 4 && s1 >= 0 && e1 < 0) e1 = i;
+        if (cy[i].addr == zt.mark && s0 < 0) s0 = i;
+        if (cy[i].addr == zt.mark + 1 && s0 >= 0 && s1 < 0) s1 = i;
+        if (cy[i].addr == zt.res + 4 && s1 >= 0 && e1 < 0) e1 = i;
     }
     if (s0 < 0) return;
     b->have = true;
     int k = 0;
     for (int i = s0 + 1; i < n && k < 20; i++) {
-        if (cy[i].kind != LA_WRITE || cy[i].addr == ZT_MARK) continue;
-        if (cy[i].addr == ZT_RES) break;    /* test 0's result: past its writes */
+        if (cy[i].kind != LA_WRITE || cy[i].addr == zt.mark) continue;
+        if (cy[i].addr == zt.res) break;    /* test 0's result: past its writes */
         /* the k-th write of test 0 (where it went is test 1's business) */
         uint8_t want = alive[k], got = cy[i].data;
         b->alive_seen++;
@@ -153,7 +194,7 @@ static void zt_bus(const la_cycle_t *cy, int n, const uint8_t *rom, zt_bus_t *b)
     /* test 1: LD A,(nn) 32 times: fetch, two operand reads, the data read */
     int reads = 0;
     for (int i = s1 + 1; i < n && (e1 < 0 || i < e1); i++) {
-        if (cy[i].kind == LA_FETCH && cy[i].addr >= 0x0300 && cy[i].addr < 0x0400 && cy[i].data == 0x3A) reads = 0;
+        if (cy[i].kind == LA_FETCH && T1(cy[i].addr) && cy[i].data == 0x3A) reads = 0;
         if (cy[i].kind != LA_READ) continue;
         if (++reads != 3) continue;
         int w = b->walk_seen++;
@@ -305,7 +346,7 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
             printf("  %d. /INT is held low: an interrupt came at once each time it was let in (%d loop turn%s between\n"
                    "     two, not %d). The ULA makes it, once a frame (IC1 pin 12, through R26): R26 open (the CPU's pin\n"
                    "     then floats low), the line shorted to 0 V, or the ULA.%s%s\n", ++item, v16,
-                   v16 == 1 ? "" : "s", ZT_FRAME, buf[0] ? " On the line: " : "", buf);
+                   v16 == 1 ? "" : "s", zt.frame, buf[0] ? " On the line: " : "", buf);
             return item;
         }
         if (r[1] & 1) {
@@ -319,7 +360,7 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
         if (r[1] & 4)
             printf("  %d. The frame is the wrong length: %d loop turns between interrupts, not %d (each turn is 24 clock\n"
                    "     cycles: a frame is 69888). The ULA's clock (the crystal X1, the ULA) or the frame counter in the ULA.\n",
-                   ++item, v16, ZT_FRAME);
+                   ++item, v16, zt.frame);
         return item;
     case 7: {
         const char *ula = ref_of("ULA");
@@ -330,7 +371,7 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
         }
         printf("  %d. Contention is wrong: %d loop turns a frame with reads of 4000, not %d (with no contention at\n"
                "     all it would be %d). The ULA (%s) holds the CPU's clock while it fetches the screen: its\n"
-               "     timing with the CPU, or the clock's path to the CPU.\n", ++item, v16, ZT_CONT, ZT_NOCONT, ula ? ula : "IC1");
+               "     timing with the CPU, or the clock's path to the CPU.\n", ++item, v16, zt.cont, zt.nocont, ula ? ula : "IC1");
         return item;
     }
     }
@@ -347,6 +388,9 @@ int zxtest_diagnose(const la_cli_t *o) {
         fprintf(stderr, "The test ROM (zxtest.rom) isn't in carts/ or zxtest/ here or beside the program: name it on the command line\n");
         return 1;
     }
+    zt_consts(rom);
+    int img_ver = zt.version;
+    char oldpath[1000] = "";        /* the older image the captures were compared with */
     mkdir1(dir);
     if (!o->replay)
         for (int k = 0; k < ZT_NCAP; k++) { cap_file(dir, k, path, sizeof(path)); remove(path); }
@@ -417,9 +461,12 @@ int zxtest_diagnose(const la_cli_t *o) {
         la_cycle_t *cy;
         int n = la_cycles(&c, &cy);
         if (k == 0) {
+            for (int tt = 0; tt < 2; tt++) got[tt] = zt_result(cy, n, tt, res[tt]);
+            /* the cartridge holds an older version: its own image, if kept */
+            int v = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
+            if (v != img_ver && !zt_old_rom(rompath, v, rom, oldpath, sizeof(oldpath))) oldpath[0] = 0;
             zt_bus(cy, n, rom, &bus);
             have_bus = bus.have;
-            for (int tt = 0; tt < 2; tt++) got[tt] = zt_result(cy, n, tt, res[tt]);
         } else got[t] = zt_result(cy, n, t, res[t]);
         if (!got[t] && !where[0]) where_text(&c, where, sizeof(where));
         free(cy);
@@ -450,11 +497,15 @@ int zxtest_diagnose(const la_cli_t *o) {
                ncap ? " (the captures came, but no result was written)" : "", where[0] ? "\nWhere the CPU was: " : "", where);
     } else {
         /* Captures of another version of the test ROM than the image here:
-         * its bytes can't be compared (its results still say what they say). */
-        int img_ver = rom[0x77] - '0', cap_ver = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
+         * compared with that version's image if it was kept, else its
+         * bytes can't be (its results still say what they say). */
+        int cap_ver = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
         zt_capver = cap_ver;
         int ntests = cap_ver >= 3 ? ZT_N : 8;    /* test 8 came with version 3 */
-        if (have_bus && cap_ver != img_ver) {
+        if (have_bus && cap_ver != img_ver && oldpath[0])
+            printf("(These captures are of version %d of the test ROM, compared with %s; %s is\n"
+                   "version %d: program the cartridge with it when convenient.)\n\n", cap_ver, oldpath, rompath, img_ver);
+        else if (have_bus && cap_ver != img_ver) {
             printf("(These captures are of version %d of the test ROM, %s is version %d: the cartridge's reads aren't\n"
                    "compared with it. Program the cartridge with the newer one.)\n\n", cap_ver, rompath, img_ver);
             bus.rom_bad = 0;

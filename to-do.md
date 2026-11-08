@@ -1180,14 +1180,19 @@ Steps:
           bad-byte count.
       [ ] 4. EAR in (IN FE bit 6 after OUT 00/08/10/18; Issue 2 vs 3
           differ; a plugged-in EAR changes it); HALT (low priority).
-      [~] 6. VERSION: the ROM's two strings now come from the EQU (v3);
-          the C side still reads rom[0x77]-'0' (one digit).
-      [ ] 7. Constants duplicated in C and asm (MARK, RES, FRAME_N,
-          CONT_N): a table at a fixed ROM address, read by lacap_zxtest.c
-          (replaces the symbols-file item in step 2).
-      [ ] 8. Hand-counted $+n jumps in RESULT/FAILBITS/INTBACK: sjasmplus
-          1.24 makes `.label` local to each macro instance; then drop
-          patchsum.py's guarding asserts.
+      [x] 6. VERSION: the ROM's two strings come from the EQU (v3), the C
+          side reads it from the table (v4; older images: rom[0x77]).
+      [x] 7. (2026-11-08, v4) The constants in a table at 00A0: "ZTAB",
+          VERSION, NTESTS, then words MARK, RES, ALIVE, CSUM, t1,
+          FRAME_N, CONT_N, NOCONT_N, NTOL; lacap_zxtest.c reads it from
+          the image (defaults = v1-3's values without one). Replaces the
+          symbols-file item in step 2. A new VERSION keeps the old image
+          as carts/ and zxtest/zxtest-vN.rom: captures of a cartridge not
+          yet reprogrammed are compared with it (else, as before, its
+          reads aren't compared). zxtest-v3.rom kept.
+      [x] 8. (2026-11-08) Labels in the macros (INTBACK, RESULT,
+          FAILBITS, CALLX) instead of $+n; patchsum.py's guards gone. The
+          ROM came out byte for byte v3.
       [ ] 9. ROM sum is additive (misses byte order); CRC-16; low priority.
       [ ] 10. Frame 2912 / contention 2209 confirmed on real Issue 2 and
           3B only; run good Issues 1, 4, 6A. (v3's simulated counts are
@@ -1202,7 +1207,7 @@ Steps:
           code path twice (could go): IC8/IC13 data0=0 as IC7.14:vcc (one
           lower RAM bit), IC2.16:gnd as R26 removed (/INT held).
       [ ] Reprogram the SteamCard Pro (ROMs/steamcard-test.bin, bank 3)
-          with v3 and capture the good Issue 2 and the IC22 board again.
+          with v4 (v3's image: ROMs/steamcard-test-v3.bin) and capture the good Issue 2 and the IC22 board again.
 
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the

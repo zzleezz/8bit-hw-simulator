@@ -17,7 +17,11 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   upper RAM filled, read back after 1.6 s untouched); the border yellow,
   not green, when no upper RAM answers (right on a 16K only), with the
   two bytes read back in the result (FF FF: nothing there; else the stuck
-  chips are named); the ALIVE line shows the version (it showed 0000). Unlike the ROM's own RAM test it holds a 1 in every bit: a
+  chips are named); the ALIVE line shows the version (it showed 0000).
+  Version 4: a table of its constants at 00A0 (addresses, the frame
+  counts, the version), read by the diagnosis instead of copies in the C
+  code. Captures of an older version are compared with that version's
+  image when it is kept (carts/zxtest-v3.rom). Unlike the ROM's own RAM test it holds a 1 in every bit: a
   simulated weak IC22 (D7) passes all six boot stages and fails it. Run
   on a real Issue 2 from a SteamCard Pro cartridge: every result the same
   as the simulated board's. zxtest/zxbench.rom: the cartridge's bench
