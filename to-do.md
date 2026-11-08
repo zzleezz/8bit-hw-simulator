@@ -1044,7 +1044,7 @@ Later, software:
 - [x] (Done 2026-11-08.) la_window.c's comment on the stage boxes said
       skipped ones are "crossed out".
 - [ ] **V1.2 release page on GitHub (the user, 2026-11-08).** Tag V1.2
-      (b8d2ac1) is pushed. At github.com/zzleezz/8bit-hw-simulator/releases/new:
+      (96623bf, moved there on 2026-11-08 to take in the later work) is pushed. At github.com/zzleezz/8bit-hw-simulator/releases/new:
       tag V1.2, title V1.2, paste github-release/release-description.txt,
       drag in github-release/c64-hw-sim-windows.zip and fault_atlas.bin,
       Publish release.
