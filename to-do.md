@@ -631,8 +631,9 @@ commit-message.txt).
       address, Claude as co-author, "An AI-generated project" at the top
       of the README); release V1.0 with the zip and the seven-board atlas;
       the issue to antirez posted.
-- [x] V1.1 released 2026-10-30 (by the user, from github-release/). The
-      next one (V1.2) when enough is under "Unreleased" in CHANGELOG.md.
+- [x] V1.1 released 2026-10-30 (by the user, from github-release/).
+- [x] V1.2 released 2026-11-08 (by the user). The next one (V1.3) when
+      enough is under "Unreleased" in CHANGELOG.md.
 
 ## 10. Stretch goal: the real machine's bus, read into the simulator
 (the user's idea, 2026-10-29; reworked 2026-10-30)
@@ -1043,11 +1044,9 @@ Later, software:
       and use the answer.
 - [x] (Done 2026-11-08.) la_window.c's comment on the stage boxes said
       skipped ones are "crossed out".
-- [ ] **V1.2 release page on GitHub (the user, 2026-11-08).** Tag V1.2
-      (96623bf, moved there on 2026-11-08 to take in the later work) is pushed. At github.com/zzleezz/8bit-hw-simulator/releases/new:
-      tag V1.2, title V1.2, paste github-release/release-description.txt,
-      drag in github-release/c64-hw-sim-windows.zip and fault_atlas.bin,
-      Publish release.
+- [x] V1.2 released 2026-11-08 (by the user, from github-release/):
+      https://github.com/zzleezz/8bit-hw-simulator/releases/tag/V1.2 (tag
+      at 96623bf, with the zip and fault_atlas.bin).
 
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
