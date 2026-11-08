@@ -1,5 +1,6 @@
 /* probe_db.c - "Diagnose by probing": the matching (see probe_db.h). */
 #include "probe_db.h"
+#include "lacap.h"
 #include "c64.h"
 #include "zx48.h"
 #include <math.h>
@@ -28,6 +29,15 @@ static const float cost_table[NET_NONE][PROBE_NREADINGS] = {
 float probe_cost(int net_state, int reading) {
     if (net_state < 0 || net_state >= NET_NONE || reading < 0 || reading >= PROBE_NREADINGS) return 0;
     return cost_table[net_state][reading];
+}
+
+float probe_reading_cost(int net_state, const probe_reading_t *r) {
+    float c = probe_cost(net_state, r->reading);
+    if (r->analyser && r->reading == PROBE_LOW) {
+        float f = probe_cost(net_state, PROBE_FLOATING);
+        if (f < c) c = f;
+    }
+    return c;
 }
 
 int probe_reading_of(int net_state) {
@@ -564,7 +574,7 @@ int probe_rank(probe_db_t *db, const probe_reading_t *readings, int n, int *orde
         for (int i = 0; i < n; i++) {
             int net = readings[i].net;
             if (net < 0 || net >= db->nnets) continue;
-            float c = probe_cost(probe_group_state(gr, &readings[i]), readings[i].reading);
+            float c = probe_reading_cost(probe_group_state(gr, &readings[i]), &readings[i]);
             gr->cost += c;
             gr->mismatches += c >= 0.5f;
         }
@@ -792,7 +802,7 @@ static void diagnose_one(probe_db_t *db, board_t *ref, board_t *b, int *order, i
         if (r < 0) r = PROBE_FLOATING;
         if ((int)(rng_next(&rng) % 100) < noise_pct)
             r = (r + 1 + (int)(rng_next(&rng) % (PROBE_NREADINGS - 1))) % PROBE_NREADINGS;
-        rd[n++] = (probe_reading_t){ pin, net, r, leg };
+        rd[n++] = (probe_reading_t){ pin, net, r, leg, false };
         if (getenv("C64HW_PROBE_TRACE"))
             printf("      probe %s.%d%s: %s\n", ref->sim.parts[ref->sim.pins[pin].part].ref,
                    ref->sim.pins[pin].number, leg ? " (leg)" : "", probe_reading_name(r));
@@ -907,5 +917,66 @@ int probe_test(const char *atlas_path, int count, unsigned seed, int noise_pct) 
             snprintf(what, sizeof(what), "%s, %s:", probe_strategy_name(s), known ? "screen known" : "probing only");
             print_stats(what, &st[s][known]);
         }
+    return 0;
+}
+
+int probe_capture_cli(const char *atlas_path, const struct machine *m, const char *capture) {
+    int machine = atlas_machine_of(m);
+    if (machine < 0) { fprintf(stderr, "--probe-capture: no atlas machine for this board\n"); return 1; }
+    board_t *b = board_create(m);
+    probe_db_t db;
+    char err[300];
+    if (!probe_db_load(&db, atlas_path, machine, b, err, sizeof(err))) {
+        fprintf(stderr, "--probe-capture: %s\n", err);
+        board_destroy(b);
+        return 1;
+    }
+    db.on_legs = false;
+    int net[64], rd[64];
+    int n = la_probe_readings(b, capture, net, rd, 64, err, sizeof(err));
+    if (n < 0) { fprintf(stderr, "--probe-capture: %s\n", err); probe_db_free(&db); board_destroy(b); return 1; }
+    static const int as[3] = { PROBE_LOW, PROBE_HIGH, PROBE_PULSING };
+    probe_reading_t r[64];
+    int nr = 0;
+    for (int k = 0; k < n; k++) {
+        int pin = -1;
+        for (int p = 0; p < b->sim.npins && pin < 0; p++) {
+            int x = b->sim.pins[p].net, y = net[k];
+            if (x < 0) continue;
+            while (b->sim.nets[x].root != x) x = b->sim.nets[x].root;
+            while (b->sim.nets[y].root != y) y = b->sim.nets[y].root;
+            if (x == y) pin = p;
+        }
+        if (pin < 0) continue;
+        r[nr++] = (probe_reading_t){ .pin = pin, .net = b->sim.pins[pin].net, .reading = as[rd[k]], .analyser = true };
+    }
+    printf("%d readings from %s:", nr, capture);
+    for (int i = 0; i < nr; i++) {
+        const char *nm = b->sim.nets[b->sim.pins[r[i].pin].net].name;
+        printf(" %s=%s", nm ? nm : "?", probe_reading_name(r[i].reading));
+    }
+    printf("\n");
+    int *order = malloc((size_t)db.ngroups * sizeof(int));
+    int nrun = probe_rank(&db, r, nr, order);
+    printf("%d of %d groups in the running (atlas readings of %s)\n", nrun, db.ngroups, atlas_machine_id(db.source));
+    for (int k = 0; k < nrun && k < 8; k++) {
+        const probe_group_t *g = &db.groups[order[k]];
+        printf("  %d. cost %.2f, %d disagree, %d fault%s:", k + 1, g->cost, g->mismatches, g->nfaults,
+               g->nfaults == 1 ? "" : "s");
+        for (int f = 0; f < g->nfaults && f < 4; f++) printf(" %s", db.atlas.faults[g->faults[f]].spec);
+        if (g->healthy) printf(" (the healthy board)");
+        printf("\n");
+        if (k == 0)
+            for (int i = 0; i < nr; i++) {
+                int st = probe_group_state(g, &r[i]);
+                if (probe_reading_cost(st, &r[i]) < 0.5f) continue;
+                const char *nm = b->sim.nets[b->sim.pins[r[i].pin].net].name;
+                printf("     disagrees: %s reads %s, it gives %s\n", nm ? nm : "?", probe_reading_name(r[i].reading),
+                       probe_reading_name(probe_reading_of(st)));
+            }
+    }
+    free(order);
+    probe_db_free(&db);
+    board_destroy(b);
     return 0;
 }

@@ -241,6 +241,7 @@ static struct {
     int browse_pick;
     int match_test, top, causes, match_machine, match_cart;
     int probe_test, probe_noise;      /* probe_db.h */
+    const char *probe_capture;        /* --probe-capture FILE */
     bool probe;
     unsigned seed;
     la_cli_t la;                /* --la-...: lacap.h */
@@ -701,6 +702,7 @@ int main(int argc, char **argv) {
             if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') args.probe_test = atoi(argv[++i]);
         }
         else if (!strcmp(argv[i], "--probe")) args.probe = true;
+        else if (!strcmp(argv[i], "--probe-capture") && i + 1 < argc) args.probe_capture = argv[++i];
         else if (!strcmp(argv[i], "--probe-noise") && i + 1 < argc) args.probe_noise = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--match-dir") && i + 1 < argc) args.match_dir = argv[++i];
         else if (!strcmp(argv[i], "--match-debug") && i + 1 < argc) args.match_debug = argv[++i];
@@ -776,6 +778,10 @@ int main(int argc, char **argv) {
         return atlas_build(&(atlas_build_t){ .tier = args.atlas_tier, .path = args.atlas_path,
                                              .carts = args.carts, .threads = args.threads });
     if (args.atlas_diff) return atlas_diff(args.atlas_path, args.atlas_diff);
+    if (args.probe_capture) {
+        atlas_init_shared();
+        return probe_capture_cli(args.atlas_path, args.machine ? args.machine : &machine_zx48, args.probe_capture);
+    }
     if (args.probe_test) {
         atlas_init_shared();
         return probe_test(args.atlas_path, args.probe_test, args.seed, args.probe_noise);

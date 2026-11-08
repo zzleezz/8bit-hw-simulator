@@ -318,3 +318,49 @@ int timeline(const la_cli_t *o) {
     board_destroy(b);
     return 0;
 }
+
+/* See lacap.h. */
+int la_probe_readings(board_t *b, const char *path, int *net, int *reading, int max, char *err, int errlen) {
+    la_capture_t c[2];
+    memset(c, 0, sizeof(c));
+    if (!la_read(path, &c[0], err, errlen)) return -1;
+    int nc = 1;
+    /* idle.lac and idle-slow.lac: the other one too. */
+    const char *base = strrchr(path, '/');
+    const char *bs = strrchr(path, '\\');
+    if (!base || (bs && bs > base)) base = bs;
+    base = base ? base + 1 : path;
+    const char *other = !strcasecmp(base, "idle.lac") ? "idle-slow.lac" : !strcasecmp(base, "idle-slow.lac") ? "idle.lac" : NULL;
+    if (other) {
+        char p2[1200], e2[200];
+        snprintf(p2, sizeof(p2), "%.*s%s", (int)(base - path), path, other);
+        if (la_read(p2, &c[1], e2, sizeof(e2))) nc = 2;
+    }
+    int nets[LA_NSIG];
+    find_nets(b, nets, NULL);
+    int n = 0;
+    for (int sg = 0; sg < LA_NSIG && n < max; sg++) {
+        if (nets[sg] < 0) continue;
+        int st = -1;                    /* 0 low, 1 high, 2 pulsing */
+        for (int k = 0; k < nc && st != 2; k++) {
+            /* From where the bus starts, as the diagnosis reads a line
+             * (line_state): before it, the analyser's buffer from before
+             * the trigger can show /RESET low. */
+            int from = la_start(&c[k]);
+            if (!(c[k].have >> sg & 1) || from >= c[k].n) continue;
+            int v0 = (int)(c[k].s[from] >> sg & 1);
+            int v = v0;
+            for (int i = from + 1; i < c[k].n; i++)
+                if ((int)(c[k].s[i] >> sg & 1) != v0) { v = 2; break; }
+            if (v == 2 || (st >= 0 && st != v)) st = 2;
+            else st = v;
+        }
+        if (st < 0) continue;
+        net[n] = nets[sg];
+        reading[n] = st;
+        n++;
+    }
+    for (int k = 0; k < nc; k++) la_free(&c[k]);
+    if (!n) { snprintf(err, (size_t)errlen, "no lines of this board in the capture"); return -1; }
+    return n;
+}

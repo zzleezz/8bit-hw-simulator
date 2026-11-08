@@ -346,6 +346,17 @@ it (`U7.3`).
 A level a logic chip still reads right (a high wobbling between 4.0 and
 4.8 V) is that level: the simulation knows logic levels, not volts.
 
+On a Spectrum, **Import capture...** takes the readings from the logic
+analyser instead: every line at the edge connector, low, high or pulsing,
+from a capture (best `idle.lac` from a diagnosis folder, the board left
+running; `idle-slow.lac` next to it is read too, for the frame
+interrupt). They are marked "analyser". The analyser reads a floating
+line (about 1.2 V) as low, so its "low" counts as low or floating. On a
+working or running board they fit the healthy board: a probe can't see a
+RAM bit read wrong; on a dead one they narrow it fast (the dead Issue 1
+boards: the CPU, the only fault left). `--probe-capture FILE --board B`
+does the same on the command line and lists the faults that fit.
+
 Faults aren't all as likely. The window weights each one the way they
 come to the bench: the PLA first, then the CIAs, the CPU, the RAM and the
 ROMs, then the video and sound chips and the logic; a chip dead or its

@@ -64,6 +64,16 @@ bool la_read(const char *path, la_capture_t *c, char *err, int errlen);
 bool la_write(const char *path, const la_capture_t *c, char *err, int errlen);
 void la_free(la_capture_t *c);
 
+struct board;
+/* A capture as a logic probe would show each line, on board B (a
+ * Spectrum): NET[i] its net, READING[i] 0 low, 1 high, 2 pulsing (any
+ * change in the capture). Best the idle capture, the board left running:
+ * from idle.lac or idle-slow.lac, the other is read too and a line that
+ * changes in either is pulsing (the slow one's 49 ms see the frame
+ * interrupt). The analyser can't tell floating from low (about 1.2 V reads
+ * low). The number of lines (up to MAX), or -1 with ERR. */
+int la_probe_readings(struct board *b, const char *path, int *net, int *reading, int max, char *err, int errlen);
+
 /* Record the simulated board as the analyser would: from power on, every
  * bus step (28 MHz, 8 per T state), triggered on /RESET going high, PRE
  * samples before and POST after. B is a board_t (a Spectrum). */

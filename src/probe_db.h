@@ -70,6 +70,7 @@ typedef struct {
     int net;                    /* its net */
     int reading;                /* PROBE_* */
     bool leg;                   /* on the chip's leg (else on the pad, the solder side) */
+    bool analyser;              /* from a logic analyser's capture: its "low" may be floating (it reads about 1.2 V low) */
 } probe_reading_t;
 
 typedef struct {
@@ -123,6 +124,9 @@ void probe_db_free(probe_db_t *db);
 /* How badly a net the simulation shows as NET_STATE fits a READING:
  * 0 (the same) to 1 (nothing alike). */
 float probe_cost(int net_state, int reading);
+/* The cost of reading R where the net is NET_STATE: probe_cost(), but an
+ * analyser's low fits floating as well. */
+float probe_reading_cost(int net_state, const probe_reading_t *r);
 /* What a probe would show for a NET_* state (PROBE_*), -1 for NET_NONE. */
 int probe_reading_of(int net_state);
 const char *probe_reading_name(int reading);
@@ -176,5 +180,9 @@ int probe_pin_for_net(board_t *b, int net);
  * faults. Faults are picked as likely as their WEIGHT (none marked), the
  * way they come to the bench. The exit code. */
 int probe_test(const char *atlas_path, int count, unsigned seed, int noise_pct);
+/* --probe-capture FILE: a logic analyser capture's lines (lacap.h's
+ * la_probe_readings) as the probing window's readings on board M, and the
+ * faults that fit them, best first. */
+int probe_capture_cli(const char *atlas_path, const struct machine *m, const char *capture);
 
 #endif

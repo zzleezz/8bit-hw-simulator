@@ -754,9 +754,13 @@ and will take the captures; Pico model to be agreed with Jim.
       lower 16K, IC15-22 upper 32K, one per data bit). Done in
       --la-diagnose; a real faulty 4116 (i2-lr1, IC7) named right.
 - [ ] Open the simulated .lac in the LogicAnalyzer program (does it load?).
-- [ ] Step 1, readings: each signal low / high / pulsing (--la-info has
-      them) imported into "Diagnose by probing" ("Import capture").
-      Floating can't be told by a digital input.
+- [x] (Done 2026-11-08.) Step 1, readings: each signal low / high /
+      pulsing imported into "Diagnose by probing" ("Import capture...",
+      --probe-capture). The analyser's low also fits floating. Real
+      folders: i1-test4 and issue1-dead -> IC2 (CPU) the only group left;
+      newtest1 (no clock) -> IC2.6 high / TR3 open / R25 short; running
+      boards fit the healthy board (a probe can't see RAM data). The
+      window's button not yet clicked through (a file dialog): check it.
 - [ ] Step 2b, against the faults: which faults go wrong at the first
       differing cycle the same way. Simulate the likely ones for the
       capture's few ms on demand (a fault run is well under a second)

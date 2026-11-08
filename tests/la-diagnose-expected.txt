@@ -1397,3 +1397,65 @@ The screen (shot.png): it shows repeating pattern over 50% of the screen (black 
   The nearest simulated screen (93% alike): "Vertical bars: 17 of them, 7 pixels wide, every 15 pixels (black border, black screen), animated"
   In the atlas, that picture comes from 10 faults on 3 parts.
   It agrees with the bus: IC5 is among them (a fault there gives this picture as well).
+######## check IC6:addr2
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 94% of its pulses)
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 10A8-162C
+  OK: the same as a working one
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  OK: the same as a working one
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  OK: the same as a working one
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way after 2493 bus cycles
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way after 91 bus cycles
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way after 167 bus cycles
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  OK: the same as a working one
+The boot goes wrong at RAM done (2 stages before it are good).
+What to look at, most likely first:
+  1. IC6, the lower RAM's bit D0 (4000-7FFF): it reads 1 where it should be 0 (2 reads, the first at 5C50)
+  2. Or what the lower RAM's chips share, if they are all addressed wrong (only 2 wrong reads to go on):
+     IC3 (MUX), IC4 (MUX), IC1 (ULA)
+Checked against the captures: 24 faults of the verdict's parts, each put on the simulated board and
+its 6 stages compared with the analyser's (4 at a time).
+  A working board: 3 of 6 stages the same as the captures, the others the same for 2751 cycles.
+From the check, what to look at, most likely first:
+  1. IC6:addr2: 6 of 6 stages the same (IC6 LRAM0 address line A2 dead inside the chip: half of it is never reached, the other half answers twice - [video RAM] 4116)
+  Note: the first does just what the board did in every stage the analyser took.
+######## check IC8:data0=0
+First, idle: what it does left running, before any reset (the clock, /RESET, the frame interrupt, the CPU)
+  CLK: running (the analyser sees 94% of its pulses)
+  /RESET: high
+  /INT: low 2 times in 49 ms (a working one's: 2, every 20 ms)
+  The CPU: fetching from 10A8-162C
+  OK: the same as a working one
+1 of 6, Reset: the reset: the RAM test's first write (FFFF), about 110 clock cycles after it
+  OK: the same as a working one
+2 of 6, RAM test: the RAM test starts reading the RAM back, from 4000 up (11E2, 0.45 s after the reset)
+  OK: the same as a working one
+3 of 6, RAM done: the RAM test is over (11EF, 1.65 s after the reset; sooner if the RAM has a fault)
+  FAULT: the CPU went another way after 2493 bus cycles
+4 of 6, Copyright: the copyright message (1539, 1.71 s after the reset)
+  Wrong too: the CPU went another way after 79 bus cycles
+5 of 6, Main loop: the editor's main loop starts (12A9, 1.73 s after the reset)
+  Wrong too: the CPU went another way after 167 bus cycles
+6 of 6, Interrupt: a frame interrupt (50 a second, while the ROM's interrupt routine is used)
+  OK: the same as a working one
+The boot goes wrong at RAM done (2 stages before it are good).
+What to look at, most likely first:
+  1. IC8, the lower RAM's bit D2 (4000-7FFF): it reads 0 where it should be 1 (5 reads, the first at 5CB2)
+Checked against the captures: 24 faults of the verdict's parts, each put on the simulated board and
+its 6 stages compared with the analyser's (4 at a time).
+  A working board: 3 of 6 stages the same as the captures, the others the same for 2739 cycles.
+From the check, what to look at, most likely first:
+  1. IC8:data0=0: 6 of 6 stages the same (IC8 LRAM2 dead: reads 0 at every address - [video RAM] 4116)
+  2. IC8.2:open: 6 of 6 stages the same (IC8 LRAM2 pin 2 (D) open: the leg doesn't reach net Net-(IC1-D2) - [video RAM] 4116)
+  3. IC8.15:open: 5 of 6 stages the same, the others for 53 cycles (IC8 LRAM2 pin 15 (/CAS) open: the leg doesn't reach net /LCAS - [video RAM] 4116)
+  4. IC8.2:gnd: 5 of 6 stages the same, the others for 53 cycles (net Net-(IC1-D2) stuck low: IC8 LRAM2 pin 2 (D) shorted to GND; also on the net: IC8.14(Q), IC1.22(D2) - [video RAM] 4116)
+  5. IC8.14:out0: 5 of 6 stages the same, the others for 53 cycles (IC8 LRAM2 pin 14 (Q): output dead inside the chip, stuck low (net Net-(IC1-D2)) - [video RAM] 4116)
+  Note: the first does just what the board did in every stage the analyser took.

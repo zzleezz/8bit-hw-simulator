@@ -6,6 +6,8 @@
 #include "probe_db.h"
 #include "atlas.h"
 #include "diagnose.h"
+#include "filedialog.h"
+#include "lacap.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +55,7 @@ static struct {
     float *boost;
     char boost_note[600];
     unsigned boost_serial;
+    char import_note[300];      /* what "Import capture" took in */
 } P = { .sug_net = -1, .sug_pin = -1, .cur_pin = -1, .last_scope = -1, .on_legs = true };
 
 void probe_open(void) { P.open = P.reopen = true; }
@@ -228,7 +231,58 @@ static void add_reading(int pin, int reading) {
             P.n--;
             break;
         }
-    P.rd[P.n++] = (probe_reading_t){ pin, net, reading, leg };
+    P.rd[P.n++] = (probe_reading_t){ pin, net, reading, leg, false };
+    update();
+}
+
+/* The pin a capture's reading of NET is put on: the edge connector's (where
+ * the analyser is clipped on), else the first pin of the net. */
+static int pin_for_net(int net) {
+    const sim_t *s = &P.b->sim;
+    int root = net;
+    while (s->nets[root].root != root) root = s->nets[root].root;
+    int first = -1;
+    for (int p = 0; p < s->npins; p++) {
+        int r = s->pins[p].net;
+        if (r < 0) continue;
+        while (s->nets[r].root != r) r = s->nets[r].root;
+        if (r != root) continue;
+        if (s->parts[s->pins[p].part].kind == PART_CONNECTOR) return p;
+        if (first < 0) first = p;
+    }
+    return first;
+}
+
+/* "Import capture": the lines of a logic analyser capture (best idle.lac,
+ * the board left running) as readings on their pads; one already taken
+ * on the same net is replaced. */
+static void import_capture(void) {
+    char path[1200], err[300];
+    if (filedialog_capture(path, sizeof(path)) != FILEDIALOG_PICKED) return;
+    int net[64], rd[64];
+    int n = la_probe_readings(P.b, path, net, rd, 64, err, sizeof(err));
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    if (n < 0) { snprintf(P.import_note, sizeof(P.import_note), "Couldn't take %.60s: %.200s", base, err); return; }
+    static const int as[3] = { PROBE_LOW, PROBE_HIGH, PROBE_PULSING };
+    int added = 0;
+    for (int k = 0; k < n; k++) {
+        int pin = pin_for_net(net[k]);
+        if (pin < 0) continue;
+        int pn = P.b->sim.pins[pin].net;
+        for (int i = 0; i < P.n; i++)
+            if (P.rd[i].net == pn && !P.rd[i].leg) {
+                memmove(&P.rd[i], &P.rd[i + 1], (size_t)(P.n - i - 1) * sizeof(probe_reading_t));
+                P.n--;
+                break;
+            }
+        if (P.n >= MAX_READINGS) break;
+        P.rd[P.n++] = (probe_reading_t){ .pin = pin, .net = pn, .reading = as[rd[k]], .leg = false, .analyser = true };
+        added++;
+    }
+    snprintf(P.import_note, sizeof(P.import_note),
+             "Took %d line%s from %.60s (marked \"analyser\"). Its \"low\" counts as low or floating: the analyser reads a "
+             "floating line (about 1.2 V) as low.", added, added == 1 ? "" : "s", base);
     update();
 }
 
@@ -591,20 +645,32 @@ static void bad_levels_note(int net, char *buf, size_t len) {
 /* The readings so far, each with what a healthy board shows there. */
 static void readings(struct nk_context *ctx, float cw) {
     char line[300], desc[160];
-    nk_layout_row_begin(ctx, NK_STATIC, 26, 3);
-    nk_layout_row_push(ctx, cw - 200);
+    bool zx = atlas_family(P.machine) == ATLAS_ZX48;
+    nk_layout_row_begin(ctx, NK_STATIC, 26, zx ? 4 : 3);
+    nk_layout_row_push(ctx, cw - 200 - (zx ? 150 : 0));
     snprintf(line, sizeof(line), "Readings: %d", P.n);
     nk_label(ctx, line, NK_TEXT_LEFT);
+    if (zx) {
+        nk_layout_row_push(ctx, 140);
+        if (nk_widget_is_hovered(ctx))
+            nk_tooltip(ctx, "Take the readings from a logic analyser capture: every line at the edge connector, low, "
+                            "high or pulsing. Best idle.lac from a diagnosis folder (the Spectrum left running)");
+        if (nk_button_label(ctx, "Import capture...")) import_capture();
+    }
     nk_layout_row_push(ctx, 90);
     if (nk_button_label(ctx, "Undo") && P.n) remove_reading(P.n - 1);
     nk_layout_row_push(ctx, 90);
-    if (nk_button_label(ctx, "Clear all") && P.n) { P.n = 0; update(); }
+    if (nk_button_label(ctx, "Clear all") && P.n) { P.n = 0; P.import_note[0] = 0; update(); }
     nk_layout_row_end(ctx);
+    if (P.import_note[0]) wrapped(ctx, P.import_note, cw, COL_DIMTEXT);
     const probe_group_t *best = P.db.ngroups ? &P.db.groups[P.order[0]] : NULL;
     for (int i = 0; i < P.n; i++) {
         const probe_reading_t *r = &P.rd[i];
         pin_desc(P.b, r->pin, desc, sizeof(desc));
-        if (r->leg != P.on_legs) {
+        if (r->analyser) {
+            size_t dl = strlen(desc);
+            snprintf(desc + dl, sizeof(desc) - dl, " (analyser)");
+        } else if (r->leg != P.on_legs) {
             size_t dl = strlen(desc);
             snprintf(desc + dl, sizeof(desc) - dl, r->leg ? " (leg)" : " (pad)");
         }
@@ -616,7 +682,7 @@ static void readings(struct nk_context *ctx, float cw) {
         nk_layout_row_push(ctx, 170);
         /* Where the best fit disagrees, say what it expects. */
         int want = best ? probe_reading_of(probe_group_state(best, r)) : -1;
-        if (want >= 0 && probe_cost(probe_group_state(best, r), r->reading) >= 0.5f)
+        if (want >= 0 && probe_reading_cost(probe_group_state(best, r), r) >= 0.5f)
             snprintf(line, sizeof(line), "best fit: %s", probe_reading_name(want));
         else snprintf(line, sizeof(line), "healthy: %s", healthy_on(r->net));
         nk_label_colored(ctx, line, NK_TEXT_LEFT,
@@ -667,7 +733,7 @@ static void group(struct nk_context *ctx, int k, float cw, probe_action_t *act) 
         int shown = 0;
         for (int i = 0; i < P.n && shown < 4; i++) {
             const probe_reading_t *r = &P.rd[i];
-            if (probe_cost(probe_group_state(gr, r), r->reading) < 0.5f) continue;
+            if (probe_reading_cost(probe_group_state(gr, r), r) < 0.5f) continue;
             const part_t *pt = &P.b->sim.parts[P.b->sim.pins[r->pin].part];
             size_t len = strlen(what);
             snprintf(what + len, sizeof(what) - len, "%s%s.%s would be %s", shown ? ", " : "", pt->ref,

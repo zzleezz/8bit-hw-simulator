@@ -288,6 +288,38 @@ int filedialog_repairs(bool save, char *path, int len) {
     return got;
 }
 
+int filedialog_capture(char *path, int len) {
+    int got;
+    path[0] = 0;
+#ifdef _WIN32
+    wchar_t file[MAX_PATH * 4] = L"";
+    OPENFILENAMEW ofn;
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = GetActiveWindow();
+    ofn.lpstrFilter = L"Logic analyser captures (*.lac)\0*.lac\0All files\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = sizeof(file) / sizeof(file[0]);
+    ofn.lpstrTitle = L"A capture of the board left running (idle.lac in a diagnosis folder)";
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_FILEMUSTEXIST;
+    if (!GetOpenFileNameW(&ofn)) return FILEDIALOG_CANCELLED;
+    if (!WideCharToMultiByte(CP_UTF8, 0, file, -1, path, len, NULL, NULL)) return FILEDIALOG_CANCELLED;
+    slashes(path);
+    got = FILEDIALOG_PICKED;
+#elif defined(__APPLE__)
+    got = run_dialog("osascript -e 'POSIX path of (choose file with prompt \"A capture (idle.lac)\")' 2>/dev/null",
+                     path, len);
+#else
+    got = run_dialog("if command -v zenity >/dev/null 2>&1; then"
+                     " zenity --file-selection --title='A capture (idle.lac)' --file-filter='*.lac' 2>/dev/null;"
+                     " elif command -v kdialog >/dev/null 2>&1; then"
+                     " kdialog --title 'A capture (idle.lac)' --getopenfilename . '*.lac' 2>/dev/null;"
+                     " else exit 127; fi",
+                     path, len);
+#endif
+    return got;
+}
+
 bool filedialog_exe_dir(char *dir, int len) {
 #ifdef _WIN32
     wchar_t w[MAX_PATH * 4];

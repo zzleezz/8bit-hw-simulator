@@ -56,6 +56,11 @@ done >> "$OUT/jobs.txt"
 for f in IC13:data0=1 IC5:removed; do
     echo "screen $f"
 done >> "$OUT/jobs.txt"
+# The check with no screen (--la-check): the faults of the verdict's parts
+# put on the board; the fault itself should come out on top.
+for f in IC8:data0=0 IC6:addr2; do
+    echo "check $f"
+done >> "$OUT/jobs.txt"
 
 job() {
     kind=$1; f=$2
@@ -69,6 +74,9 @@ job() {
         "$EXE" --board issue2 --headless 150 --shot "$OUT/$n/shot.png" --fault "$f" >/dev/null 2>&1
         out=$("$EXE" --la-diagnose "$OUT/$n" --la-simulate --la-all --board issue2 --fault "$f" \
               --la-screen "$OUT/$n/shot.png" 2>&1)
+    elif [ "$kind" = check ]; then
+        n=check_$(echo "$f" | tr ':.=@' '____')
+        out=$(LA_JOBS=4 "$EXE" --la-diagnose "$OUT/$n" --la-simulate --la-all --board issue2 --fault "$f" --la-check 2>&1)
     else
         n=sim_$(echo "$f" | tr ':.=@' '____'); ff=$f; [ "$f" = healthy ] && ff=""
         out=$("$EXE" --la-diagnose "$OUT/$n" --la-simulate --la-all --board issue2 ${ff:+--fault $ff} 2>&1)
@@ -82,7 +90,7 @@ job() {
 }
 export -f job
 xargs -P "${LA_JOBS:-$(nproc 2>/dev/null || echo 4)}" -L 1 bash -c 'job "$0" "$1"' < "$OUT/jobs.txt"
-cat "$OUT"/real_*.txt "$OUT"/sim_*.txt "$OUT"/screen_*.txt > "$OUT/all.txt"
+cat "$OUT"/real_*.txt "$OUT"/sim_*.txt "$OUT"/screen_*.txt "$OUT"/check_*.txt > "$OUT/all.txt"
 echo "Verdicts in $OUT/all.txt"
 if [ ! -f tests/la-diagnose-expected.txt ]; then
     echo "No tests/la-diagnose-expected.txt yet: copy $OUT/all.txt there to compare against it next time"

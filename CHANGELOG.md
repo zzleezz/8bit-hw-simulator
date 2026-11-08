@@ -8,6 +8,17 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- "Diagnose by probing", on a Spectrum: **Import capture...** takes a
+  logic analyser capture's lines (best idle.lac) as readings, low, high
+  or pulsing; the analyser's "low" also fits floating (it reads 1.2 V
+  low). `--probe-capture FILE --board B` on the command line. On the two
+  dead Issue 1 captures the CPU is the only fault left; working boards
+  fit the healthy board.
+- The check of the verdict's parts tries what goes wrong inside a chip
+  (an address line) before its pins, and gives the first item's parts
+  two tries a turn: simulated IC6 addr2 is now found exactly. The
+  regression has two check cases.
+
 - The check against the captures works without a screenshot: after a
   fault, **Check the named parts' faults against the captures** (or
   `--la-check` with no `--la-screen`) puts the atlas's faults of the

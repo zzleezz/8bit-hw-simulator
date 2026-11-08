@@ -378,8 +378,10 @@ static int screen_candidates(const la_cli_t *o, const machine_t *m, cand_t *c, i
 
 /* With no screen: the faults of the parts the bus's verdict names (its
  * "What to look at", the first item's parts first), from the atlas: each
- * part's removal first, then its data bits, then the rest, a part at a
- * time, at most MAX. TEXT: the diagnosis (diagnosis.txt). */
+ * part's removal first, then its data bits, then what goes wrong inside it
+ * (an address line, a flipped bit, weak outputs), then its pins (open,
+ * shorted, stuck); a part at a time, the first item's parts two at a turn,
+ * at most MAX. TEXT: the diagnosis (diagnosis.txt). */
 static int bus_candidates(const la_cli_t *o, const machine_t *m, const char *text, cand_t *c, int max) {
     char ref[32][16];
     int level[32];
@@ -408,44 +410,46 @@ static int bus_candidates(const la_cli_t *o, const machine_t *m, const char *tex
     }
     /* Each part's faults, best first: the board's own atlas machine, else
      * one with the same parts. */
-    int *fl[32], nf[32];
+    int *fl[32], nf[32], lev[32];
     for (int k = 0; k < no; k++) {
         const char *r = ref[order[k]];
         size_t rl = strlen(r);
         fl[k] = xmalloc((size_t)a.nfaults * sizeof(int));
         nf[k] = 0;
+        lev[k] = level[order[k]];
         for (int pass = 0; pass < 2 && !nf[k]; pass++)
-            for (int rank = 0; rank < 3; rank++)
+            for (int rank = 0; rank < 4; rank++)
                 for (int f = 0; f < a.nfaults; f++) {
                     const atlas_fault_t *x = &a.faults[f];
                     if (x->h.mode != 0 || !x->spec) continue;
                     if (pass == 0 ? x->h.machine != am : !atlas_same_refs(x->h.machine, am) || x->h.machine == am) continue;
                     if (strncmp(x->spec, r, rl) || !strchr(".:", x->spec[rl]) || strchr(x->spec, ' ')) continue;
-                    int fr = strstr(x->spec, ":removed") ? 0 : strstr(x->spec, ":data") ? 1 : 2;
+                    int fr = strstr(x->spec, ":removed") ? 0 : strstr(x->spec, ":data") ? 1
+                           : x->spec[rl] == ':' ? 2 : 3;      /* "IC6:addr2" inside; "IC6.3:open" a pin */
                     if (fr != rank) continue;
                     int dup = 0;
                     for (int i = 0; i < nf[k] && !dup; i++) dup = !strcmp(a.faults[fl[k][i]].spec, x->spec);
                     if (!dup) fl[k][nf[k]++] = f;
                 }
     }
-    int n = 0;
-    for (int depth = 0; n < max; depth++) {
+    int n = 0, used[32] = { 0 };
+    for (;;) {
         bool any = false;
-        for (int k = 0; k < no && n < max; k++) {
-            if (depth >= nf[k]) continue;
-            any = true;
-            const atlas_fault_t *x = &a.faults[fl[k][depth]];
-            int dup = 0;
-            for (int i = 0; i < n && !dup; i++) dup = !strcmp(c[i].spec, x->spec);
-            if (dup) continue;
-            memset(&c[n], 0, sizeof(c[n]));
-            snprintf(c[n].spec, sizeof(c[n].spec), "%s", x->spec);
-            const char *dd = x->desc ? x->desc : "";
-            size_t l = strcspn(dd, "\n");
-            snprintf(c[n].desc, sizeof(c[n].desc), "%.*s", (int)(l < 300 ? l : 300), dd);
-            n++;
-        }
-        if (!any) break;
+        for (int k = 0; k < no && n < max; k++)
+            for (int t = 0; t < (lev[k] == 2 ? 2 : 1) && n < max && used[k] < nf[k]; t++) {
+                any = true;
+                const atlas_fault_t *x = &a.faults[fl[k][used[k]++]];
+                int dup = 0;
+                for (int i = 0; i < n && !dup; i++) dup = !strcmp(c[i].spec, x->spec);
+                if (dup) continue;
+                memset(&c[n], 0, sizeof(c[n]));
+                snprintf(c[n].spec, sizeof(c[n].spec), "%s", x->spec);
+                const char *dd = x->desc ? x->desc : "";
+                size_t l = strcspn(dd, "\n");
+                snprintf(c[n].desc, sizeof(c[n].desc), "%.*s", (int)(l < 300 ? l : 300), dd);
+                n++;
+            }
+        if (!any || n >= max) break;
     }
     for (int k = 0; k < no; k++) free(fl[k]);
     atlas_free(&a);
