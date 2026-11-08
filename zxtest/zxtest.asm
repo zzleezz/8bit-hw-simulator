@@ -89,17 +89,20 @@ NTOL    EQU     8
         inc     sp
         ld      a, ixh
         cp      t6 >> 8
-        jr      z, $ + 9            ; to the JP (IX)
+        jr      z, .back
         cp      t7 >> 8
-        jr      z, $ + 5
+        jr      z, .back
         jp      reset
-        jp      (ix)
+.back   jp      (ix)
         ENDM
+
+; (A label in a macro is local to each use of it: sjasmplus 1.24.)
 
 ; Call a subroutine that returns with JP (IX) (no stack).
         MACRO   CALLX addr
-        ld      ix, $ + 7
+        ld      ix, .ret
         jp      addr
+.ret
         ENDM
 
 ; A test's start: the marker write and the border (n AND 7: 8 is black,
@@ -127,9 +130,10 @@ NTOL    EQU     8
         exx
         bit     0, b
         exx
-        jr      z, $ + 9            ; skip the two saves (3 + 4 bytes)
+        jr      z, .nosave
         ld      (SAVE + 4 * n + 2), hl
         ld      (SAVE + 4 * n), de
+.nosave
         ENDM
 ; (SAVE+4n) = E (bits), +1 = D (status), +2 = L, +3 = H: little-endian.
 
@@ -141,11 +145,12 @@ NTOL    EQU     8
         ld      e, a
         ld      a, iyh
         or      iyl
-        jr      nz, $ + 8           ; IY has one already (skip 6 bytes)
+        jr      nz, .had            ; IY has one already
         ld      a, h
         ld      iyh, a
         ld      a, l
         ld      iyl, a
+.had
         ENDM
 
 ; A march over PAGES pages from START (bad bits into E, the first bad
