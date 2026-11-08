@@ -613,8 +613,11 @@ The review of all of src/ (four parts) found these; the rest are fixed.
       passive pad every frame (a flag per net, made once); sim_rebuild
       reallocs each net's lists one pin at a time (count, then fill);
       swapping a cartridge cold-starts twice; the paddles look their pins
-      up by name on every POT read; c64.c cia_outs is never used;
-      --atlas-diff compares every fault with every other (hash them).
+      up by name on every POT read; --atlas-diff compares every fault
+      with every other (hash them). (2026-11-08: c64.c cia_outs IS used,
+      c64.c:442 detects a change of the CIA outputs with it. A per-net
+      "simulated" flag must be cleared when shorts merge nets or a chip is
+      removed: left until it's worth that risk.)
 
 ## 9. Publishing on GitHub (prepared 2026-10-29)
 Everything is ready in ../github-upload (antirez's repository with this
@@ -1034,6 +1037,11 @@ Later, software:
       (xmalloc: out of memory says so and stops). The build's last six
       warnings fixed (a typed path too long for the file browser now says
       so instead of opening a cut one). Static buffers commented.
+- [x] (Decided 2026-11-08, not done.) Verdict items as structured data for
+      the window instead of finding part names in the text: the text has
+      to be parsed anyway (diagnosis.txt, read back by the check and by a
+      saved run), and la_text_parts is the one parser for all of them; a
+      second, structured path could disagree with it. Left as text.
 - [x] (Done 2026-11-08.) Results window: what it found first, Open folder,
       stages named as the boxes; the Monitor shows the real Spectrum's
       screenshot while the window is open.
