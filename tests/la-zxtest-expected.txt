@@ -1,5 +1,6 @@
 real_zxtest-i2-good  OOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
 real_zxtest-i2-live  OOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
+real_zxtest-i3-ram-fault  OOOOFOOO | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at D380).
 sim_healthy  OOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
 sim_IC22_weak  OOOOFOOO | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at FFEA).
 sim_IC22_removed  OOOOFOOO | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at 8000).

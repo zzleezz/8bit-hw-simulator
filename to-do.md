@@ -1151,8 +1151,12 @@ Steps:
       folders and 16 simulated cases (IC22 weak/removed, IC7/8/13 bits,
       IC6/IC15 addr, IC3/IC25 banks, no contention, R26, /INT held, a dead
       address line, Issue 1, Issue 2 16K).
-      [ ] The user's real faulty boards (RAM first: one that passed the
-          boot stages, like the IC22 board).
+      [x] (2026-11-08) The real Issue 3B with the bad IC22 (passed all six
+          boot stages; ZX Diagnostics v0.37 found it): test 4 FAIL, bits
+          80, first at D380, the same in 4 captures; verdict "IC22, the
+          upper RAM's bit D7". Folder Logic Analyser/zxtest-i3-ram-fault.
+      [ ] More real faulty boards (and which part was replaced, for
+          tests/la-faults.txt).
 - [ ] 6. ZX Diagnostics v0.37 stages from its source, as a cross-check.
 
 ## Left over from earlier work
