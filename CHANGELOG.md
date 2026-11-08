@@ -6,6 +6,21 @@ Changes not yet in a release are under "Unreleased".
 This project is AI-generated: the code and these notes were written with
 Claude (Anthropic's AI), directed and tested by zzleezz.
 
+## Unreleased
+
+- A test ROM for 16K/48K Spectrums, made for the logic analyser
+  (zxtest/, built with sjasmplus): eight tests in a loop (data and address
+  lines, the ROM's sum, a march over the lower and upper RAM, the ULA's
+  ports, the interrupts, contention), each writing its result to an
+  address in the ROM area the analyser triggers on, and the results on
+  the screen. Unlike the ROM's own RAM test it holds a 1 in every bit: a
+  simulated weak IC22 (D7) passes all six boot stages and fails it. Run
+  on a real Issue 2 from a SteamCard Pro cartridge: every result the same
+  as the simulated board's. zxtest/zxbench.rom: the cartridge's bench
+  check.
+- --la-record plugs a ROM image named on the command line into the
+  simulated board.
+
 ## V1.2 (2026-11-08)
 
 - Logic analyser diagnosis, each thing said once: a dead board's idle

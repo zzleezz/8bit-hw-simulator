@@ -117,6 +117,9 @@ typedef struct {
      * screenshot), matched against the fault atlas ATLAS with what the bus
      * showed (a replay finds DIR/screen.png by itself). */
     const char *screen, *atlas, *carts;
+    /* A ROM cartridge (image.rom on the command line) plugged into the
+     * simulated board --la-record runs (the zxtest ROMs). */
+    const char *cart;
     /* --la-check [N]: after it, the screen's faults (N at most) put on the
      * simulated board one by one and compared with the captures, stage by
      * stage (LA_JOBS threads, else half the processors). */

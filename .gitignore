@@ -19,3 +19,5 @@ match_test/
 c64-hw-sim-*.exe
 tools/__pycache__/
 WORK_SUMMARY.md
+zxtest/*.lst
+zxtest/*.sym

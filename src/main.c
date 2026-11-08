@@ -103,9 +103,10 @@
  *       first N (20) cycles.
  *   --la-cycles FILE [--la-count N]
  *       Every bus cycle: T state, sample, kind, address, data.
- *   --la-record FILE [--board B] [--fault SPEC]... [--la-pre N] [--la-post N]
+ *   --la-record FILE [--board B] [--fault SPEC]... [--la-pre N] [--la-post N] [image.rom]
  *       Record the simulated board as the analyser would (28 MHz, triggered
- *       on /RESET going high, N 512 before and 32000 after).
+ *       on /RESET going high, N 512 before and 32000 after); with a ROM
+ *       image, that cartridge plugged in (zxtest/zxtest.rom).
  *   --la-compare FILE [--la-against FILE2 | --board B --fault SPEC...]
  *           [--la-count N] [--la-refresh]
  *       Cycle by cycle from the first fetch at 0000: the first difference
@@ -802,6 +803,7 @@ int main(int argc, char **argv) {
         args.la.nfaults = args.nfaults;
         args.la.atlas = args.atlas_path;
         args.la.carts = args.carts;
+        args.la.cart = args.crt;
         la_set_options(args.options, args.noptions);
         return la_cli(&args.la);
     }

@@ -252,6 +252,10 @@ bool record_board(const la_cli_t *o, int post, int trig_addr, la_capture_t *c, c
             board_destroy(b);
             return false;
         }
+    if (o->cart && !board_load(b, o->cart, false, err, errlen)) {
+        board_destroy(b);
+        return false;
+    }
     /* Before the trigger: the analyser's 1000 samples at 14 MHz are 70 us,
      * 2000 here at 28 MHz. The stages are up to 1.8 s after power on. */
     int pre = o->pre > 0 && !o->capture ? o->pre : trig_addr >= 0 ? 2000 : 512;

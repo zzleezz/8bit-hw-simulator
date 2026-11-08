@@ -1048,6 +1048,97 @@ Later, software:
       https://github.com/zzleezz/8bit-hw-simulator/releases/tag/V1.2 (tag
       at 96623bf, with the zip and fault_atlas.bin).
 
+## 13. Our own ZX test ROM for the logic analyser (planned 2026-11-08)
+Why: the boot stages only see the ROM's RAM test (02, 01, 00), so D2-D7
+never hold a 1 (the Issue 3B with a bad IC22 D7 passed all six stages).
+Decided with the user (2026-11-08):
+- A 16K ROM image in a slot of the user's SteamCard Pro (4 slots, switch
+  selected; not open source, so its behaviour is checked at the bench).
+  Not DivMMC/Dandanator (a .tap needs working RAM), not One ROM (opening
+  every machine). Runs from reset at 0000, needs no RAM to start.
+- Our own program first; ZX Diagnostics v0.37 (already simulated) captured
+  as a cross-check.
+- 16K/48K boards (Issues 1-6A) only; the 128 later.
+- Screen: border colour per test, a beep at the end, a small hex readout
+  once the lower RAM has passed (useful without the analyser too).
+Design:
+- Signposts: each test starts at its own fixed address the analyser arms
+  on (chosen to have no glitch look-alikes from nearby addresses).
+- Mailbox: each result is a write the analyser sees, address = test,
+  data = result (pass, or first bad address + wrong bits). Default: writes
+  into 0000-3FFF (go nowhere on a 48K, need no RAM, put every data bit on
+  the bus as 0 and 1). If the SteamCard Pro reacts to ROM-area writes, a
+  build switch moves it to OUT to an odd, unused port.
+- The whole suite loops for ever: arm on test N's signpost any time, no
+  reset timing. Tests longer than one ~7 ms capture check themselves and
+  report through the mailbox; the analyser takes a slice + the result.
+- No stack or RAM use until the RAM has passed (return addresses in
+  IX/IY). DI throughout except the interrupt test (deterministic, so the
+  simulator's run matches cycle by cycle).
+Tests, in order:
+  0 alive: mailbox writes 00 FF 55 AA, walking 1s and 0s (CPU data out,
+    D0-D7 stuck/shorted)
+  1 address walk: reads with A0-A15 walking 1 and 0
+  2 checksum of the ROM area (aliases, the cartridge/ROM path)
+  3 lower RAM 4000-7FFF: data-bit walk at one address, then a march
+  4 upper RAM 8000-FFFF: 16K or 48K, march, refresh (fill, wait, re-read)
+  5 ULA ports: OUT FE each border/MIC/EAR bit; IN FE each keyboard row,
+    no keys pressed; EAR in
+  6 interrupts: IM 1 and IM 2 (table in our ROM), HALT, frame spacing
+  7 contention: timed loop in contended RAM (vs the simulator)
+Steps:
+- [ ] 1. Assembler (sjasmplus, portable, in J:/Coding/pico-tools) and a
+      tiny bench ROM: writes to the ROM area in a loop at a signpost.
+      At the bench: does the SteamCard Pro keep running it (no paging on
+      writes)? Does the analyser see /ROMCS held and the cartridge's data?
+      Built 2026-11-08: zxtest/zxbench.asm -> zxbench.rom (sjasmplus 1.24.0
+      in J:/Coding/pico-tools/sjasmplus). No RAM, no stack, DI; loops every
+      265 us: 0200 writes 3F80-3F93 (00 FF 55 AA, walking 1, walking 0),
+      0300 reads 3F80/3F81, 0400 the same 20 values OUT to (80-93)BB; the
+      border steps about 7 times a second. --la-record now plugs a ROM
+      named on the command line (la_cli_t.cart): the simulated Issue 2 gives
+      every value right. Logic Analyser/bench.bat captures it (addr=3F80).
+      The SteamCard Pro's chip (ROMs/RIP0001.bin, 64K): bank 0 ZX
+      Diagnostics v0.37 (= carts/zx-diagnostics-v0.37.rom), 1 Retroleum
+      DIAGROM V1.56, 2 Paul Farrow's 128 RAM Tester V2.1, 3 the Sinclair
+      128 test ROM. Keep 0 and 1 (the user); 2 and 3 are ours.
+      ROMs/steamcard-bench.bin = the same with zxbench in bank 2 (banks 0,
+      1, 3 byte-identical; 0-2 boot right in the simulator).
+      [x] The user programmed it (SW1 off + SW2 on = bank 2), border cycled.
+      [x] Captured on the real Issue 2 (bench.lac): 508 writes, 520 OUTs,
+          2404 reads, 3276 fetches, all right; /ROMCS high. The SteamCard
+          Pro ignores ROM-area writes and keeps off the bus during them.
+- [x] 2. The test ROM (2026-11-08): zxtest/zxtest.asm, sh zxtest/build.sh
+      (font from mkfont.py, the ROM sum patched by patchsum.py, which also
+      checks the hand-counted jumps) -> zxtest.rom and
+      ROMs/steamcard-test.bin (banks 0-1 the dump, 2 zxbench, 3 zxtest).
+      Mailbox: MARK 3FA0+n (test start), RES 3FC0+4n (status, bits, hi,
+      lo), 3FAF loop end. Nothing READS 3F80-3FFF (the ROM sum stops at
+      3F7F): the trigger is the address alone.
+      Simulated: Issues 2, 3B, 4B, 6A all OK; Issue 1 (16K) upper NONE.
+      Frame 0B5E (2910 turns), contention 08A1 (2209; none would be
+      2254). IC22:weak -> test 4 FAIL bits 80 at FFEA, while the six boot
+      stages pass it ("All 6 stages the same as a working one"); IC22
+      removed -> 80 at 8000; IC7.14:vcc -> test 3 bits 02 at 4000.
+      IC22.14:gnd (D7 of the whole bus) can't run it: the CPU slides
+      through memory and FETCHES 3FCx, so only a WRITE there is a result.
+      Loop about 4.5 s. Logic Analyser/zxtest.bat: one test's result.
+      [x] The user programmed steamcard-test.bin; on the real Issue 2
+          (2026-11-08, Logic Analyser/zxtest0-7.lac, mark3FA0/3FA1.lac):
+          all 8 results byte for byte the simulated ones, frame 0B5E and
+          contention 08A1 included; test 0's 20 writes right, all 32
+          walking addresses seen, 5310 ROM-area reads right, 0 wrong.
+      [ ] The signpost/mailbox addresses into a file the C code reads
+          (zxtest.sym has them now).
+- [ ] 3. Simulator: a ROM mode like MODE_ZXDIAG running our image; the
+      atlas/screen matcher for it later.
+- [ ] 4. --la-diagnose test-ROM mode: arm on each signpost in turn,
+      compare with the simulated board, read the mailbox results, name
+      parts (bit -> chip per issue).
+- [ ] 5. Regression: simulated faults (IC22 D7 first: must now fail) in
+      tests/la-diagnose.sh; then the user's real faulty boards.
+- [ ] 6. ZX Diagnostics v0.37 stages from its source, as a cross-check.
+
 ## Left over from earlier work
 - [x] Rebuild `fault_atlas.bin` (`--build-atlas`): it was out of date for the
       power-path faults (F1, L4, L5 said "CPU running"). Rebuilt with item 1.
