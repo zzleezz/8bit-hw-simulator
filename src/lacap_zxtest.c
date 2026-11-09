@@ -16,7 +16,7 @@
 #include "lacap_int.h"
 #include "filedialog.h"
 
-#define ZT_N 12                 /* the most results (the arrays): 9-11 come within tests 3-5 (version 5) */
+#define ZT_N 13                 /* the most results (the arrays): 9-11 come within tests 3-5 (version 5), 12 after 7 (7) */
 
 /* The ROM's constants, from its table at 00A0 ("ZTAB", version 4 on: see
  * zxtest.asm); an image without one (versions 1-3) had these. */
@@ -47,20 +47,25 @@ static void zt_consts(const uint8_t *rom) {
 static const char *const zt_name[ZT_N] = {
     "alive (the data lines)", "the address lines", "the ROM's sum (a CRC from version 6)","the lower RAM (4000-7FFF)",
     "the upper RAM (8000-FFFF)", "the ULA's ports (keyboard)", "the interrupts", "contention (the ULA's timing)",
-    "the upper RAM's refresh", "the lower RAM's address lines", "the upper RAM's address lines", "the EAR input" };
+    "the upper RAM's refresh", "the lower RAM's address lines", "the upper RAM's address lines", "the EAR input",
+    "the Spectrum's own ROM (the cartridge paged out)" };
 
 /* The order the results are judged and listed in: each bank's address
  * lines before its march (an address line wrong fails the march too). */
-static const int zt_order[ZT_N] = { 0, 1, 2, 9, 3, 10, 4, 5, 11, 6, 7, 8 };
+static const int zt_order[ZT_N] = { 0, 1, 2, 9, 3, 10, 4, 5, 11, 6, 7, 8, 12 };
+/* The version a result came with (test 8: 3, 9-11: 5, 12: 7). */
+static int zt_since(int t) { return t == 12 ? 7 : t >= 9 ? 5 : t == 8 ? 3 : 1; }
 /* The captures: the first from test 0's start (tests 0 and 1 and their
  * results fit in it), then each result, in the order the ROM writes them
  * (one turn of its loop can give them all). A capture's stage box in the
  * window is its test's: 9 and 10 (the address lines) go with the RAM
- * tests they run in, 11 (EAR) with the ULA's ports. Results 9-11 came with
+ * tests they run in, 11 (EAR) with the ULA's ports, 12 (the Spectrum's own
+ * ROM, version 7) with the ROM's box. Results 9-11 came with
  * version 5: an older image's captures are the first eight. */
-#define ZT_NCAP 11
+#define ZT_NCAP 12
 static const struct { int test, box; } zt_cap[ZT_NCAP] = {
-    { 0, 0 }, { 2, 1 }, { 9, 2 }, { 3, 2 }, { 10, 3 }, { 4, 3 }, { 5, 4 }, { 11, 4 }, { 6, 5 }, { 7, 6 }, { 8, 7 } };
+    { 0, 0 }, { 2, 1 }, { 9, 2 }, { 3, 2 }, { 10, 3 }, { 4, 3 }, { 5, 4 }, { 11, 4 }, { 6, 5 }, { 7, 6 }, { 12, 1 },
+    { 8, 7 } };
 static int cap_test(int k) { return zt_cap[k].test; }
 /* The capture of a test's result (tests 0 and 1: the first). */
 static int cap_of(int test) {
@@ -300,11 +305,48 @@ static int zt_ram(int item, bool upper, const uint8_t r[4]) {
 static int zt_capver;
 
 
+/* Test 12 (version 7): the CRC-16/CCITT-FALSE of the Spectrum's own ROM,
+ * 0000-3F7F, read with the cartridge paged out; a good 48K ROM's, and the
+ * test ROM image's own over the same bytes (what a cartridge that didn't
+ * page out gives). */
+#define ZT_ROM48_CRC 0xE295u
+static unsigned zt_imgcrc;
+static unsigned crc16(const uint8_t *d, int n) {
+    unsigned c = 0xFFFF;
+    for (int i = 0; i < n; i++) {
+        c ^= (unsigned)d[i] << 8;
+        for (int k = 0; k < 8; k++) c = c & 0x8000 ? (c << 1 ^ 0x1021) & 0xFFFF : c << 1 & 0xFFFF;
+    }
+    return c;
+}
+
+/* The parts on a net of this board, by name ("TR3 pin 2, IC1 pin 33"). */
+static void net_parts(const char *name, char *out, int len) {
+    out[0] = 0;
+    if (!vboard) return;
+    const sim_t *s = &vboard->sim;
+    int root = -1;
+    for (int i = 0; i < s->nnets && root < 0; i++) if (s->nets[i].name && !strcmp(s->nets[i].name, name)) root = s->nets[i].root;
+    if (root < 0) return;
+    int m = 0, k = 0;
+    for (int i = 0; i < s->nparts && m < len; i++) {
+        if (!strcmp(board_part_kind_name(vboard, i), "connector")) continue;
+        for (int j = 0; j < s->parts[i].npins; j++) {
+            if (s->pins[s->parts[i].first_pin + j].root != root) continue;
+            m += snprintf(out + m, len - m, "%s%s pin %d", k++ ? ", " : "", s->parts[i].ref, s->pins[s->parts[i].first_pin + j].number);
+            break;
+        }
+    }
+}
+
 /* Test 1's result: the CPU drives every address line both ways (said in
  * the address lines' verdict). */
 static bool zt_t1_ok;
 /* Contention wrong (judged first): the lower RAM's failures follow from it. */
 static bool zt_cont_bad;
+/* Test 7 failed at all: the ULA's timing with the CPU is off, and it may
+ * miss port reads (a missed IN FE reads FF, as EAR high with no key). */
+static bool zt_cont_fail;
 
 /* Results 9 and 10: a bank's address lines that alias (r[1] the data bits
  * it showed in, r[2] r[3] the lines). The board's wiring says which pin of
@@ -406,8 +448,22 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
     case 9: return zt_addr(item, false, r);
     case 10: return zt_addr(item, true, r);
     case 11: {
-        /* bits 0-3: bit 6 read 1 after OUT 00, 08, 10, 18 */
+        /* bits 0-3: bit 6 read 1 after OUT 00, 08, 10, 18; bit 4 (version
+         * 7): 1 after OUT 18 to port FF (A0 high, not the ULA's) */
         const char *ula = ref_of("ULA");
+        if ((r[1] & 0x10) && zt_cont_fail) {
+            printf("  %d. EAR read 1 after a write to port FF too: with the contention wrong the ULA can miss port reads\n"
+                   "     (they read FF), so that says nothing about its port select. Run again once contention is right.\n", ++item);
+            if (r[0] == 1 && (r[1] & 9) == 8) return item;
+        } else if (r[1] & 0x10) {
+            char on[300];
+            net_parts("/IORQULA", on, sizeof(on));
+            printf("  %d. The ULA (%s) answered a write to port FF: OUT 18 there set its EAR/MIC level, so it takes a\n"
+                   "     port with A0 high for its own. Its port select (/IORQULA, made from /IORQ and A0)%s%s: the\n"
+                   "     transistor and resistor that make it, A0 to them, or the ULA.\n", ++item, ula ? ula : "IC1",
+                   on[0] ? ": " : "", on);
+            if (r[0] == 1 && (r[1] & 9) == 8) return item;    /* the rest was right */
+        }
         if (r[0] == 0) {
             /* the ROM passed it: 08 or 10 not as this issue's */
             int e = ear_expect(m);
@@ -527,6 +583,28 @@ static int zt_verdict(int item, int test, const uint8_t r[4], const machine_t *m
                    "     cycles: a frame is 69888). The ULA's clock (the crystal X1, the ULA) or the frame counter in the ULA.\n",
                    ++item, v16, zt.frame);
         return item;
+    case 12: {
+        /* +1 bit 0: the cartridge didn't page out; bit 1: it didn't come
+         * back (the ROM stopped there) */
+        const char *rom = ref_of("ROM");
+        if (r[1] & 2)
+            printf("  %d. The cartridge paged out (20 to port 1F) but didn't come back on 00: the test ROM stops there\n"
+                   "     with a magenta border, running from the RAM. The cartridge's paging latch.\n", ++item);
+        if (r[1] & 1) {
+            printf("  %d. The cartridge didn't page out when 20 was written to port 1F (its own ROM was still there:\n"
+                   "     CRC %04X%s), so the Spectrum's own ROM wasn't tested. A cartridge without ZX Diagnostics\n"
+                   "     paging, or its paging latch (on the SteamCard Pro, the LS138's pin 15 to the latch).\n", ++item, v16,
+                   v16 == zt_imgcrc ? ", the test ROM's" : "");
+            return item;
+        }
+        if (v16 != ZT_ROM48_CRC)
+            printf("  %d. The Spectrum's own ROM (%s) reads wrong: its CRC over 0000-3F7F is %04X, not %04X (a good 48K\n"
+                   "     ROM's). The cartridge reads right (test 2), so the address and data lines are good as far\n"
+                   "     as the edge connector: the ROM chip, its legs or socket, its select (/ROMCS from the ULA),\n"
+                   "     or the board's link for the ROM type. (A replacement ROM that isn't the standard 48K one\n"
+                   "     also gives another CRC.)\n", ++item, rom ? rom : "IC5", v16, ZT_ROM48_CRC);
+        return item;
+    }
     case 7: {
         const char *ula = ref_of("ULA");
         if (r[0] == 2) return item;
@@ -555,6 +633,7 @@ int zxtest_diagnose(const la_cli_t *o) {
     }
     zt_consts(rom);
     int img_ver = zt.version;
+    zt_imgcrc = crc16(rom, 0x3F80);
     char oldpath[1000] = "";        /* the older image the captures were compared with */
     mkdir1(dir);
     if (!o->replay)
@@ -600,13 +679,19 @@ int zxtest_diagnose(const la_cli_t *o) {
         }
     }
     bool boxbad[8] = { 0 };
-    int ncaps = zt.ntests > 9 ? ZT_NCAP : 8, shown = 0;
-    if (o->replay && ncaps > 8) {
-        /* a folder of an older version's captures: no file for result 9 */
-        cap_file(dir, cap_of(9), path, sizeof(path));
-        FILE *f = fopen(path, "rb");
-        if (f) fclose(f);
-        else ncaps = 8;
+    /* The captures this image has results for (a folder replayed from an
+     * older version's captures: only those it has files for). */
+    int ncaps = 0, shown = 0;
+    for (int k = 0; k < ZT_NCAP; k++) {
+        int t = cap_test(k);
+        if (t >= zt.ntests || zt_since(t) > img_ver) continue;
+        if (o->replay && t >= 9) {
+            cap_file(dir, k, path, sizeof(path));
+            FILE *f = fopen(path, "rb");
+            if (!f) continue;
+            fclose(f);
+        }
+        ncaps++;
     }
     for (int k = 0; k < ZT_NCAP; k++) {
         la_capture_t c;
@@ -620,7 +705,7 @@ int zxtest_diagnose(const la_cli_t *o) {
             int v = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
             FILE *f = o->replay ? fopen(path, "rb") : NULL;
             if (f) fclose(f);
-            if (zt.ntests <= 9 || v < 5 || (o->replay && !f)) continue;
+            if (zt.ntests <= t || v < zt_since(t) || (o->replay && !f)) continue;
         }
         /* this box's last capture? (then its state is final) */
         bool last = true;
@@ -659,6 +744,7 @@ int zxtest_diagnose(const la_cli_t *o) {
             /* the cartridge holds an older version: its own image, if kept */
             int v = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
             if (v != img_ver && !zt_old_rom(rompath, v, rom, oldpath, sizeof(oldpath))) oldpath[0] = 0;
+            zt_imgcrc = crc16(rom, 0x3F80);
             zt_bus(cy, n, rom, &bus);
             have_bus = bus.have;
         }
@@ -701,7 +787,8 @@ int zxtest_diagnose(const la_cli_t *o) {
          * bytes can't be (its results still say what they say). */
         int cap_ver = got[0] ? (res[0][3] ? res[0][3] : 1) : img_ver;
         zt_capver = cap_ver;
-        int ntests = cap_ver >= 5 ? ZT_N : cap_ver >= 3 ? 9 : 8;    /* test 8 came with version 3, 9-11 with 5 */
+        int ntests = cap_ver >= 7 ? 13 : cap_ver >= 5 ? 12 : cap_ver >= 3 ? 9 : 8;    /* test 8 came with version 3, 9-11 with 5, 12 with 7 */
+        if (ntests > zt.ntests) ntests = zt.ntests;
         if (have_bus && cap_ver != img_ver && oldpath[0])
             printf("(These captures are of version %d of the test ROM, compared with %s; %s is\n"
                    "version %d: program the cartridge with it when convenient.)\n\n", cap_ver, oldpath, rompath, img_ver);
@@ -755,6 +842,7 @@ int zxtest_diagnose(const la_cli_t *o) {
         zt_t1_ok = got[1] && res[1][0] == 0;
         bool cont_noted = false;    /* the lower RAM's failure put down to contention, once */
         zt_cont_bad = cont_first;
+        zt_cont_fail = got[7] && res[7][0] == 1;
         if (cont_first) item = zt_verdict(item, 7, res[7], m);
         for (int o = 2; o < ZT_N; o++) {
             int t = zt_order[o];
@@ -784,8 +872,12 @@ int zxtest_diagnose(const la_cli_t *o) {
                    k16 ? " (no upper RAM: a 16K)" : "", ntests > 9 ? " (each address line its own)" : "",
                    ntests > 9 ? " (only the EAR input's level)" : "");
             if (ntests > 9 && got[11])
-                printf("  The EAR input after OUT 00, 08, 10, 18: %d %d %d %d, as this issue's.\n", res[11][1] & 1,
-                       res[11][1] >> 1 & 1, res[11][1] >> 2 & 1, res[11][1] >> 3 & 1);
+                printf("  The EAR input after OUT 00, 08, 10, 18: %d %d %d %d, as this issue's%s.\n", res[11][1] & 1,
+                       res[11][1] >> 1 & 1, res[11][1] >> 2 & 1, res[11][1] >> 3 & 1,
+                       ntests > 12 ? "; a write to port FF left it alone" : "");
+            if (ntests > 12 && got[12] && res[12][0] == 0)
+                printf("  The Spectrum's own ROM reads right (CRC %04X over 0000-3F7F, the cartridge paged out).\n",
+                       res[12][2] << 8 | res[12][3]);
         }
     }
     board_destroy(vboard);

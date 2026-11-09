@@ -8,6 +8,21 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- The test ROM, version 7 (not yet run on the bench): result 12, the
+  Spectrum's own ROM. A routine copied to the lower RAM writes 20 to
+  port 1F, the ZX Diagnostics paging port the SteamCard Pro decodes
+  too, which releases /ROMCS. It takes the CRC of 0000-3F7F and pages
+  the cartridge back in; a good 48K ROM gives E295. The diagnosis tells
+  apart a cartridge that didn't page out (the CRC is the test ROM's own)
+  from a bad ROM. Result 11 also writes 18 to port FF: EAR must not
+  change, as the ULA only answers ports with A0 low. Twelve captures
+  now; version 6's image is kept (carts/zxtest-v6.rom). The simulated
+  cartridge pages out the same way: a write to ports 00-1F with bit 5
+  set, and /RESET pages it back in.
+- The SteamCard Pro's I/O, traced on the card (v1.2): an LS138 on
+  /IORQ, /WR and A5-A7 (writes only). Ports 00-1F are paging, 20-3F the
+  data LEDs, and nothing is on E0-FF. The bank is set by the DIP switch
+  only.
 - Diagnose by probing: Save... and Load... The readings, the settings
   that rank them (the screen, the strategy, legs or pads, chip markings,
   the repair records' weights) and a report of the suspects, as a text

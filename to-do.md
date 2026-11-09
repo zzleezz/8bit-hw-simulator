@@ -1159,11 +1159,41 @@ Steps:
           tests/la-faults.txt).
 - [x] 6. (2026-11-09) ZX Diagnostics from its source, as a cross-check:
       zxtest/zx-diagnostics-crosscheck.md. Gaps found:
-      [ ] Which I/O ports the SteamCard Pro decodes; can it page out?
-      [ ] The ULA's port decoding (OUT to an odd port, EAR must stay 0),
-          in result 11, once the SteamCard's ports are known.
-      [ ] A floating bus test (v7): the ULA's screen fetches seen by the CPU.
-      [ ] If the card can page out: a CRC of the Spectrum's own ROM.
+      [x] (2026-11-09) Which I/O ports the SteamCard Pro decodes (v1.2,
+          traced by the user; photos): an LS138, A=A5 B=A6 C=A7, /G2A
+          (pin 4) /IORQ, /G2B (5) /WR, G1 (6) +5V: writes only, A0-A4 and
+          A8-A15 not decoded. Y0 (pin 15) = ports 00-1F (ZX Diagnostics'
+          ROMPAGE_PORT 1F: bit 5 set pages the card out, clear pages it
+          in), Y1 (14) = 20-3F (LED_PORT 3F, the data LEDs). Y7 (pin 7,
+          ports E0-FF, so FE and FF) goes nowhere as far as the meter
+          shows; bank 0 (ZX Diagnostics) writes FE and FF itself. The
+          LS273s are the activity-LED latches (/IORQ on one's D input,
+          pin 8). The bank is the DIP switch only (a One ROM as the EPROM):
+          software can't change it. RIP0001.bin's OUT (n),A: bank 0 FE 53,
+          3F 17, 1F 4, FF 3; bank 1 FE, CF; banks 2, 3 FE only.
+          Not checked on the card: whether the 1F latch is really bit 5
+          and /ROMCS (as the original diagboard) - v7 would show it.
+      [x] (2026-11-09, v7) The ULA's port decoding: result 11 bit 4, EAR
+          after OUT 00 to FE then 18 to FF (FAIL if it reads 1; the
+          diagnosis names the parts on /IORQULA).
+      [ ] A floating bus test (v8?): the ULA's screen fetches seen by the CPU.
+      [x] (2026-11-09, v7) The Spectrum's own ROM: result 12 (after test
+          7, capture at 3FF0), a CRC of 0000-3F7F with the cartridge paged
+          out by port 1F (routine and tables copied to 7900/7A00). E295 =
+          a good 48K ROM. Flags: bit 0 didn't page out, bit 1 didn't come
+          back (magenta border, stays in the RAM). The simulated cartridge
+          pages the same way.
+          [x] (2026-11-09) tests/la-zxtest.sh (8:41): every case's line
+              has the 13th result (n where the lower RAM failed); the v6
+              and v7 real folders added. IC1:nocontention showed bit 4
+              set (a missed IN FE reads FF): the port FF verdict now
+              isn't given when test 7 failed.
+          [ ] A simulated fault of the Spectrum's ROM for result 12 (and
+              of /IORQULA for bit 4), if the fault grammar can make one.
+          [x] (2026-11-09) Simulated good Issue 2 and 3B: all 12 OK, 12 =
+              E295. On the bench (bench-pc-v7/zxtest-i2-v7-01, good Issue
+              2): all OK, test 12 00 E295 (the SteamCard Pro pages out on
+              20 to port 1F and back on 00), 11 = 0E (port FF ignored).
 - [ ] 7. The review of 2026-11-08 (commits d0d2477..70257e2), in order:
       [x] 1. (2026-11-08, v3) Test 4's "none": 55@8000 and AA@8001 both
           wrong also when a 48K's upper RAM is dead or two chips are stuck
@@ -1204,8 +1234,9 @@ Steps:
               pin for MIC too (ula.c mic_reads_ear, set in zx48.c); the
               diagnosis judges all four values by the board's issue
               (ear_expect: 0 1 1 1 Issue 1/2, 0 0 1 1 later).
-          [ ] Confirm on a real Issue 3 (expected 0 0 1 1) and an Issue 1
-              (assumed as the Issue 2).
+          [x] (2026-11-09) Real Issue 3B (bench-pc/zxtest-i3-v6-01, the
+              IC22 board): 0 0 1 1, as modelled.
+          [ ] Confirm on an Issue 1 (assumed as the Issue 2).
           HALT: not done (low priority, nothing to diagnose with it yet).
       [x] 6. VERSION: the ROM's two strings come from the EQU (v3), the C
           side reads it from the table (v4; older images: rom[0x77]).
@@ -1223,8 +1254,11 @@ Steps:
       [x] 9. (2026-11-09, v6) Test 2 is a CRC-16/CCITT-FALSE of 0000-3F7D
           (two 256-byte tables at 1800/1900, about 0.45 s); patchsum.py
           stores it at CSUM. v5 kept as zxtest-v5.rom.
-          [ ] Reflash the SteamCard with v6 (ROMs/steamcard-test.bin) and
-              run zxdiagnose.bat on the good Issue 2.
+          [x] (2026-11-09) On the bench: good Issue 2 all OK, CRC 3049
+              (bench-pc/zxtest-i2-v6-01); IC22 board as before. The bench
+              PC ran an old c64-hw-sim.exe and v5 carts/zxtest.rom (the
+              reports said "WRONG" and "version 5"); replayed here they
+              are right.
       [ ] 10. Frame 2912 / contention 2209 confirmed on real Issue 2 and
           3B only; run good Issues 1, 4, 6A. (v3's simulated counts are
           0B5D/08A0, one turn less than v2's: where the first interrupt

@@ -69,6 +69,22 @@
 ;               FAIL if 00 reads 1 or 18 reads 0 (the same on every issue
 ;               with nothing in the EAR socket; 08 and 10 are reported only:
 ;               an Issue 2 and an Issue 3 are known to differ there).
+;               (v7) Bit 4: EAR read 1 after OUT 00 to FE then OUT 18 to
+;               port FF (A0 high): the ULA answered a port that isn't its
+;               own (FAIL). FF is safe on the SteamCard Pro: its LS138
+;               decodes only A5-A7 (writes), and E0-FF go nowhere.
+;  12 own ROM   (v7, after test 7) the Spectrum's own ROM: a routine in the
+;               lower RAM (only if it passed) writes 20 to port 1F (the
+;               ZX Diagnostics / SteamCard Pro paging port, any of 00-1F:
+;               bit 5 releases /ROMCS), takes the CRC of 0000-3F7F (not
+;               3F80-3FFF: reads there would fire the analyser's triggers),
+;               writes 00 to port 1F and comes back. +2 +3 the CRC (E295 a
+;               good 48K ROM); +1 bit 0: the cartridge didn't page out (its
+;               "ZTAB" still at 00A0: the CRC is of this ROM). FAIL if not
+;               E295 (another ROM version also fails: the PC says which).
+;               Status 02: not run (the lower RAM failed). If the
+;               cartridge doesn't come back, the routine stays in the RAM
+;               with a magenta border (the result written first).
 ; Then the results on the screen (if the lower RAM passed; test 8's line
 ; WAIT until it is read back), the border green (all OK), yellow (no upper
 ; RAM: right on a 16K only) or red, a beep, about 1.5 s to read it, test
@@ -80,7 +96,7 @@
 ; A new VERSION: keep the old zxtest.rom as carts/ and zxtest/zxtest-vN.rom
 ; (N the old version): captures of a cartridge not reprogrammed yet are
 ; compared with it.
-VERSION EQU     6               ; test 0's result +3, "ZXTEST n" at 0070, the title
+VERSION EQU     7              ; test 0's result +3, "ZXTEST n" at 0070, the title
 MARK    EQU     3FA0h           ; test n's marker
 RES     EQU     3FC0h           ; test n's four result bytes
 ALIVE   EQU     3F80h           ; test 0's writes
@@ -97,7 +113,13 @@ FRAME_N EQU     2912
 CONT_N  EQU     2209            ; measured on the simulated Issue 2
 NOCONT_N EQU    2254            ; the same loop with no contention (not used here: for the PC)
 NTOL    EQU     8
-NTESTS  EQU     12              ; results 0-11 (9-11 within tests 3-5)
+NTESTS  EQU     13              ; results 0-12 (9-11 within tests 3-5, 12 after 7)
+PAGEPORT EQU    1Fh             ; the cartridge's paging port (v7, test 12)
+PAGEOUT EQU     20h             ; bit 5: the cartridge's ROM out
+RCODE   EQU     7900h           ; test 12's routine in the lower RAM
+RTAB    EQU     7A00h           ; and copies of crc_hi, crc_lo (7A00, 7B00)
+ROMEND  EQU     3F80h           ; test 12's CRC: 0000 up to here
+ROM48_CRC EQU   0E295h          ; a good 48K ROM's CRC of 0000-3F7F
 
 ; shadow registers: B' bit 0 lower RAM OK, bit 1 upper RAM OK;
 ; C' test 2's status; HL' test 2's sum; D' the loop count.
@@ -650,12 +672,27 @@ t5:
         ld      h, a
         cp      20h
         jr      nz, .e
-        ld      a, iyl
+        ; (v7) the ULA's port decode: EAR low by FE, then 18 to port FF
+        ; (A0 high): EAR must stay low
+        xor     a
+        out     (0FEh), a
+        ld      b, 0
+.p1     djnz    .p1
+        ld      a, 18h
+        out     (0FFh), a
+        ld      b, 0
+.p2     djnz    .p2
+        ld      a, 0FFh
+        in      a, (0FEh)
+        bit     6, a
+        jr      z, .p0
+        set     4, e
+.p0     ld      a, iyl
         ld      h, a
         ld      l, c                ; after OUT 18
         ld      d, 0
         ld      a, e
-        and     9                   ; 00 low and 18 high on every issue
+        and     19h                 ; 00 low and 18 high on every issue, FF ignored
         cp      8
         jr      z, .eok
         inc     d
@@ -808,7 +845,7 @@ t7:
         ld      d, 1
 .r
         RESULT  7
-        jp      show
+        jp      t12
 
 ; ---- the march's parts: HL from, C pages, D the value; JP (IX) back ------
         ds      1000h - $, 0FFh
@@ -1014,7 +1051,7 @@ show:
         inc     l
         djnz    .ck
         ld      hl, SAVE + 4 * 9 + 1
-        ld      b, 3                ; tests 9-11
+        ld      b, NTESTS - 9       ; tests 9-12
 .c2     ld      a, (hl)
         cp      1
         jr      z, .bad
@@ -1239,6 +1276,7 @@ names:  db      "ALIVE    ", 0
         db      "LOW ADDR ", 0
         db      "UP ADDR  ", 0
         db      "EAR IN   ", 0
+        db      "OWN ROM  ", 0
 w_ok:   db      " OK  ", 0
 w_fail: db      " FAIL", 0
 w_none: db      " NONE", 0
@@ -1272,6 +1310,111 @@ crc_lo:
         ds      2000h - $, 0FFh
 font:
         INCLUDE "font.inc"
+
+; ---- test 12: the Spectrum's own ROM (2400, v7) --------------------------
+; Runs from the lower RAM (the cartridge is paged out meanwhile): the CRC
+; tables and the routine are copied to RTAB and RCODE. No stack.
+        ds      2400h - $, 0FFh
+t12:
+        START   12
+        di
+        exx
+        ld      a, b
+        exx
+        bit     0, a
+        jr      nz, .st
+        ld      de, 2 << 8          ; no lower RAM: not run
+        ld      hl, 0
+        jp      t12r
+.st     ld      hl, crc_hi
+        ld      de, RTAB
+        ld      bc, 512
+        ldir
+        ld      hl, r12src
+        ld      de, RCODE
+        ld      bc, r12len
+        ldir
+        jp      RCODE
+t12r:                               ; D status, E flags, HL the CRC
+        RESULT  12
+        jp      show
+
+; The routine, run at RCODE.
+r12src:
+        DISP    RCODE
+r12:    ld      a, PAGEOUT
+        out     (PAGEPORT), a       ; the cartridge out
+        ld      iyl, 0              ; the flags
+        ld      hl, (00A0h)         ; still this ROM? (its "ZTAB")
+        ld      de, 'Z' | 'T' << 8
+        or      a
+        sbc     hl, de
+        jr      nz, .out
+        ld      hl, (00A2h)
+        ld      de, 'A' | 'B' << 8
+        or      a
+        sbc     hl, de
+        jr      nz, .out
+        ld      iyl, 1              ; it didn't page out
+.out    ld      ix, 0               ; the CRC of 0000-3F7F, as test 2's
+        ld      de, 0FFFFh
+        ld      bc, ROMEND
+.l      ld      a, (ix + 0)
+        inc     ix
+        xor     d
+        ld      l, a
+        ld      h, RTAB >> 8
+        ld      a, (hl)
+        xor     e
+        ld      d, a
+        inc     h
+        ld      e, (hl)
+        dec     bc
+        ld      a, b
+        or      c
+        jr      nz, .l
+        xor     a
+        out     (PAGEPORT), a       ; the cartridge back
+        ex      de, hl              ; HL = the CRC
+        ld      d, 0
+        ld      a, h
+        cp      ROM48_CRC >> 8
+        jr      nz, .f
+        ld      a, l
+        cp      ROM48_CRC & 0FFh
+        jr      nz, .f
+        ld      a, iyl
+        or      a
+        jr      z, .s
+.f      ld      d, 1
+.s      ld      a, iyl
+        ld      e, a
+        ld      b, 2                ; back? (two tries)
+.bk     ld      a, (00A0h)
+        cp      'Z'
+        jr      nz, .no
+        ld      a, (00A1h)
+        cp      'T'
+        jp      z, t12r
+.no     xor     a
+        out     (PAGEPORT), a
+        djnz    .bk
+        ; it stays out: the result from here, a magenta border, for ever
+        set     1, e
+        ld      d, 1
+        ld      a, d
+        ld      (RES + 4 * 12), a
+        ld      a, e
+        ld      (RES + 4 * 12 + 1), a
+        ld      a, h
+        ld      (RES + 4 * 12 + 2), a
+        ld      a, l
+        ld      (RES + 4 * 12 + 3), a
+        ld      a, 3
+        out     (0FEh), a
+.hang   jr      .hang
+        ENT
+r12len  EQU     $ - r12src
 
 ; ---- the IM 2 handler and table ------------------------------------------
         ds      (IM2V << 8 | IM2V) - $, 0FFh

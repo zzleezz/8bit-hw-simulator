@@ -1157,24 +1157,34 @@ static bool load_z80(board_t *b, const uint8_t *d, size_t n, char *msg, int msgl
  * the edge connector's: a bad contact there is a bad contact for it.
  * A 32K or 64K image is an EPROM of several 16K banks behind a switch on
  * its upper address lines (like DesTestSwitch): one bank is seen at a
- * time, and flipping the switch restarts the Spectrum. */
+ * time, and flipping the switch restarts the Spectrum.
+ * The paging of the ZX Diagnostics boards (and the SteamCard Pro, traced
+ * 2026-11-09): an LS138 on /IORQ, /WR and A5-A7 latches a write to any of
+ * ports 00-1F; its bit 5 set releases /ROMCS and the data bus (the
+ * Spectrum's own ROM is seen), clear takes them again. /RESET pages in. */
 #define ZX_MAX_BANKS 16
 typedef struct {
     char name[64];
     uint8_t rom[16384];         /* the selected bank */
     int pin_romcs, pin_mreq, pin_rd, pin_a[16], pin_d[8];
+    int pin_iorq, pin_wr, pin_reset;
+    bool out;                   /* paged out (port 1F, bit 5) */
     int nbanks, bank;
     uint8_t image[];            /* nbanks * 16K */
 } zxcart_t;
 
 static void zxcart_eval(sim_t *s, part_t *p) {
     zxcart_t *c = p->state;
-    bool sel = !sim_read(s, c->pin_mreq) && !sim_read(s, c->pin_rd) && !sim_read(s, c->pin_a[14]) &&
+    if (c->pin_reset >= 0 && !sim_read(s, c->pin_reset)) c->out = false;
+    else if (c->pin_iorq >= 0 && c->pin_wr >= 0 && !sim_read(s, c->pin_iorq) && !sim_read(s, c->pin_wr) &&
+             !sim_read(s, c->pin_a[5]) && !sim_read(s, c->pin_a[6]) && !sim_read(s, c->pin_a[7]))
+        c->out = sim_read(s, c->pin_d[5]);
+    bool sel = !c->out && !sim_read(s, c->pin_mreq) && !sim_read(s, c->pin_rd) && !sim_read(s, c->pin_a[14]) &&
                !sim_read(s, c->pin_a[15]);
     unsigned a = 0;
     for (int i = 0; sel && i < 14; i++) a |= (unsigned)sim_read(s, c->pin_a[i]) << i;
     for (int i = 0; i < 8; i++) sim_drive(s, c->pin_d[i], sel ? DRV_BIT((c->rom[a] >> i) & 1) : DRV_Z);
-    sim_drive(s, c->pin_romcs, DRV_HI);
+    sim_drive(s, c->pin_romcs, c->out ? DRV_Z : DRV_HI);
 }
 
 /* The edge connector pin on a net, or -1. */
@@ -1190,7 +1200,7 @@ static int edge_pin(board_t *b, const char *net) {
 
 static void cart_pins(board_t *b, zxcart_t *c, bool plugged) {
     sim_t *s = &b->sim;
-    int ins[18] = { c->pin_mreq, c->pin_rd }, nin = 2;
+    int ins[21] = { c->pin_mreq, c->pin_rd, c->pin_iorq, c->pin_wr, c->pin_reset }, nin = 5;
     for (int i = 0; i < 16; i++) ins[nin++] = c->pin_a[i];
     for (int i = 0; i < nin; i++) if (ins[i] >= 0) s->pins[ins[i]].flags = plugged ? PIN_IN | PIN_SENSE : 0;
     int outs[9] = { c->pin_romcs };
@@ -1222,6 +1232,7 @@ static void zx_set_cart_bank(board_t *b, int bank) {
     zxcart_t *c = ZX(b)->cart;
     if (!c || bank < 0 || bank >= c->nbanks) return;
     c->bank = bank;
+    c->out = false;
     memcpy(c->rom, c->image + (size_t)bank * 16384, 16384);
     board_config_changed(b);
     board_rebuild(b);
@@ -1244,6 +1255,10 @@ static bool plug_rom(board_t *b, const char *path, const uint8_t *d, size_t n, c
     c->pin_romcs = edge_pin(b, "/ROMCS");
     c->pin_mreq = edge_pin(b, "/MREQ");
     c->pin_rd = edge_pin(b, "/RD");
+    c->pin_iorq = edge_pin(b, "/IORQ");
+    if (c->pin_iorq < 0) c->pin_iorq = edge_pin(b, "/IOREQ");     /* Issue 3B on */
+    c->pin_wr = edge_pin(b, "/WR");
+    c->pin_reset = edge_pin(b, "/RESET");
     char name[8];
     for (int i = 0; i < 16; i++) { snprintf(name, sizeof(name), "A%d", i); c->pin_a[i] = edge_pin(b, name); }
     for (int i = 0; i < 8; i++) { snprintf(name, sizeof(name), "D%d", i); c->pin_d[i] = edge_pin(b, name); }

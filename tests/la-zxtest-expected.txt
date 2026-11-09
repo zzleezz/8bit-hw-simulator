@@ -1,24 +1,27 @@
 real_zxtest-i2-good  OOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
 real_zxtest-i2-live  OOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
 real_zxtest-i2-v5-01  OOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
+real_zxtest-i2-v6-01  OOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
+real_zxtest-i2-v7-01  OOOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
 real_zxtest-i3-ram-fault  OOOOFOOO | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at D380).
 real_zxtest-i3-ram-fault-v2  OOOOFOOO | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at D380).
-sim_healthy  OOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
-sim_IC22_weak  OOOOOOFOOOOn | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at 8000).
-sim_IC22_removed  OOOOOOFOOOOn | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at 8000).
-sim_IC7_14_vcc  OOOOFOOOOOOO | 1. IC7, the lower RAM's bit D1: it didn't keep what was written (the first wrong at 4000).
-sim_IC6_addr2  OOOFFOOOOOOO | 1. IC6, the lower RAM's bit D0: address lines A6 A13 alias in this chip only. Its address pin A2 (pin 6): the | 2. The lower RAM's march fails in the same bits (D0, the first at 4040): explained by its
-sim_IC15_addr3  OOOOOFFOOOOn | 1. IC15, the upper RAM's bit D0: address lines A3 A10 alias in this chip only. Its address pin A3 (pin 12): th | 2. The upper RAM's march fails in the same bits (D0, the first at 8008): explained by its
-sim_IC3_4_gnd  OOOFFOOOOOOO | 1. The lower RAM's address lines A5 A12 don't reach its chips as their own: writing one address changed | 2. The lower RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 4020): explained by its
-sim_IC3_2_open  OOOFFOOOOOOO | 1. The lower RAM's address line A12 doesn't reach its chips as its own: writing one address changed | 2. The lower RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 5000): explained by its
-sim_IC25_7_gnd  OOOOOFFOOOOn | 1. The upper RAM's address lines A4 A11 don't reach its chips as their own: writing one address changed | 2. The upper RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 8010): explained by its
-sim_IC25_removed  OOOOOFFOOOOn | 1. The upper RAM's address lines A3 A4 A5 A6 A10 A11 A12 A13 don't reach its chips as their own: writing one a | 2. The upper RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 8008): explained by its
-sim_IC1_nocontention  OOOFFOOOFOFO | 1. Contention is wrong: 2251 loop turns a frame with reads of 4000, not 2209 (with no contention at | 2. The lower RAM's address lines A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12 A13 don't reach its chips as their own: w | 3. The lower RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 4004): explained by its | 4. IN FE read FF after OUT 00 and after OUT 18: nothing answered the read (the EAR bit and the
-sim_R26_removed  OOOOOOOOOFFO | 1. /INT is held low: an interrupt came at once each time it was let in (1 loop turn between
+real_zxtest-i3-v6-01  OOOOOOFOOOOn | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at D380).
+sim_healthy  OOOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
+sim_IC22_weak  OOOOOOFOOOOOn | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at 8000).
+sim_IC22_removed  OOOOOOFOOOOOn | 1. IC22, the upper RAM's bit D7: it didn't keep what was written (the first wrong at 8000).
+sim_IC7_14_vcc  OOOOFOOOOOOnO | 1. IC7, the lower RAM's bit D1: it didn't keep what was written (the first wrong at 4000).
+sim_IC6_addr2  OOOFFOOOOOOnO | 1. IC6, the lower RAM's bit D0: address lines A6 A13 alias in this chip only. Its address pin A2 (pin 6): the | 2. The lower RAM's march fails in the same bits (D0, the first at 4040): explained by its
+sim_IC15_addr3  OOOOOFFOOOOOn | 1. IC15, the upper RAM's bit D0: address lines A3 A10 alias in this chip only. Its address pin A3 (pin 12): th | 2. The upper RAM's march fails in the same bits (D0, the first at 8008): explained by its
+sim_IC3_4_gnd  OOOFFOOOOOOnO | 1. The lower RAM's address lines A5 A12 don't reach its chips as their own: writing one address changed | 2. The lower RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 4020): explained by its
+sim_IC3_2_open  OOOFFOOOOOOnO | 1. The lower RAM's address line A12 doesn't reach its chips as its own: writing one address changed | 2. The lower RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 5000): explained by its
+sim_IC25_7_gnd  OOOOOFFOOOOOn | 1. The upper RAM's address lines A4 A11 don't reach its chips as their own: writing one address changed | 2. The upper RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 8010): explained by its
+sim_IC25_removed  OOOOOFFOOOOOn | 1. The upper RAM's address lines A3 A4 A5 A6 A10 A11 A12 A13 don't reach its chips as their own: writing one a | 2. The upper RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 8008): explained by its
+sim_IC1_nocontention  OOOFFOOOFOFnO | 1. Contention is wrong: 2251 loop turns a frame with reads of 4000, not 2209 (with no contention at | 2. The lower RAM's address lines A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12 A13 don't reach its chips as their own: w | 3. The lower RAM's march fails in the same bits (D0 D1 D2 D3 D4 D5 D6 D7, the first at 4004): explained by its | 4. EAR read 1 after a write to port FF too: with the contention wrong the ULA can miss port reads
+sim_R26_removed  OOOOOOOOOFFOO | 1. /INT is held low: an interrupt came at once each time it was let in (1 loop turn between
 sim_IC2_34_vcc  none | No test of the test ROM was seen. Is the cartridge in, set to the test ROM, and the Spectrum on?
-sim_IC23_removed  OOOOOnnOOOOn | 1. No upper RAM found at all (8000 and 8001 read back FF FF, not 55 AA: nothing drives the data bus there). A 
-sim_IC15_data0_0_IC16_data0_0  OOOOOnnOOOOn | 1. No upper RAM found at first sight: 8000 and 8001 read back 54 A8, not 55 AA, so the march | 2. IC15, the upper RAM's bit D0: it didn't keep what was written (the first wrong at 8000). | 3. IC16, the upper RAM's bit D1: it didn't keep what was written (the first wrong at 8000).
-sim_issue1  OOOOOnnOOOOn | Nothing to look at: every test passed (no upper RAM: a 16K). The data and address lines go both ways, the ROM 
-sim_issue2_16k  OOOOOnnOOOOn | Nothing to look at: every test passed (no upper RAM: a 16K). The data and address lines go both ways, the ROM 
-sim_issue3b  OOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
+sim_IC23_removed  OOOOOnnOOOOOn | 1. No upper RAM found at all (8000 and 8001 read back FF FF, not 55 AA: nothing drives the data bus there). A 
+sim_IC15_data0_0_IC16_data0_0  OOOOOnnOOOOOn | 1. No upper RAM found at first sight: 8000 and 8001 read back 54 A8, not 55 AA, so the march | 2. IC15, the upper RAM's bit D0: it didn't keep what was written (the first wrong at 8000). | 3. IC16, the upper RAM's bit D1: it didn't keep what was written (the first wrong at 8000).
+sim_issue1  OOOOOnnOOOOOn | Nothing to look at: every test passed (no upper RAM: a 16K). The data and address lines go both ways, the ROM 
+sim_issue2_16k  OOOOOnnOOOOOn | Nothing to look at: every test passed (no upper RAM: a 16K). The data and address lines go both ways, the ROM 
+sim_issue3b  OOOOOOOOOOOOO | Nothing to look at: every test passed. The data and address lines go both ways, the ROM reads right, all of
 real_i2_as_3b  OOOOOOOOOOOO | 1. The EAR input after OUT 00, 08, 10, 18 reads 0 1 1 1; a good ZX Spectrum 48K Issue 3B reads
