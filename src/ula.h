@@ -40,6 +40,9 @@ typedef struct {
     /* A 5C ULA (set by the machine): its clock output pulls up itself.
      * The 6C001's is open collector, pulled up by R73. */
     bool clk_pulls_up;
+    /* The board's resistors let MIC alone read as EAR (set by the machine:
+     * the Issue 1 and 2). */
+    bool mic_reads_ear;
     uint32_t inputs;
     uint8_t pix;                    /* the colour of the last pixel (bit 3 bright) */
 } ula_state_t;

@@ -28,7 +28,8 @@
 ;   0 alive     20 writes: 00 FF 55 AA, walking 1, walking 0 (3F80-3F93);
 ;               +2 +3 = the ROM's VERSION
 ;   1 address   reads with A0-A15 walking 1 then walking 0 (for the analyser)
-;   2 ROM sum   16-bit sum of 0000-3F7F (bits 00, +2 +3 = the sum)
+;   2 ROM CRC   CRC-16/CCITT-FALSE of 0000-3F7D (from v6; v1-5: a 16-bit sum of
+;               0000-3F7F but CSUM) (bits 00, +2 +3 = the CRC)
 ;   3 lower RAM 4000-7FFF: data walk at 4000, the address lines (test 9),
 ;               then a march (w0 up, r0w1 up, r1w0 down, r0 down); +1 the
 ;               bad bits, +2 +3 the first bad address
@@ -79,11 +80,11 @@
 ; A new VERSION: keep the old zxtest.rom as carts/ and zxtest/zxtest-vN.rom
 ; (N the old version): captures of a cartridge not reprogrammed yet are
 ; compared with it.
-VERSION EQU     5               ; test 0's result +3, "ZXTEST n" at 0070, the title
+VERSION EQU     6               ; test 0's result +3, "ZXTEST n" at 0070, the title
 MARK    EQU     3FA0h           ; test n's marker
 RES     EQU     3FC0h           ; test n's four result bytes
 ALIVE   EQU     3F80h           ; test 0's writes
-CSUM    EQU     3F7Eh           ; the ROM's sum (patched in), not counted
+CSUM    EQU     3F7Eh           ; the ROM's CRC (patched in), after the bytes it covers
 SAVE    EQU     5B00h           ; the results kept in the lower RAM
 STACKL  EQU     7FF0h
 STACKU  EQU     0FFF0h
@@ -373,40 +374,33 @@ t1:
         RESULT  1
         jp      t2
 
-; ---- test 2: the ROM's sum (0400) ----------------------------------------
+; ---- test 2: the ROM's CRC (0400) ----------------------------------------
         ds      400h - $, 0FFh
 t2:
         START   2
-        ld      hl, 0
-        ld      de, 0
-        ld      bc, 003Fh           ; 63 pages (B = 0: 256 a page), then 3F00-3F7F
-.l      ld      a, (hl)
-        add     a, e
-        ld      e, a
-        jr      nc, .n
-        inc     d
-.n      inc     hl
-        djnz    .l
-        dec     c
-        jr      nz, .l
-        ld      a, l
-        or      a
-        jr      nz, .sd             ; L = 80: 3F00-3F7F done too
-        ld      bc, 8001h           ; 128 bytes, one turn
-        jr      .l
-.sd     ; take out the two bytes of the stored sum
-        ld      a, (CSUM)
+        ; CRC-16/CCITT-FALSE (poly 1021, from FFFF) of 0000 up to CSUM, by
+        ; the two tables (a byte: hi' = lo ^ crc_hi[hi ^ byte], lo' =
+        ; crc_lo[hi ^ byte]); about 0.45 s. It catches what a sum doesn't:
+        ; bytes swapped or in the wrong place (an address line).
+        ld      ix, 0
+        ld      de, 0FFFFh
+        ld      bc, CSUM            ; the stored CRC: the next two bytes
+.l      ld      a, (ix + 0)
+        inc     ix
+        xor     d
         ld      l, a
-        ld      h, 0
+        ld      h, crc_hi >> 8
+        ld      a, (hl)
+        xor     e
+        ld      d, a
+        inc     h                   ; crc_lo
+        ld      e, (hl)
+        dec     bc
+        ld      a, b
+        or      c
+        jr      nz, .l
         ex      de, hl
-        or      a
-        sbc     hl, de
-        ld      a, (CSUM + 1)
-        ld      e, a
-        ld      d, 0
-        or      a
-        sbc     hl, de
-        ; HL = the sum; compare with the stored one
+        ; HL = the CRC; compare with the stored one
         ld      de, (CSUM)
         ld      a, h
         cp      d
@@ -1235,7 +1229,7 @@ putc:   push    hl
 title:  db      "ZX LA TEST ", '0' + VERSION, "         LOOP", 0
 names:  db      "ALIVE    ", 0
         db      "ADDRESS  ", 0
-        db      "ROM SUM  ", 0
+        db      "ROM CRC  ", 0
         db      "LOWER RAM", 0
         db      "UPPER RAM", 0
         db      "ULA PORTS", 0
@@ -1249,6 +1243,30 @@ w_ok:   db      " OK  ", 0
 w_fail: db      " FAIL", 0
 w_none: db      " NONE", 0
 w_wait: db      " WAIT", 0
+
+; ---- test 2's CRC tables (1800, 1900: a page each) -----------------------
+; crc_hi[i], crc_lo[i]: the CRC-16 (poly 1021) of i << 8 after 8 shifts.
+        ds      1800h - $, 0FFh
+crc_hi:
+.i = 0
+        DUP     256
+.c = .i << 8
+        DUP     8
+.c = ((.c << 1) ^ (((.c >> 15) & 1) * 1021h)) & 0FFFFh
+        EDUP
+        db      .c >> 8
+.i = .i + 1
+        EDUP
+crc_lo:
+.i = 0
+        DUP     256
+.c = .i << 8
+        DUP     8
+.c = ((.c << 1) ^ (((.c >> 15) & 1) * 1021h)) & 0FFFFh
+        EDUP
+        db      .c & 0FFh
+.i = .i + 1
+        EDUP
 
 ; ---- the font (2000) -----------------------------------------------------
         ds      2000h - $, 0FFh

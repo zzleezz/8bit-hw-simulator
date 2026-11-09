@@ -1157,7 +1157,13 @@ Steps:
           upper RAM's bit D7". Folder Logic Analyser/zxtest-i3-ram-fault.
       [ ] More real faulty boards (and which part was replaced, for
           tests/la-faults.txt).
-- [ ] 6. ZX Diagnostics v0.37 stages from its source, as a cross-check.
+- [x] 6. (2026-11-09) ZX Diagnostics from its source, as a cross-check:
+      zxtest/zx-diagnostics-crosscheck.md. Gaps found:
+      [ ] Which I/O ports the SteamCard Pro decodes; can it page out?
+      [ ] The ULA's port decoding (OUT to an odd port, EAR must stay 0),
+          in result 11, once the SteamCard's ports are known.
+      [ ] A floating bus test (v7): the ULA's screen fetches seen by the CPU.
+      [ ] If the card can page out: a CRC of the Spectrum's own ROM.
 - [ ] 7. The review of 2026-11-08 (commits d0d2477..70257e2), in order:
       [x] 1. (2026-11-08, v3) Test 4's "none": 55@8000 and AA@8001 both
           wrong also when a 48K's upper RAM is dead or two chips are stuck
@@ -1183,13 +1189,23 @@ Steps:
           each DRAM pin's row/column line and mux output; verified with
           IC3.4:gnd, IC3.2:open, IC3.3:open, IC25.7:gnd, IC25:removed,
           IC6:addr2, IC15:addr3. No bad-byte count (not needed so far).
-          [ ] Run on the bench once the SteamCard has the v5 image.
+          [x] (2026-11-09) On the bench: the good Issue 2 passes (00 0000
+              both banks); in the regression as real_zxtest-i2-v5-01.
       [x] 4. (2026-11-08 overnight, v5) EAR in: result 11, after test 5's
           result: bit 6 after OUT 00/08/10/18 in +1 bits 0-3, IN FE
           after 00 and 18 in +2 +3. FAIL only if 00 reads 1 or 18 reads 0;
           08/10 are printed, not judged (the simulator gives 0 0 1 1 on
           every issue: the Issue 2/3 difference isn't modelled).
-          [ ] Note what a real Issue 2 and Issue 3 give for 08 and 10.
+          [x] (2026-11-09) Real Issue 2 (bench-pc/zxtest-i2-v5-01, all
+              11 captures OK, address lines 00 0000): 0 1 1 1, MIC alone
+              reads 1. The simulator says 0 0 1 1: its ULA (ula.c, the EAR
+              bit follows only OUT bit 4) is wrong for the Issue 2.
+          [x] (2026-11-09) Modelled: the Issue 1 and 2 drive the SOUND
+              pin for MIC too (ula.c mic_reads_ear, set in zx48.c); the
+              diagnosis judges all four values by the board's issue
+              (ear_expect: 0 1 1 1 Issue 1/2, 0 0 1 1 later).
+          [ ] Confirm on a real Issue 3 (expected 0 0 1 1) and an Issue 1
+              (assumed as the Issue 2).
           HALT: not done (low priority, nothing to diagnose with it yet).
       [x] 6. VERSION: the ROM's two strings come from the EQU (v3), the C
           side reads it from the table (v4; older images: rom[0x77]).
@@ -1204,7 +1220,11 @@ Steps:
       [x] 8. (2026-11-08) Labels in the macros (INTBACK, RESULT,
           FAILBITS, CALLX) instead of $+n; patchsum.py's guards gone. The
           ROM came out byte for byte v3.
-      [ ] 9. ROM sum is additive (misses byte order); CRC-16; low priority.
+      [x] 9. (2026-11-09, v6) Test 2 is a CRC-16/CCITT-FALSE of 0000-3F7D
+          (two 256-byte tables at 1800/1900, about 0.45 s); patchsum.py
+          stores it at CSUM. v5 kept as zxtest-v5.rom.
+          [ ] Reflash the SteamCard with v6 (ROMs/steamcard-test.bin) and
+              run zxdiagnose.bat on the good Issue 2.
       [ ] 10. Frame 2912 / contention 2209 confirmed on real Issue 2 and
           3B only; run good Issues 1, 4, 6A. (v3's simulated counts are
           0B5D/08A0, one turn less than v2's: where the first interrupt

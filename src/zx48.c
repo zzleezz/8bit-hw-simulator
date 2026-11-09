@@ -364,7 +364,13 @@ static int zx_ula(board_t *b) {
 static void zx_ula_fitted(board_t *b) {
     zx48_t *z = ZX(b);
     bool c6 = zx_ula(b) == 2;
-    ((ula_state_t *)b->sim.parts[z->p_ula].state)->clk_pulls_up = !c6;
+    ula_state_t *u = b->sim.parts[z->p_ula].state;
+    u->clk_pulls_up = !c6;
+    /* The Issue 1 and 2's resistors around the SOUND pin: MIC alone lifts
+     * it over the EAR comparator's threshold (a real Issue 2 reads EAR 0 1
+     * 1 1 after OUT 00 08 10 18; from the Issue 3 only the speaker bit
+     * does). */
+    u->mic_reads_ear = b->m == &machine_zx48i2 || b->m == &machine_zx48i1;
     int r = V(b)->with_6c001 ? sim_find_part(&b->sim, V(b)->with_6c001) : -1;
     if (r >= 0) b->sim.parts[r].unfitted = b->sim.parts[r].removed = !c6;
 }
@@ -894,16 +900,16 @@ static int addr_bit_of_net(sim_t *s, int net) {
  * its net comes from a 74LS157 output (maybe through a series resistor);
  * that section's B input is the row (the mux select is high before /RAS
  * falls), its A input the column. */
-static void dram_pin_mux(board_t *b, int pin, int *row, int *col, int *mux_part, int *mux_pin);
-static void dram_pin_bits(board_t *b, int pin, int *row, int *col) { dram_pin_mux(b, pin, row, col, NULL, NULL); }
+static void dram_pin_mux(board_t *b, int pin, int *row, int *col, zx48_addr_pin_t *mux);
+static void dram_pin_bits(board_t *b, int pin, int *row, int *col) { dram_pin_mux(b, pin, row, col, NULL); }
 
-/* The same, and the mux output that drives the pin (part, pin number; -1
- * none found). */
-static void dram_pin_mux(board_t *b, int pin, int *row, int *col, int *mux_part, int *mux_pin) {
+/* The same, and the mux section that drives the pin (its part, output,
+ * column and row input pin numbers; part -1 none found). */
+static void dram_pin_mux(board_t *b, int pin, int *row, int *col, zx48_addr_pin_t *mux) {
     sim_t *s = &b->sim;
     static const int sec[4][3] = { {4, 2, 3}, {7, 5, 6}, {9, 11, 10}, {12, 14, 13} };   /* Y, A, B */
     *row = *col = -1;
-    if (mux_part) *mux_part = *mux_pin = -1;
+    if (mux) { mux->mux_part = mux->mux_pin = mux->mux_col_pin = mux->mux_row_pin = -1; mux->mux_157 = false; }
     int net = s->pins[pin].net;
     for (int hop = 0; hop < 2 && net >= 0; hop++) {
         int next = -1;
@@ -918,7 +924,13 @@ static void dram_pin_mux(board_t *b, int pin, int *row, int *col, int *mux_part,
                     if (part_pin(p, tab[k][0]) == i) {
                         *col = addr_bit_of_net(s, s->pins[part_pin(p, tab[k][1])].net);
                         *row = addr_bit_of_net(s, s->pins[part_pin(p, tab[k][2])].net);
-                        if (mux_part) { *mux_part = s->pins[i].part; *mux_pin = tab[k][0]; }
+                        if (mux) {
+                            mux->mux_part = s->pins[i].part;
+                            mux->mux_pin = tab[k][0];
+                            mux->mux_col_pin = tab[k][1];
+                            mux->mux_row_pin = tab[k][2];
+                            mux->mux_157 = !zx8401;
+                        }
                         return;
                     }
             }
@@ -950,7 +962,7 @@ int zx48_ram_addr_pins(board_t *b, bool upper, zx48_addr_pin_t out[8]) {
     int bits = p->commit == PT_4116.commit ? 7 : 8;
     for (int i = 0; i < bits; i++) {
         out[i].pin = addr_pins[i];
-        dram_pin_mux(b, part_pin(p, addr_pins[i]), &out[i].row, &out[i].col, &out[i].mux_part, &out[i].mux_pin);
+        dram_pin_mux(b, part_pin(p, addr_pins[i]), &out[i].row, &out[i].col, &out[i]);
     }
     return bits;
 }

@@ -39,6 +39,29 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
   version 4's image is kept (carts/zxtest-v4.rom) and its captures are
   read as before. tests/la-zxtest.sh: two more faults (IC3.2 open,
   IC25.7 to GND).
+- The test ROM, version 6: test 2 checks a CRC-16 (CCITT-FALSE) of the
+  cartridge's bytes instead of a sum, so bytes read swapped or from the
+  wrong address no longer cancel out. The screen says ROM CRC. Version 5's
+  image is kept (carts/zxtest-v5.rom).
+- The EAR input on the Issue 1 and 2: MIC alone (OUT 08) reads as EAR, as
+  a real Issue 2 does (0 1 1 1 after OUT 00/08/10/18; the Issue 3 on reads
+  0 0 1 1). The test ROM's diagnosis judges result 11 by the board's
+  issue: other values name the resistors around the ULA's SOUND pin, or
+  a wrongly set issue.
+- The test ROM's diagnosis: result 11 is printed under its own heading
+  (it comes in the upper RAM's capture); a folder of older captures
+  counts its own number of captures; on an Issue 6A the ZX8401's input
+  pins are named (not the 74LS157's); "the CPU drives it right" only
+  when test 1 passed; IN FE reading FF both times is "nothing answered
+  the port read", not the EAR circuit; with the contention wrong, the
+  lower RAM's address lines aren't listed pin by pin (the contention
+  explains them).
+- tests/la-zxtest.sh: a real Issue 2's v5 captures, the same read as an
+  Issue 3B (its EAR values aren't a 3B's), a healthy Issue 3B; three
+  duplicate cases dropped (IC8/IC13 data0=0, IC2.16 to GND).
+- zxtest/zx-diagnostics-crosscheck.md: what ZX Diagnostics tests on a 48K
+  compared with our test ROM, and what to add (the floating bus, the
+  ULA's port decoding).
 - A test ROM for 16K/48K Spectrums, made for the logic analyser
   (zxtest/, built with sjasmplus): nine tests in a loop (data and address
   lines, the ROM's sum, a march over the lower and upper RAM, the ULA's

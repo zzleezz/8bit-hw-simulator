@@ -69,9 +69,10 @@ void zx48_unfitted_note(board_t *b, int part, char *out, int len);
 /* The address pins of a RAM bank's chips (the lower, or the UPPER), as
  * the board wires them now (the first chip fitted): pin i is the chip's
  * A(i), at its pin number PIN; the CPU address line it gets as the row
- * and as the column (-1 none, -2 GND, -3 +5V); the multiplexer output
- * driving it (part, pin number; -1 none). Returns how many (0: no bank). */
-typedef struct { int pin, row, col, mux_part, mux_pin; } zx48_addr_pin_t;
+ * and as the column (-1 none, -2 GND, -3 +5V); the multiplexer section
+ * driving it (part -1 none; its output, column and row input pin numbers;
+ * a 74LS157, or the ZX8401). Returns how many (0: no bank). */
+typedef struct { int pin, row, col, mux_part, mux_pin, mux_col_pin, mux_row_pin; bool mux_157; } zx48_addr_pin_t;
 int zx48_ram_addr_pins(board_t *b, bool upper, zx48_addr_pin_t out[8]);
 /* The 48K ROM (its character set is at 0x3D00, characters 32-127). */
 const uint8_t *zx48_rom_image(void);

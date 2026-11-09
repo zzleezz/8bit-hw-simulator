@@ -121,8 +121,10 @@ static void ula_eval(sim_t *s, part_t *p) {
     part_drive_bus(s, p, addr_pins, 7, u->addr, u->ae);
     /* The SOUND pin: the speaker bit (an analog level on the real chip: the
      * MIC bit only moves it a little). The EAR input is the same pin, read
-     * by a comparator: on this board it reads back the speaker bit. */
-    pin_out(s, p, P_SOUND, DRV_BIT(u->speaker));
+     * by a comparator: it reads back the speaker bit, and on the Issue 1
+     * and 2 the MIC bit too (their resistors put MIC alone over the
+     * threshold: the pin's level is modelled as high then). */
+    pin_out(s, p, P_SOUND, DRV_BIT(u->speaker || (u->mic_reads_ear && u->mic)));
     /* Port 0xFE read: keyboard on D0-D4, EAR on D6. The data pins are open
      * collector: they only pull low; bits 5 and 7 are never driven. */
     bool port_rd = iorq && rd && !pin_in(s, p, P_A0) && u->ioreqt2;
@@ -221,12 +223,12 @@ void ula_step(sim_t *s, part_t *p) {
     /* Port 0xFE write: the latch is open while the CPU writes. */
     if (iorq && wr && !pin_in(s, p, P_A0) && u->ioreqt2) {
         uint8_t d = (uint8_t)part_read_bus(s, p, data_pins, 8);
+        bool was = u->speaker || (u->mic_reads_ear && u->mic);
         u->border = d & 7;
         u->mic = (d >> 3) & 1;
-        if (u->speaker != ((d >> 4) & 1)) {     /* the SOUND pin changes */
-            u->speaker = (d >> 4) & 1;
+        u->speaker = (d >> 4) & 1;
+        if (was != (u->speaker || (u->mic_reads_ear && u->mic)))   /* the SOUND pin changes */
             sim_mark_dirty(s, (int)(p - s->parts));
-        }
     }
     if ((c & 7) == 5) u->border_ao = u->border;
     /* The CPU clock and contention (gates g383..g405 of the netlist). The
@@ -265,13 +267,14 @@ static void ula_reset(sim_t *s, part_t *p) {
     (void)s;
     ula_state_t *u = p->state;
     uint32_t *fb = u->fb;
-    bool ear = u->ear_in, running = u->running, logging = u->logging, pulls_up = u->clk_pulls_up;
+    bool ear = u->ear_in, running = u->running, logging = u->logging, pulls_up = u->clk_pulls_up, mic_ear = u->mic_reads_ear;
     memset(u, 0, sizeof(*u));
     u->fb = fb;
     u->ear_in = ear;
     u->running = running;
     u->logging = logging;
     u->clk_pulls_up = pulls_up;
+    u->mic_reads_ear = mic_ear;
     u->cpuclk = true;
 }
 
