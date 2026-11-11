@@ -142,8 +142,7 @@ static void strategy_choice(struct nk_context *ctx, float cw) {
     nk_layout_row_push(ctx, 140);
     nk_label(ctx, "Next pin by:", NK_TEXT_LEFT);
     nk_layout_row_push(ctx, cw - 146);
-    if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, tips[P.strategy]);
-    int s = nk_combo(ctx, names, PROBE_NSTRATEGIES, P.strategy, 22, nk_vec2(cw - 146, 100));
+    int s = combo_tip(ctx, names, PROBE_NSTRATEGIES, P.strategy, 22, nk_vec2(cw - 146, 100), tips[P.strategy]);
     nk_layout_row_end(ctx);
     if (s != P.strategy) {
         P.strategy = P.db.strategy = s;
@@ -154,12 +153,11 @@ static void strategy_choice(struct nk_context *ctx, float cw) {
     nk_layout_row_push(ctx, 140);
     nk_label(ctx, "Probing on:", NK_TEXT_LEFT);
     nk_layout_row_push(ctx, cw - 146);
-    if (nk_widget_is_hovered(ctx))
-        nk_tooltip(ctx, P.on_legs ? "On a leg that is lifted or not soldered, the probe shows the chip's side: what "
-                                    "the chip drives there, or floating for an input. That finds open legs"
-                                  : "A pad shows the trace, whatever the chip's leg does: an open leg can look "
-                                    "healthy there. When only a leg tells the faults left apart, it asks for the leg");
-    int on = nk_combo(ctx, where, 2, P.on_legs ? 0 : 1, 22, nk_vec2(cw - 146, 80)) == 0;
+    const char *tip = P.on_legs ? "On a leg that is lifted or not soldered, the probe shows the chip's side: what "
+                                  "the chip drives there, or floating for an input. That finds open legs"
+                                : "A pad shows the trace, whatever the chip's leg does: an open leg can look "
+                                  "healthy there. When only a leg tells the faults left apart, it asks for the leg";
+    int on = combo_tip(ctx, where, 2, P.on_legs ? 0 : 1, 22, nk_vec2(cw - 146, 80), tip) == 0;
     nk_layout_row_end(ctx);
     if (on != P.on_legs) {
         P.on_legs = P.db.on_legs = on;

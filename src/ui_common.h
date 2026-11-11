@@ -19,16 +19,25 @@
 #define COL_OTHER     nk_rgb(60, 120, 80)
 #define COL_TEXT      nk_rgb(235, 235, 225)
 #define COL_DIMTEXT   nk_rgb(150, 160, 150)
-#define COL_HIGH      nk_rgb(240, 80, 60)
+#define COL_HIGH      nk_rgb(235, 30, 30)     /* a true red: +12V is orange */
 #define COL_LOW       nk_rgb(70, 140, 255)
 #define COL_PULSE     nk_rgb(250, 210, 60)
 #define COL_FLOAT     nk_rgb(160, 160, 160)
 #define COL_FIGHT     nk_rgb(255, 60, 255)
 #define COL_NONE      nk_rgb(70, 70, 70)
-#define COL_FAULT     nk_rgb(255, 150, 0)
+#define COL_FAULT     nk_rgb(255, 150, 0)     /* fault text on the windows */
+#define COL_FAULT_MARK nk_rgb(255, 255, 255)   /* a fault on the board: no pin color is white */
 #define COL_HOVER     nk_rgb(0, 255, 255)
 #define COL_TRACE     nk_rgb(90, 255, 120)
 #define COL_HARNESS   nk_rgb(150, 160, 255)
+#define COL_NEG5      nk_rgb(170, 255, 0)     /* -5V: not GND's blue */
+#define COL_P12       nk_rgb(255, 120, 0)     /* +12V: not +5V's red */
+
+/* The pin colors only: a net on the -5V or the +12V supply (the 4116s'
+ * VBB and VDD, the VIC-II's and SID's 12V). To a logic probe they are low
+ * and high, like GND and +5V, so they get their own colors. */
+#define NET_NEG5      (NET_NONE + 1)
+#define NET_P12       (NET_NONE + 2)
 
 /* Light or dark windows (ui_set_theme(), the Theme row of the controls).
  * The board, the monitor, the scope screen and the chips keep their own
@@ -129,6 +138,8 @@ static inline struct nk_color state_color(int st) {
     case NET_PULSING: return COL_PULSE;
     case NET_FLOATING: return COL_FLOAT;
     case NET_CONTENTION: return COL_FIGHT;
+    case NET_NEG5: return COL_NEG5;
+    case NET_P12: return COL_P12;
     default: return COL_NONE;
     }
 }
@@ -140,8 +151,21 @@ static inline const char *state_name(int st) {
     case NET_PULSING: return "PULSING";
     case NET_FLOATING: return "FLOATING";
     case NET_CONTENTION: return "CONTENTION";
+    case NET_NEG5: return "-5V";
+    case NET_P12: return "+12V";
     default: return "not connected";
     }
+}
+
+/* A combo with a tooltip. The tooltip is drawn after the combo: a tooltip
+ * is a popup until the end of the frame, and a combo drawn while one is up
+ * won't open (pointing at the combo to click it showed the tooltip first). */
+static inline int combo_tip(struct nk_context *ctx, const char *const *items, int n, int sel, int item_h,
+                            struct nk_vec2 size, const char *tip) {
+    struct nk_rect r = nk_widget_bounds(ctx);
+    int now = nk_combo(ctx, items, n, sel, item_h, size);
+    if (tip && nk_input_is_mouse_hovering_rect(&ctx->input, r)) nk_tooltip(ctx, tip);
+    return now;
 }
 
 /* "Hide fault markers": the board, the inspector and the fault list don't

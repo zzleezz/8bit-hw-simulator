@@ -8,6 +8,18 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Continuity: the readout names what drives the net tested, from what
+  each pin drove this frame ("Driven by U7.40"), and triangles on the
+  yellow wires point the way the signal goes. A net several chips drive
+  (a bus, open collector lines) names them; "Nothing drives it" (orange)
+  is a net with inputs and no output driving it: a dead chip or an open
+  leg.
+- Pin colors: -5V and +12V get their own colors (to a logic probe they
+  read low and high, like GND and +5V), and high is a true red.
+- A fault on the board is outlined in white (no pin color is white),
+  not red or orange.
+- The drop-down lists with a tooltip open on the first click: the
+  tooltip is drawn after the list now.
 - The test ROM, version 7 (not yet run on the bench): result 12, the
   Spectrum's own ROM. A routine copied to the lower RAM writes 20 to
   port 1F, the ZX Diagnostics paging port the SteamCard Pro decodes

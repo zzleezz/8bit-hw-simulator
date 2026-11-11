@@ -584,14 +584,14 @@ static void draw_pinout(struct nk_context *ctx, struct nk_command_buffer *cv, bo
             /* Between the squares, so both numbers stay readable. */
             float dir = left ? 1 : -1, cx = sq.x + sq.w / 2;
             float y0 = y + dir * (sq.h / 2 - 1), y1 = y + dir * (L->pitch - sq.h / 2 + 1);
-            nk_stroke_line(cv, cx, y0, cx, y1, sq.w * 0.8f + 4, COL_FAULT);
+            nk_stroke_line(cv, cx, y0, cx, y1, sq.w * 0.8f + 4, COL_FAULT_MARK);
             nk_stroke_line(cv, cx, y0, cx, y1, sq.w * 0.8f, nk_rgb(200, 200, 205));
         }
         if (!g_hide_faults && (pp->fault != PF_OK || bridged)) {
-            nk_stroke_rect(cv, nk_rect(sq.x - 2, sq.y - 2, sq.w + 4, sq.h + 4), 0, 2, COL_FAULT);
+            nk_stroke_rect(cv, nk_rect(sq.x - 2, sq.y - 2, sq.w + 4, sq.h + 4), 0, 2, COL_FAULT_MARK);
             if (pp->fault == PF_OPEN) {
-                nk_stroke_line(cv, sq.x, sq.y, sq.x + sq.w, sq.y + sq.h, 1.5f, COL_FAULT);
-                nk_stroke_line(cv, sq.x + sq.w, sq.y, sq.x, sq.y + sq.h, 1.5f, COL_FAULT);
+                nk_stroke_line(cv, sq.x, sq.y, sq.x + sq.w, sq.y + sq.h, 1.5f, COL_FAULT_MARK);
+                nk_stroke_line(cv, sq.x + sq.w, sq.y, sq.x, sq.y + sq.h, 1.5f, COL_FAULT_MARK);
             }
         }
         if (pin == b->scope_pin || pin == b->scope_pin2) nk_stroke_rect(cv, nk_rect(sq.x - 4, sq.y - 4, sq.w + 8, sq.h + 8), 0, 2, ink(COL_TRACE));

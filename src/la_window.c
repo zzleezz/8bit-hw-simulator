@@ -256,7 +256,7 @@ static void find_marks(const char *text) {
         for (int k = 0; k < L.nmarks && m < (int)sizeof(L.summary) - 20; k++)
             if (L.mark_level[k] == lev) {
                 m += snprintf(L.summary + m, sizeof(L.summary) - m, "%s%s",
-                              any ? ", " : lev == 2 ? "first (thick orange) " : m ? "; then (thin yellow) " : "then ",
+                              any ? ", " : lev == 2 ? "first (thick white) " : m ? "; then (thin yellow) " : "then ",
                               L.mark_ref[k]);
                 any = true;
             }

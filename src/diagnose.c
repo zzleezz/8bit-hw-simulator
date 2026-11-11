@@ -278,9 +278,9 @@ void diagnose_caps(struct nk_context *ctx, float cw, bool brief) {
     nk_layout_row_push(ctx, 140);
     nk_label(ctx, "Electrolytic caps:", NK_TEXT_LEFT);
     nk_layout_row_push(ctx, cw - 146 < 300 ? cw - 146 : 300);
-    if (nk_widget_is_hovered(ctx))
-        nk_tooltip(ctx, "The electrolytic capacitors on the real machine. The simulator's capacitors are always good");
-    original_caps = nk_combo(ctx, caps, 2, original_caps ? 0 : 1, 22, nk_vec2(300, 80)) == 0;
+    original_caps = combo_tip(ctx, caps, 2, original_caps ? 0 : 1, 22, nk_vec2(300, 80),
+                              "The electrolytic capacitors on the real machine. The simulator's capacitors are "
+                              "always good") == 0;
     nk_layout_row_end(ctx);
     if (original_caps && brief) {        /* one line, the reasons when pointed at */
         nk_layout_row_dynamic(ctx, 22, 1);

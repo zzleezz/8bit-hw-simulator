@@ -177,7 +177,7 @@ the whole chip), a dead address line, one bad cell or corrupted byte,
 or, on a DRAM, weak cells that forget. Click a resistor, a ferrite bead
 or the crystal to open it. The control panel lists the faults, each with a
 repair button; its heading counts them, in red. Click a fault in the list
-to zoom in on it. On the board, a part with a fault has a red outline and a
+to zoom in on it. On the board, a part with a fault has a white outline and a
 "!" badge, seen even with the whole board in view; point at it to read
 what is wrong. "Hide fault markers (practice)" hides the badges, the marked
 pins and the list (a pulled chip still shows its empty socket, as it would
@@ -197,6 +197,14 @@ supply (`U13.11 shorted to GND`), both ways: probing GND reaches the
 shorted net too. The bottom of the view lists it all:
 `Beep [/RESET]: Direct: U7.40, FB4.2, ... | Via FB4 [/RESET']: CN6.C |
 Via R36: +5V (pull-up)`. Click the bare board to stop the test.
+
+The list starts with what drives the net, from what each pin drove this
+frame: `Driven by U7.40`, and small triangles on the yellow wires point
+away from it, the way the signal goes. A net several chips drive in turn
+(a data bus, open collector lines) names them and has no triangles.
+`Nothing drives it` (in orange) is a net with inputs but no output
+driving it: a dead or pulled chip, or the output's leg broken open. A
+supply, and a net that isn't simulated (analog), say nothing.
 
 The inspector draws the chip large, like a datasheet: the pins numbered
 and colored, the nets outside, the gates inside, wired to their pins. A
@@ -265,7 +273,7 @@ fault gives any more goes. `C64HW_ATLAS_TODO=1` lists what would run.
 
 Found what was wrong with a real machine? "Record the repair..." in the
 diagnose window keeps it: a small window opens beside the board, and a
-click on a chip of the board marks it faulty (outlined in orange; click
+click on a chip of the board marks it faulty (outlined in white; click
 again to take it off). Say how sure it is (swapping it fixed it, tested
 bad in a chip tester, or several replaced and not sure which), add notes
 and your name if you like, and save. The record keeps the screenshot,

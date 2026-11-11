@@ -68,7 +68,7 @@ typedef struct {
     uint8_t what; int at;   /* HOP_* */
 } cont_hop_t;
 typedef struct { int a, b; uint8_t tier; bool dashed, body; } cont_wire_t;
-typedef struct { char text[48]; uint8_t tier; bool item; } cont_word_t;
+typedef struct { char text[64]; uint8_t tier; bool item; } cont_word_t;
 typedef struct {
     uint8_t *tier;          /* per net */
     int *via;               /* per net reached: the hop that reached it, -1 for the net of the pin */
@@ -77,6 +77,12 @@ typedef struct {
     cont_wire_t *wires; int nwires;
     cont_word_t *words; int nwords;
     struct { int line; float x; } *pos;
+    /* Which way the signal goes, worked out every frame (cont_direction):
+     * per wire 1 (a to b), -1 (b to a) or 0; a pin scratch buffer; the
+     * readout word naming what drives it (-1: none). */
+    int8_t *dir;
+    uint8_t *seen;
+    int drv_word;
 } cont_t;
 
 static struct {
@@ -138,6 +144,9 @@ static struct {
     float view_cx, view_cy, view_zoom;
     /* Logic probe state of every net, refreshed every frame. */
     uint8_t *net_state;
+    /* The supplies with their own pin color ("-5V", "+12V"...; -1 for one
+     * the board doesn't have), and +5V (one shorted to it isn't recolored). */
+    int rail_net[4], p5_net;
     /* Monitor. */
     sg_image img;
     sg_view view;
@@ -490,10 +499,10 @@ static void draw_chip_inside(struct nk_command_buffer *cv, struct nk_context *ct
 /* A passive broken open (a diagonal) or shorted (a bar across, pad to pad). */
 static void body_fault(struct nk_command_buffer *cv, struct nk_rect r, int rfault) {
     if (rfault == RF_OK || g_hide_faults) return;
-    nk_stroke_rect(cv, r, 2, 2, COL_FAULT);
-    if (rfault == RF_OPEN) nk_stroke_line(cv, r.x, r.y, r.x + r.w, r.y + r.h, 2, COL_FAULT);
-    else if (r.w >= r.h) nk_stroke_line(cv, r.x, r.y + r.h / 2, r.x + r.w, r.y + r.h / 2, 3, COL_FAULT);
-    else nk_stroke_line(cv, r.x + r.w / 2, r.y, r.x + r.w / 2, r.y + r.h, 3, COL_FAULT);
+    nk_stroke_rect(cv, r, 2, 2, COL_FAULT_MARK);
+    if (rfault == RF_OPEN) nk_stroke_line(cv, r.x, r.y, r.x + r.w, r.y + r.h, 2, COL_FAULT_MARK);
+    else if (r.w >= r.h) nk_stroke_line(cv, r.x, r.y + r.h / 2, r.x + r.w, r.y + r.h / 2, 3, COL_FAULT_MARK);
+    else nk_stroke_line(cv, r.x + r.w / 2, r.y, r.x + r.w / 2, r.y + r.h, 3, COL_FAULT_MARK);
 }
 
 /* Does a rectangle on screen cover one of the part's pads? */
@@ -704,7 +713,7 @@ static int part_faults(int part, char *out, int len) {
     return n;
 }
 
-/* A part with a fault on it: a red outline and a "!" badge in a corner,
+/* A part with a fault on it: a white outline and a "!" badge in a corner,
  * big enough to see on the whole board. Faults are easy to forget. */
 static void fault_badges(struct nk_command_buffer *cv, struct nk_context *ctx, struct nk_rect area) {
     if (g_hide_faults) return;
@@ -713,12 +722,12 @@ static void fault_badges(struct nk_command_buffer *cv, struct nk_context *ctx, s
         if (!part_faults(i, NULL, 0)) continue;
         const box_t *b = &U.box[i];
         struct nk_rect r = to_screen(area, b->x0, b->y0, b->x1, b->y1);
-        nk_stroke_rect(cv, nk_rect(r.x - 3, r.y - 3, r.w + 6, r.h + 6), 3, 2, COL_FAULT);
+        nk_stroke_rect(cv, nk_rect(r.x - 3, r.y - 3, r.w + 6, r.h + 6), 3, 2, COL_FAULT_MARK);
         float rad = 8;
         struct nk_rect c = nk_rect(r.x + r.w - rad, r.y - rad, 2 * rad, 2 * rad);
-        nk_fill_circle(cv, c, COL_FAULT);
+        nk_fill_circle(cv, c, COL_FAULT_MARK);
         nk_stroke_circle(cv, c, 1.5f, nk_rgb(0, 0, 0));
-        text_centered(cv, ctx, c, "!", nk_rgb(255, 255, 255));
+        text_centered(cv, ctx, c, "!", nk_rgb(0, 0, 0));
     }
 }
 
@@ -727,7 +736,7 @@ static void draw_bridge(struct nk_command_buffer *cv, struct nk_rect area, int p
     const bd_pad_t *a = &BD()->pads[pa], *c = &BD()->pads[pb];
     float ax = area.x + U.ox + a->x * U.zoom, ay = area.y + U.oy + a->y * U.zoom;
     float cx = area.x + U.ox + c->x * U.zoom, cy = area.y + U.oy + c->y * U.zoom;
-    nk_stroke_line(cv, ax, ay, cx, cy, width + 3, COL_FAULT);
+    nk_stroke_line(cv, ax, ay, cx, cy, width + 3, COL_FAULT_MARK);
     nk_stroke_line(cv, ax, ay, cx, cy, width, nk_rgb(200, 200, 205));
 }
 
@@ -753,7 +762,7 @@ static void draw_pins(struct nk_command_buffer *cv, struct nk_context *ctx, stru
         if (!chip && p->net >= 0 && !board_net_simulated(U.b, p->net)) c = nk_rgb(150, 140, 110);
         nk_fill_rect(cv, r, chip ? 0 : sz / 2, c);
         if (!g_hide_faults && (p->fault != PF_OK || pin_bridged(i))) {
-            nk_stroke_rect(cv, nk_rect(r.x - 2, r.y - 2, r.w + 4, r.h + 4), 0, 2, COL_FAULT);
+            nk_stroke_rect(cv, nk_rect(r.x - 2, r.y - 2, r.w + 4, r.h + 4), 0, 2, COL_FAULT_MARK);
             if (p->fault == PF_OPEN) {
                 nk_stroke_line(cv, r.x, r.y, r.x + r.w, r.y + r.h, 1.5f, nk_rgb(0, 0, 0));
                 nk_stroke_line(cv, r.x + r.w, r.y, r.x, r.y + r.h, 1.5f, nk_rgb(0, 0, 0));
@@ -808,7 +817,9 @@ static struct nk_color tier_color(int tier) {
 static void cont_free(void) {
     cont_t *c = &U.cont;
     free(c->tier); free(c->via); free(c->pads); free(c->hops); free(c->wires); free(c->words); free(c->pos);
+    free(c->dir); free(c->seen);
     memset(c, 0, sizeof(*c));
+    c->drv_word = -1;
 }
 
 /* Faults that change what the test reaches. */
@@ -1017,6 +1028,8 @@ static void continuity_trace(void) {
     c->words = malloc(sizeof(cont_word_t) * (s->npins + 4 * c->nhops + 8));
     c->pos = malloc(sizeof(c->pos[0]) * (s->npins + 4 * c->nhops + 8));
     cont_word(1, false, "Beep [%s]:", s->nets[net_a].name);
+    c->drv_word = c->nwords;    /* "Driven by U7.40 |": filled in every frame */
+    cont_word(0, false, "%s", "");
     cont_word(0, false, "Direct:");
     cont_net_words(net_a, -1, 1);
     for (int k = 0; k < c->nhops; k++) {
@@ -1054,6 +1067,67 @@ static void continuity_trace(void) {
         }
     }
     free(queue);
+    c->dir = calloc((size_t)c->nwires + 1, 1);
+    c->seen = calloc((size_t)s->npins, 1);
+}
+
+/* Which chip drives the net tested (its tier 1 nets: the copper and the
+ * links), from this frame's samples of what each pin itself drives: an
+ * output (or a bidirectional pin) driving strongly, not a weak pull-up,
+ * not through a leg broken open. With one, the copper wires point away
+ * from it. The readout says which, several (a bus, open collectors), or
+ * none (an input nothing drives: a dead chip, an open leg). A supply and a
+ * net that isn't simulated (analog) get neither. */
+static void cont_direction(void) {
+    cont_t *c = &U.cont;
+    if (c->drv_word < 0 || !c->dir) return;
+    sim_t *s = S();
+    board_t *b = U.b;
+    memset(c->dir, 0, (size_t)c->nwires);
+    cont_word_t *word = &c->words[c->drv_word];
+    word->text[0] = 0;
+    word->tier = 0;
+    int drv[2] = { -1, -1 }, nd = 0;
+    bool inputs = false;
+    for (int k = 0; k < c->npads; k++) {
+        if (c->pads[k].tier != 1) continue;
+        int pin = c->pads[k].pin;
+        const pin_t *p = &s->pins[pin];
+        if (board_net_supply(b, p->net) || !board_net_simulated(b, p->net)) return;
+        const part_t *pt = &s->parts[p->part];
+        if (pt->removed || !board_part_simulated(b, p->part)) continue;
+        if (p->flags & PIN_IN) inputs = true;
+        if (!(p->flags & PIN_OUT) || p->fault == PF_OPEN) continue;
+        uint32_t hi = b->pst_hi[pin], lo = b->pst_lo[pin], off = b->pst_off[pin], weak = b->pst_weak[pin];
+        bool on = hi + lo + off ? hi + lo > weak : (p->drive >> 1) >= S_RES;   /* no samples: paused */
+        if (on && nd < 2) drv[nd] = pin;
+        nd += on;
+    }
+    char name[2][16];
+    for (int i = 0; i < 2 && i < nd; i++)
+        snprintf(name[i], sizeof(name[i]), "%s.%s", s->parts[s->pins[drv[i]].part].ref, BD()->pads[drv[i]].name);
+    if (nd == 0) {
+        if (!inputs) return;
+        snprintf(word->text, sizeof(word->text), "Nothing drives it |");
+        word->tier = 3;
+        return;
+    }
+    if (nd == 1) snprintf(word->text, sizeof(word->text), "Driven by %s |", name[0]);
+    else if (nd == 2) snprintf(word->text, sizeof(word->text), "Driven by %s and %s |", name[0], name[1]);
+    else snprintf(word->text, sizeof(word->text), "Driven by %s, %s, %d more |", name[0], name[1], nd - 2);
+    if (nd > 1) return;
+    /* Away from the driver, along the copper and the links. */
+    memset(c->seen, 0, (size_t)s->npins);
+    c->seen[drv[0]] = 1;
+    for (bool more = true; more;) {
+        more = false;
+        for (int w = 0; w < c->nwires; w++) {
+            const cont_wire_t *cw = &c->wires[w];
+            if (c->dir[w] || cw->tier != 1 || cw->dashed) continue;
+            if (c->seen[cw->a] && !c->seen[cw->b]) { c->dir[w] = 1; c->seen[cw->b] = 1; more = true; }
+            else if (c->seen[cw->b] && !c->seen[cw->a]) { c->dir[w] = -1; c->seen[cw->a] = 1; more = true; }
+        }
+    }
 }
 
 /* Start a continuity test on the net of a pin (-1 ends it). */
@@ -1082,6 +1156,7 @@ static void continuity_mark(struct nk_command_buffer *cv, struct nk_context *ctx
     if (U.cont_pin < 0) return;
     uint32_t sig = cont_signature();
     if (sig != U.cont_sig) { U.cont_sig = sig; continuity_trace(); }
+    cont_direction();
     cont_t *c = &U.cont;
     const struct nk_color dark = nk_rgba(0, 0, 0, 200);
     /* The interface's vertex indices are 16 bit: a whole frame stays under
@@ -1103,6 +1178,21 @@ static void continuity_mark(struct nk_command_buffer *cv, struct nk_context *ctx
             if (!many) nk_stroke_line(cv, ax, ay, bx, by, wd + 2, dark);
             nk_stroke_line(cv, ax, ay, bx, by, wd, col);
         }
+    }
+    /* A triangle halfway along each wire, pointing away from the driver. */
+    for (int w = 0; w < c->nwires; w++) {
+        if (!c->dir[w]) continue;
+        const cont_wire_t *cw = &c->wires[w];
+        float ax = SX(cw->a), ay = SY(cw->a), bx = SX(cw->b), by = SY(cw->b);
+        float len = sqrtf((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+        if (len < 24) continue;     /* no room next to the rings */
+        float ux = (bx - ax) / len * c->dir[w], uy = (by - ay) / len * c->dir[w];
+        float mx = (ax + bx) / 2, my = (ay + by) / 2, r = cw->body ? 7 : 6;
+        float tx = mx + ux * r, ty = my + uy * r;                       /* the tip */
+        float lx = mx - ux * r - uy * r * 0.8f, ly = my - uy * r + ux * r * 0.8f;
+        float rx = mx - ux * r + uy * r * 0.8f, ry = my - uy * r - ux * r * 0.8f;
+        nk_fill_triangle(cv, tx, ty, lx, ly, rx, ry, tier_color(cw->tier));
+        if (!many) nk_stroke_triangle(cv, tx, ty, lx, ly, rx, ry, 1.5f, dark);
     }
     for (int k = 0; k <= c->npads + c->nhops; k++) {
         /* The pads reached, then the far legs of the passives broken open. */
@@ -1155,6 +1245,12 @@ static void continuity_mark(struct nk_command_buffer *cv, struct nk_context *ctx
     } else {
         float x = 0;
         for (int k = 0; k < nw; k++) {
+            if (!c->words[k].text[0]) {     /* the driver, when nothing is said */
+                c->pos[k].line = line;
+                c->pos[k].x = x;
+                last = k;
+                continue;
+            }
             float w = text_width(ctx, c->words[k].text);
             if (x > 0 && x + w > maxw) {
                 if (line + 1 >= MAXLINES) break;
@@ -1593,21 +1689,21 @@ static void focus_mark(struct nk_command_buffer *cv, struct nk_context *ctx, str
     const box_t *fb = &U.box[U.focus_part];
     struct nk_rect br = to_screen(area, fb->x0, fb->y0, fb->x1, fb->y1);
     float g = 3 + 5 * pulse;
-    nk_stroke_rect(cv, nk_rect(br.x - g, br.y - g, br.w + 2 * g, br.h + 2 * g), 4, 3, COL_FAULT);
+    nk_stroke_rect(cv, nk_rect(br.x - g, br.y - g, br.w + 2 * g, br.h + 2 * g), 4, 3, COL_FAULT_MARK);
     for (int i = 0; i < 2; i++) {
         int pin = i ? U.focus_pin2 : U.focus_pin;
         if (pin < 0) continue;
         const bd_pad_t *bp = &BD()->pads[pin];
         struct nk_rect pr = to_screen(area, bp->x - bp->w / 2, bp->y - bp->h / 2, bp->x + bp->w / 2, bp->y + bp->h / 2);
         float k = 4 + 4 * pulse;
-        nk_stroke_circle(cv, nk_rect(pr.x - k, pr.y - k, pr.w + 2 * k, pr.h + 2 * k), 3, COL_FAULT);
+        nk_stroke_circle(cv, nk_rect(pr.x - k, pr.y - k, pr.w + 2 * k, pr.h + 2 * k), 3, COL_FAULT_MARK);
     }
     if (U.focus_note[0]) {
         float fh = ctx->style.font->height, tw = text_width(ctx, U.focus_note);
         struct nk_rect tr = nk_rect(br.x, br.y - g - fh - 10, tw + 12, fh + 6);
         tr.x = fmaxf(area.x + 4, fminf(tr.x, area.x + area.w - tr.w - 4));     /* in the view */
         nk_fill_rect(cv, tr, 3, nk_rgba(0, 0, 0, 200));
-        text_at(cv, ctx, tr.x + 6, tr.y + tr.h / 2, 0, U.focus_note, COL_FAULT);
+        text_at(cv, ctx, tr.x + 6, tr.y + tr.h / 2, 0, U.focus_note, COL_FAULT_MARK);
     }
 }
 
@@ -1673,7 +1769,7 @@ static void board_window(struct nk_context *ctx, float w, float h) {
                 if (diagnose_record_marked(s->parts[i].ref)) {
                     box_t *b = &U.box[i];
                     nk_stroke_rect(cv, to_screen(area, b->x0 - 0.8f, b->y0 - 0.8f, b->x1 + 0.8f, b->y1 + 0.8f), 3, 3,
-                                   COL_FAULT);
+                                   COL_FAULT_MARK);
                 }
         for (int i = 0; i < s->nparts; i++) {      /* the chips the analyser's verdict names */
             int lm = la_window_mark(M(), s->parts[i].ref);
@@ -1681,7 +1777,7 @@ static void board_window(struct nk_context *ctx, float w, float h) {
             box_t *b = &U.box[i];
             float g = lm == 2 ? 1.2f : 0.8f;
             nk_stroke_rect(cv, to_screen(area, b->x0 - g, b->y0 - g, b->x1 + g, b->y1 + g), 3, lm == 2 ? 4 : 2,
-                           lm == 2 ? COL_FAULT : COL_PULSE);
+                           lm == 2 ? COL_FAULT_MARK : COL_PULSE);
         }
         continuity_mark(cv, ctx, area);
         focus_mark(cv, ctx, area);
@@ -2208,7 +2304,7 @@ static void legend_item(struct nk_context *ctx, struct nk_color c, const char *t
     struct nk_rect r;
     if (nk_widget(&r, ctx) != NK_WIDGET_INVALID)
         nk_fill_rect(nk_window_get_canvas(ctx), nk_rect(r.x, r.y + 4, 10, 10), 0, c);
-    nk_layout_row_push(ctx, 72);
+    nk_layout_row_push(ctx, 60);     /* five fit across the column, with its scrollbar */
     nk_label(ctx, txt, NK_TEXT_LEFT);
 }
 
@@ -2322,7 +2418,7 @@ static void help_window(struct nk_context *ctx, float bw, float h) {
         help_line(ctx, "  whole 4164), a dead address line, one bad cell or byte, or weak DRAM cells.");
         help_line(ctx, "Click a resistor, a ferrite bead, a capacitor or the crystal: open or short it.");
         help_line(ctx, "Faults (in the controls) lists them all: repair one there, or Repair all.");
-        help_line(ctx, "  Click a fault in the list to zoom in on it. A part with a fault has a red");
+        help_line(ctx, "  Click a fault in the list to zoom in on it. A part with a fault has a white");
         help_line(ctx, "  outline and a \"!\" badge; point at it to read its faults. \"Hide fault");
         help_line(ctx, "  markers\" hides all that, to practise finding a fault like on a real board.");
         help_head(ctx, "Continuity (beep) test");
@@ -2333,12 +2429,17 @@ static void help_window(struct nk_context *ctx, float bw, float h) {
         help_color(ctx, COL_THRU, "cyan: through a resistor or a diode");
         help_color(ctx, COL_CAP, "violet: a capacitor (not followed further)");
         help_color(ctx, COL_FAULT, "orange: broken open");
+        help_line(ctx, "Triangles on the yellow wires point away from the chip driving the net now");
+        help_line(ctx, "  (named at the start of the list). Several drivers (a bus): no triangles.");
+        help_line(ctx, "  \"Nothing drives it\": only inputs (a dead chip, a leg open on the output).");
         help_head(ctx, "Pad colors (a logic probe)");
         help_color(ctx, COL_HIGH, "high");
         help_color(ctx, COL_LOW, "low");
         help_color(ctx, COL_PULSE, "pulsing");
         help_color(ctx, COL_FLOAT, "floating: nothing drives it");
         help_color(ctx, COL_FIGHT, "fight: driven high and low at once");
+        help_color(ctx, COL_NEG5, "-5V (a Spectrum's; a logic probe shows low)");
+        help_color(ctx, COL_P12, "+12V (a logic probe shows high)");
         help_head(ctx, "The machine");
         help_line(ctx, "Power cycle: off and on again (the faults stay).  Pause: stop the clock.");
         help_line(ctx, "RESET: hold the button, or tick \"keep it pressed\".");
@@ -2393,10 +2494,9 @@ static void board_choice(struct nk_context *ctx, board_t *b) {
         issues[i] = names[i];
         if (boards[i] == m) cur = i;
     }
-    if (nk_widget_is_hovered(ctx))
-        nk_tooltip(ctx, zx ? "Which issue of the board is on the bench" :
-                             "Which board is on the bench: the 250407 (breadbin) or the 250469 (C64C, Super PLA)");
-    int pick = nk_combo(ctx, issues, nb, cur, 20, nk_vec2(140, 20.0f * nb + 20));
+    int pick = combo_tip(ctx, issues, nb, cur, 20, nk_vec2(140, 20.0f * nb + 20),
+                         zx ? "Which issue of the board is on the bench" :
+                              "Which board is on the bench: the 250407 (breadbin) or the 250469 (C64C, Super PLA)");
     if (pick != cur) U.switch_to = boards[pick];
     for (int o = 0; o < m->noptions; o++) {
         const machine_option_t *opt = &m->options[o];
@@ -2408,8 +2508,7 @@ static void board_choice(struct nk_context *ctx, board_t *b) {
             items[v] = text[v];
         }
         int was = m->get_option(b, o);
-        if (nk_widget_is_hovered(ctx)) nk_tooltip(ctx, opt->help);
-        int now = nk_combo(ctx, items, n, was, 20, nk_vec2(170, 20.0f * n + 20));
+        int now = combo_tip(ctx, items, n, was, 20, nk_vec2(170, 20.0f * n + 20), opt->help);
         if (now != was) {
             m->set_option(b, o, now);
             select_pin(b->scope_pin);
@@ -2551,6 +2650,13 @@ static void controls_window(struct nk_context *ctx, float x, float y, float h) {
         legend_item(ctx, COL_FLOAT, "floating");
         legend_item(ctx, COL_FIGHT, "fight");
         nk_layout_row_end(ctx);
+        bool p12 = U.rail_net[1] >= 0 || U.rail_net[2] >= 0;
+        if (U.rail_net[0] >= 0 || p12) {    /* the supplies with a color of their own */
+            nk_layout_row_begin(ctx, NK_STATIC, 18, 4);
+            if (p12) legend_item(ctx, COL_P12, "+12V");
+            if (U.rail_net[0] >= 0) legend_item(ctx, COL_NEG5, "-5V");
+            nk_layout_row_end(ctx);
+        }
 
         /* The count in the heading, in red: seen even with the list closed. */
         int nfaults = fault_count();
@@ -2918,6 +3024,17 @@ void ui_frame(void) {
     update_status();
     /* Logic probe state for the pin colors, from this frame's samples. */
     for (int i = 0; i < S()->nnets; i++) U.net_state[i] = (uint8_t)board_net_state(U.b, i);
+    /* -5V and +12V in their own colors, not GND's blue and +5V's red: while
+     * they read as they should and aren't shorted to GND or +5V. */
+    static const uint8_t rail_reads[4] = { NET_LOW, NET_HIGH, NET_HIGH, 0 }, rail_shows[4] = { NET_NEG5, NET_P12, NET_P12, 0 };
+    for (int r = 0; r < 3; r++) {
+        if (U.rail_net[r] < 0) continue;
+        sim_t *s = S();
+        int root = s->nets[U.rail_net[r]].root;
+        if (s->nets[root].rail == RAIL_GND || (U.p5_net >= 0 && s->nets[U.p5_net].root == root)) continue;
+        for (int i = 0; i < s->nnets; i++)
+            if (s->nets[i].root == root && U.net_state[i] == rail_reads[r]) U.net_state[i] = rail_shows[r];
+    }
 
     struct nk_context *ctx = snk_new_frame();
     apply_theme(ctx);
@@ -3246,6 +3363,11 @@ static void attach_board(board_t *b) {
     set_continuity(-1);         /* nets are numbered per board */
     free(U.net_state);
     U.net_state = calloc(b->sim.nnets, 1);
+    U.rail_net[0] = sim_find_net(&b->sim, "-5V");
+    U.rail_net[1] = sim_find_net(&b->sim, "+12V");
+    U.rail_net[2] = sim_find_net(&b->sim, "+12VA");     /* a Spectrum's second +12V net */
+    U.rail_net[3] = -1;
+    U.p5_net = sim_find_net(&b->sim, "+5V");
     b->pin_stats = true;        /* what each pin drives, for the inspector */
     compute_boxes();
     /* The monitor picture has the size of the machine's screen. */
