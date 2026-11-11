@@ -8,6 +8,8 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+## V1.3 (2026-11-11)
+
 - Continuity: the readout names what drives the net tested, from what
   each pin drove this frame ("Driven by U7.40"), and triangles on the
   yellow wires point the way the signal goes. A net several chips drive
