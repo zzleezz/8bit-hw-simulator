@@ -8,6 +8,12 @@ Claude (Anthropic's AI), directed and tested by zzleezz.
 
 ## Unreleased
 
+- Builds with any MinGW toolchain again (MSYS2, TDM-GCC, older mingw-w64),
+  not just w64devkit: win_perf.h now looks up its Windows 10 power and
+  CPU-set functions at run time instead of needing headers that declare
+  them ("implicit declaration of function 'SetThreadInformation'").
+  The .exe also starts on Windows 7/8 again, where those calls are skipped.
+
 ## V1.3 (2026-11-11)
 
 - Continuity: the readout names what drives the net tested, from what
