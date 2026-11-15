@@ -4,6 +4,11 @@ The cartridge images
 deadtest-781220.crt, diag-586220.crt
     C64 diagnostic cartridges (see LICENSE).
 
+pal-bench.a26
+    Atari 2600A PAL diagnostic cartridge. Colour bars indicate a pass
+    and alternating black and white bars indicate a RIOT RAM failure.
+    Source and rebuild command are in tools/pal-bench.asm.
+
 zx-diagnostics-v0.37.rom
     ZX Diagnostics for the Spectrum (see zx-diagnostics.LICENSE).
 

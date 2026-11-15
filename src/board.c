@@ -743,7 +743,7 @@ void board_free_state(board_state_t *st) {
 #define SF_NBLOBS 8
 
 static const machine_t *const sf_machines[] = { &machine_c64, &machine_zx48, &machine_zx48i2, &machine_zx48i1,
-                                                &machine_zx48i4b, &machine_zx48i6a, &machine_c64c };
+                                                &machine_zx48i4b, &machine_zx48i6a, &machine_c64c, &machine_a2600pal };
 
 /* How a board is set up. */
 typedef struct {
@@ -1330,7 +1330,7 @@ void board_run(board_t *b, int cycles) { b->m->run(b, cycles); }
 
 void board_key_down(board_t *b, int key) { b->m->key_down(b, key); }
 void board_key_up(board_t *b, int key) { b->m->key_up(b, key); }
-void board_frame_update(board_t *b, uint32_t us) { b->m->frame_update(b, us); }
+void board_frame_update(board_t *b, uint32_t us) { if (b->m->frame_update) b->m->frame_update(b, us); }
 void board_monitor(board_t *b, uint32_t *out) { b->m->monitor(b, out); }
 
 bool board_load(board_t *b, const char *path, bool run, char *msg, int msglen) {

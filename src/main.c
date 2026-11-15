@@ -1,7 +1,7 @@
 /* main.c - c64-hw-sim entry point.
  *
  *   c64-hw-sim [program.prg | cartridge.crt | image.rom | image.bin] [--harness]
- *       [--fault SPEC]... [--machine c64|c64c|zx48|zx48i2|zx48i1|zx48i4b|zx48i6a]
+ *       [--fault SPEC]... [--machine c64|c64c|zx48|zx48i2|zx48i1|zx48i4b|zx48i6a|a2600pal]
  *       [--board 250407|250469|issue3b|issue4b|issue6a|issue2|issue1]
  *       [--option ID=VALUE]... [--bank N] [--socket u4|port]
  *       Graphical simulator. The optional .prg is loaded and RUN after boot;
@@ -263,7 +263,7 @@ static board_t *board;
 
 /* The machines, for --machine. */
 static const machine_t *const machines[] = { &machine_c64, &machine_c64c, &machine_zx48, &machine_zx48i2,
-                                             &machine_zx48i1, &machine_zx48i4b, &machine_zx48i6a };
+                                             &machine_zx48i1, &machine_zx48i4b, &machine_zx48i6a, &machine_a2600pal };
 
 static const machine_t *machine_named(const char *id) {
     for (size_t k = 0; k < sizeof(machines) / sizeof(machines[0]); k++)
@@ -405,7 +405,7 @@ static int run_headless(void) {
             int c = type[typed++];
             next_type = f + (type[typed] == c ? 12 : 4);
             if (c == '\n') c = m->host_key(SAPP_KEYCODE_ENTER);
-            else if (c >= 'a' && c <= 'z') c = m->host_char(c);
+            else if (c >= 'a' && c <= 'z' && m->host_char) c = m->host_char(c);
             board_key_down(board, c);
             board_key_up(board, c);
         }
@@ -728,7 +728,8 @@ int main(int argc, char **argv) {
             bool mach = argv[i][2] == 'm';
             const char *v = strchr(argv[i], '=') + 1;
             int *dst = mach ? &args.match_machine : &args.match_cart;
-            *dst = mach ? (machine_named(v) ? atlas_machine_of(machine_named(v)) : -2)
+            int machine = mach ? atlas_machine_of(machine_named(v)) : -1;
+            *dst = mach ? (machine < 0 ? -2 : machine)
                         : (!strcmp(v, "normal") ? 0 : !strcmp(v, "diag") ? 1 : !strcmp(v, "any") ? -1 : -2);
             if (*dst == -2) {
                 fprintf(stderr, "%s: %s\n", argv[i], mach ? "the machines are c64, c64c, zx48, zx48i2, zx48i1, zx48i4b and zx48i6a" : "the choices are normal, diag and any");
@@ -780,12 +781,21 @@ int main(int argc, char **argv) {
             size_t n = strlen(argv[i]);
             const char *ext = n > 4 ? argv[i] + n - 4 : "";
             bool raw = !strcasecmp(ext, ".rom") || !strcasecmp(ext, ".bin");
-            if (!strcasecmp(ext, ".crt") || raw) args.crt = argv[i];
+            bool atari = !strcasecmp(ext, ".a26");
+            if (!strcasecmp(ext, ".crt") || raw || atari) args.crt = argv[i];
             else args.prg = argv[i];
+            if (!args.machine && atari) args.machine = &machine_a2600pal;
             if (!args.machine && raw && raw_rom_is_zx(argv[i])) args.machine = &machine_zx48;
             if (!args.machine && (!strcasecmp(ext, ".sna") || !strcasecmp(ext, ".z80")))
                 args.machine = &machine_zx48;
         }
+    }
+    if (args.machine == &machine_a2600pal &&
+        (args.probe || args.probe_capture || args.browse_atlas || args.match || args.match_test ||
+         args.diagnose || args.diagnose_text || args.add_repair || args.harness ||
+         args.la_window || args.la.record || args.la.capture || args.la.diagnose)) {
+        fprintf(stderr, "That option requires a C64 or ZX Spectrum board\n");
+        return 1;
     }
     if (args.atlas_tier)
         return atlas_build(&(atlas_build_t){ .tier = args.atlas_tier, .path = args.atlas_path,

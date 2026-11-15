@@ -9,6 +9,7 @@
  * Pin numbers always follow the chip datasheet, so the code can be checked
  * against a pinout diagram. */
 #include "parts.h"
+#include "a2600_riot.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -1027,6 +1028,7 @@ int part_memory(const part_t *p, int *data_bits, bool *dram) {
     else if (part_is_dram64(p)) { lines = 8; bits = 1; d = true; }
     else if (p->commit == dram4116_commit) { lines = 7; bits = 1; d = true; }
     else if (p->commit == d41464_commit) { lines = 8; bits = 4; d = true; }
+    else if (p->commit == a2600_riot_type.commit) lines = A2600_RIOT_RAM_ADDR_BITS;
     if (data_bits) *data_bits = bits;
     if (dram) *dram = d;
     return lines;

@@ -33,5 +33,6 @@ extern const board_data_t bd_zx48i2;    /* zx48i2_board_data.c (Issue 2) */
 extern const board_data_t bd_zx48i1;    /* zx48i1_board_data.c (Issue 1) */
 extern const board_data_t bd_zx48i4b;   /* zx48i4b_board_data.c (Issue 4B) */
 extern const board_data_t bd_zx48i6a;   /* zx48i6a_board_data.c (Issue 6A) */
+extern const board_data_t bd_a2600pal;  /* a2600_board_data.c */
 
 #endif

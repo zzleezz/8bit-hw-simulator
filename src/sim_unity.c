@@ -47,4 +47,7 @@
 #include "harness.c"
 #include "zx48.c"
 #include "ula.c"
+#include "a2600_riot.c"
+#include "a2600_tia.c"
+#include "a2600.c"
 #include "png.c"
