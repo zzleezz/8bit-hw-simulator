@@ -149,6 +149,7 @@ typedef struct machine {
 } machine_t;
 
 extern const machine_t machine_c64, machine_c64c, machine_zx48, machine_zx48i2, machine_zx48i1, machine_zx48i4b, machine_zx48i6a;
+extern const machine_t machine_a2600pal;
 
 struct board {
     sim_t sim;

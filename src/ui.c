@@ -1829,8 +1829,9 @@ static void monitor_window(struct nk_context *ctx, float x, float y) {
                 nk_layout_row_end(ctx);
             }
         } else {
-        /* The picture with its own proportions (square pixels). */
+        /* The Atari texture stores one pixel per visible colour clock. */
         float sw = (float)M()->screen_w, sh = (float)M()->screen_h;
+        if (M() == &machine_a2600pal) sw = sh * 4.0f / 3.0f;
         float scale = fminf(MON_W / sw, MON_H / sh), w = sw * scale;
         nk_layout_row_begin(ctx, NK_STATIC, MON_H, 2);
         nk_layout_row_push(ctx, (MON_W - w) / 2);
@@ -2051,18 +2052,23 @@ static void save_state_file(const char *path) {
 static bool load_prg(const char *path, bool run) {
     if (board_is_state_file(path)) return load_state_file(path);
     size_t n = strlen(path);
-    bool ok, bad = false, other_bad = true;
+    bool ok, bad = false;
     char info[128];
     const file_kind_t *fk = M()->file_kind(path, info, sizeof(info), &bad);
     /* A file for the other machine (a Spectrum ROM dropped on the C64, a
      * C64 one on the Spectrum): that machine goes on the bench after the
      * frame, and gets the file then. */
-    const machine_t *other = board_is_c64(U.b) ? U.last_zx : U.last_c64;
-    if ((!fk || bad) && other->file_kind(path, info, sizeof(info), &other_bad) && !other_bad) {
-        U.switch_to = other;
-        snprintf(U.pending_load, sizeof(U.pending_load), "%s", path);
-        U.pending_run = run;
-        return true;
+    if (!fk || bad) {
+        const machine_t *const others[] = { U.last_c64, U.last_zx, &machine_a2600pal };
+        for (size_t i = 0; i < sizeof(others) / sizeof(*others); i++) {
+            bool other_bad = true;
+            const machine_t *other = others[i];
+            if (other == M() || !other->file_kind(path, info, sizeof(info), &other_bad) || other_bad) continue;
+            U.switch_to = other;
+            snprintf(U.pending_load, sizeof(U.pending_load), "%s", path);
+            U.pending_run = run;
+            return true;
+        }
     }
     if (fk && fk->role == ROLE_ROM) {       /* cartridges and ROMs go in with the power off */
         ok = board_load(U.b, path, run, U.status, sizeof(U.status));
@@ -2211,7 +2217,10 @@ static void diagnose_picture(const char *path) {
     lock_board();
     U.diag_status[0] = 0;
     int machine = bench_machine();
+    if (machine < 0)
+        snprintf(U.diag_status, sizeof(U.diag_status), "Screenshot diagnosis requires a C64 or ZX Spectrum board");
     unlock_board();
+    if (machine < 0) return;
     diagnose_open(path, machine);
     lock_board();
     U.diag_serial++;
@@ -2521,12 +2530,11 @@ static void controls_window(struct nk_context *ctx, float x, float y, float h) {
     nk_window_set_bounds(ctx, "Controls", r);
     if (nk_begin(ctx, "Controls", r, NK_WINDOW_TITLE | NK_WINDOW_BORDER)) {
         board_t *b = U.b;
-        /* The machine on the bench: a click puts the other one there (the
-         * Spectrum board last on the bench). */
-        const machine_t *const machines[] = { U.last_c64, U.last_zx };
-        nk_layout_row_dynamic(ctx, 24, 2);
-        for (int i = 0; i < 2; i++) {
-            bool cur = board_is_zx48(b) == (i == 1);
+        /* Remember the last board variant selected for each machine. */
+        const machine_t *const machines[] = { U.last_c64, U.last_zx, &machine_a2600pal };
+        nk_layout_row_dynamic(ctx, 24, 3);
+        for (int i = 0; i < 3; i++) {
+            bool cur = b->m == machines[i];
             if (nk_widget_is_hovered(ctx) && !cur)
                 nk_tooltip(ctx, "Put this machine's board on the bench (the other one is switched off)");
             if (nk_select_label(ctx, machines[i]->name, NK_TEXT_CENTERED, cur) && !cur) U.switch_to = machines[i];
@@ -2675,7 +2683,7 @@ static void controls_window(struct nk_context *ctx, float x, float y, float h) {
             fault_list(ctx);
             nk_tree_pop(ctx);
         }
-        if (nk_tree_push(ctx, NK_TREE_TAB, "Diagnose", NK_MAXIMIZED)) {
+        if (bench_machine() >= 0 && nk_tree_push(ctx, NK_TREE_TAB, "Diagnose", NK_MAXIMIZED)) {
             nk_layout_row_dynamic(ctx, 26, 1);
             if (nk_widget_is_hovered(ctx))
                 nk_tooltip(ctx, "Probe the real broken machine with a logic probe: the faults that fit your readings, "
@@ -3167,7 +3175,7 @@ void ui_frame(void) {
         lock_board();
         int machine = bench_machine();
         unlock_board();
-        diagnose_set_machine(machine);
+        if (machine >= 0) diagnose_set_machine(machine);
         lock_board();
         U.diag_serial++;
         if (probe_is_open()) probe_take_diagnosis();
@@ -3335,7 +3343,8 @@ static void handle_event(const sapp_event *ev) {
     }
     if (ev->type == SAPP_EVENTTYPE_CHAR) {
         int c = (int)ev->char_code;
-        if (c < 32 || c >= 127 || (ev->modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER))) return;
+        if (!M()->host_char || c < 32 || c >= 127 ||
+            (ev->modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER))) return;
         c = M()->host_char(c);
         board_key_down(U.b, c);
         board_key_up(U.b, c);
@@ -3354,7 +3363,12 @@ static void handle_event(const sapp_event *ev) {
 static void attach_board(board_t *b) {
     U.b = b;
     if (board_is_zx48(b)) U.last_zx = b->m;
-    else U.last_c64 = b->m;
+    else if (board_is_c64(b)) U.last_c64 = b->m;
+    else {
+        probe_close();
+        atlas_browse_close();
+        diagnose_close();
+    }
     U.hover_pin = U.hover_part = -1;
     U.menu_open = U.dragging = U.reset_hold = false;
     U.fitted = false;           /* the new board fills the view */
@@ -3510,6 +3524,7 @@ void ui_browse_atlas(int pick) {
 }
 
 bool chip_records_button(struct nk_context *ctx, int part) {
+    if (bench_machine() < 0) return false;
     const char *ref = S()->parts[part].ref;
     int n = diagnose_records_of_chip(bench_machine(), ref);
     char lab[64];

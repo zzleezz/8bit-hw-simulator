@@ -9,6 +9,10 @@ leg of a chip, short it to ground or to +5V, pull a chip out of its
 socket, or open a resistor. Then you watch what the machine does: the
 picture on the monitor, the keyboard, every signal on the board.
 
+It also has an experimental [Atari 2600A PAL digital bench](docs/atari2600-pal.md).
+Select **Atari 2600 PAL** and open `carts/pal-bench.a26` to see the diagnostic
+colour bars and probe the 6507, RIOT, TIA and cartridge pins.
+
 > **An AI-generated project.** What this fork adds to antirez's original
 > (the code, the board models, the tests and this documentation) was
 > written by Claude, Anthropic's AI model, working in Claude Code, at the
